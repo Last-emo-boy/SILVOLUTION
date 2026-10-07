@@ -1,0 +1,47 @@
+# silicon-agent job server on the EDA host.
+# Runs inside the existing local/vivado-desktop image so Vivado (xc7s50 backend)
+# and oss-cad-suite (ecp5 backend) are both available. Listens on 127.0.0.1 only;
+# reach it through an SSH tunnel (see README) or put sluice in front of it.
+#
+#   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d
+#   docker logs -f silicon-agent
+name: silicon-agent
+services:
+  server:
+    image: local/vivado-desktop:2025.2
+    container_name: silicon-agent
+    user: "10001:10001"
+    restart: unless-stopped
+    init: true
+    working_dir: /app
+    entrypoint: ["/bin/bash", "-c", "source /opt/amd/2025.2/Vivado/settings64.sh && exec /opt/silicon-agent/tools/oss-cad-suite/py3bin/python3 -m silicon_agent.server"]
+    environment:
+      HOME: /srv/sa/home
+      SA_ROOT: /srv/sa                       # cache/, runs/, results/ live here (persistent)
+      SA_TOOLS: /opt/silicon-agent/tools/oss-cad-suite
+      SA_HOST: 0.0.0.0
+      SA_PORT: "8765"
+      SA_TOKEN: ${SA_TOKEN:?set SA_TOKEN in /opt/silicon-agent/.env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/silicon-agent/.env}
+      LD_PRELOAD: /lib/x86_64-linux-gnu/libudev.so.1   # FlexNet/udev fix, same as the vivado wrapper
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - /opt/silicon-agent/app:/app:ro
+      - /opt/silicon-agent/tools:/opt/silicon-agent/tools:ro
+      - /opt/amd:/opt/amd:ro
+      - /srv/sa:/srv/sa
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=4g,mode=1777
+    ports:
+      - "127.0.0.1:8765:8765"
+    cpus: 10
+    mem_limit: 16g
+    pids_limit: 4096
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

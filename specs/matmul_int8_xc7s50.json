@@ -1,0 +1,26 @@
+{
+  "task": "INT8 matrix multiplication accelerator, Spartan-7 board",
+  "target": "AMD Spartan-7 XC7S50-1",
+  "backend": "xc7s50",
+  "locked": {
+    "data_width": 8
+  },
+  "constraints": {
+    "fmax_mhz": 200,
+    "max_dsp": 64,
+    "max_lut": 8000,
+    "objective": [
+      "maximize_throughput",
+      "minimize_lut"
+    ]
+  },
+  "initial_ir": {
+    "pe_rows": 8,
+    "pe_cols": 8,
+    "data_width": 8,
+    "acc_width": 32,
+    "pipe_mul": 0,
+    "dsp_regs": "none",
+    "reg_in": false
+  }
+}

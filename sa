@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""silicon-agent remote client. Submits a spec to the job server and streams progress.
+
+    sa submit specs/matmul_int8.json [--max-iter 8] [--backend ecp5|xc7s50]
+    sa watch <job-id>
+    sa list
+    sa get <job-id> <file>          e.g. summary.json, iter_02.json, llm_01.json
+
+Server: SA_SERVER (default http://127.0.0.1:8765). Token: SA_TOKEN.
+Pure standard library; no local toolchain needed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+SERVER = os.environ.get("SA_SERVER", "http://127.0.0.1:8765").rstrip("/")
+TOKEN = os.environ.get("SA_TOKEN", "")
+
+
+def req(method: str, path: str, body: dict | None = None):
+    data = json.dumps(body).encode() if body is not None else None
+    r = urllib.request.Request(f"{SERVER}{path}", data=data, method=method,
+                               headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {TOKEN}"} if TOKEN else {})})
+    try:
+        with urllib.request.urlopen(r, timeout=60) as resp:
+            ct = resp.headers.get("Content-Type", "")
+            raw = resp.read()
+            return json.loads(raw) if "json" in ct else raw.decode()
+    except urllib.error.HTTPError as e:
+        sys.exit(f"{method} {path}: HTTP {e.code} {e.read().decode()[:300]}")
+    except urllib.error.URLError as e:
+        sys.exit(f"cannot reach {SERVER}: {e.reason}  (is the SSH tunnel up? see README)")
+
+
+def fmt_event(ev: dict) -> str:
+    t = f"[{ev['t']:6.0f}s]"
+    k = ev["kind"]
+    if k == "evaluating":
+        return f"{t} [{ev['iteration']}] evaluating {json.dumps(ev['ir'])}"
+    if k == "result":
+        m = ev["metrics"]
+        v = ev["violations"]
+        status = "FEASIBLE" if not v else "violations: " + "; ".join(v)
+        return (f"{t}      fmax={m['fmax_mhz']:.1f} MHz  lut={m['lut']}  dsp={m['dsp']}  ff={m['ff']}  "
+                f"sim={'ok' if m['sim_passed'] else 'FAIL'}  {status}  ({ev['eda_seconds']}s)")
+    if k == "plan":
+        s = f"{t}      diagnosis: {ev['diagnosis']}\n{' ' * 9}      action:    {ev['action']}"
+        return s + ("\n" + " " * 15 + "planner says stop." if ev["stop"] else "")
+    if k == "done":
+        b = ev["best"]
+        if not b:
+            return f"{t} === RESULT: FAIL, no feasible design in {ev['iterations']} iterations ==="
+        m = b["metrics"]
+        return (f"{t} === RESULT: PASS after {ev['iterations']} iterations ===\n"
+                f"         ir={json.dumps(b['ir'])}\n"
+                f"         fmax={m['fmax_mhz']:.1f} MHz  lut={m['lut']}  ff={m['ff']}  dsp={m['dsp']}  "
+                f"throughput={b['throughput']} MAC/cycle  latency={b['latency_cycles']} cycles")
+    return f"{t} {json.dumps(ev)}"
+
+
+def watch(job_id: str) -> int:
+    seen = 0
+    while True:
+        j = req("GET", f"/jobs/{job_id}?after={seen}")
+        for ev in j["events"]:
+            print(fmt_event(ev), flush=True)
+        seen = j["n_events"]
+        if j["status"] in ("done", "failed", "error"):
+            if j.get("error"):
+                print(f"server error:\n{j['error']}")
+            print(f"job {job_id}: {j['status']}   (artifacts: sa get {job_id} summary.json)")
+            return 0 if j["status"] == "done" else 1
+        time.sleep(3)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="sa")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("submit"); s.add_argument("spec"); s.add_argument("--max-iter", type=int, default=8)
+    s.add_argument("--backend", choices=["ecp5", "xc7s50"]); s.add_argument("--no-watch", action="store_true")
+    sub.add_parser("list")
+    w = sub.add_parser("watch"); w.add_argument("job_id")
+    g = sub.add_parser("get"); g.add_argument("job_id"); g.add_argument("file")
+    sub.add_parser("health")
+    a = ap.parse_args()
+
+    if a.cmd == "health":
+        print(json.dumps(req("GET", "/health")))
+        return 0
+    if a.cmd == "list":
+        for j in req("GET", "/jobs"):
+            print(f"{j['id']}  {j['status']:8s}  {j['backend']:7s}  {j['task']}")
+        return 0
+    if a.cmd == "submit":
+        spec = json.load(open(a.spec))
+        if a.backend:
+            spec["backend"] = a.backend
+        r = req("POST", "/jobs", {"spec": spec, "max_iter": a.max_iter})
+        print(f"submitted {r['id']}  backend={spec.get('backend', 'ecp5')}  server={SERVER}")
+        return 0 if a.no_watch else watch(r["id"])
+    if a.cmd == "watch":
+        return watch(a.job_id)
+    if a.cmd == "get":
+        out = req("GET", f"/jobs/{a.job_id}/files/{a.file}")
+        print(json.dumps(out, indent=2) if isinstance(out, (dict, list)) else out)
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,26 @@
+{
+  "task": "INT8 matmul accelerator, Spartan-7, 300 MHz",
+  "target": "AMD Spartan-7 XC7S50-1",
+  "backend": "xc7s50",
+  "locked": {
+    "data_width": 8
+  },
+  "constraints": {
+    "fmax_mhz": 300,
+    "max_dsp": 32,
+    "max_lut": 4000,
+    "objective": [
+      "maximize_throughput",
+      "minimize_lut"
+    ]
+  },
+  "initial_ir": {
+    "pe_rows": 8,
+    "pe_cols": 8,
+    "data_width": 8,
+    "acc_width": 32,
+    "pipe_mul": 0,
+    "dsp_regs": "none",
+    "reg_in": false
+  }
+}
