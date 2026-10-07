@@ -1,7 +1,7 @@
 # silicon-agent job server on the EDA host.
 # Runs inside the existing local/vivado-desktop image so Vivado (xc7s50 backend)
-# and oss-cad-suite (ecp5 backend) are both available. Listens on 127.0.0.1 only;
-# reach it through an SSH tunnel (see README) or put sluice in front of it.
+# and oss-cad-suite (ecp5 backend) are both available. Published on 127.0.0.1 for the
+# SSH-tunnel CLI path and joined to vivado-private so sluice can front the web UI with SSO.
 #
 #   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d
 #   docker logs -f silicon-agent
@@ -22,6 +22,7 @@ services:
       SA_HOST: 0.0.0.0
       SA_PORT: "8765"
       SA_TOKEN: ${SA_TOKEN:?set SA_TOKEN in /opt/silicon-agent/.env}
+      SA_GATEWAY_HMAC_KEY: ${SA_GATEWAY_HMAC_KEY:-}   # = sluice GATEWAY_HMAC_KEY; enables browser SSO via X-Auth-Sig
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/silicon-agent/.env}
       LD_PRELOAD: /lib/x86_64-linux-gnu/libudev.so.1   # FlexNet/udev fix, same as the vivado wrapper
       PYTHONPATH: /app
@@ -34,7 +35,11 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=4g,mode=1777
     ports:
-      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8765:8765"          # SSH-tunnel path for the `sa` CLI
+    networks:
+      default: {}
+      vivado-private:
+        aliases: [silicon-agent]     # sluice reaches us here as http://silicon-agent:8765
     cpus: 10
     mem_limit: 16g
     pids_limit: 4096
@@ -45,3 +50,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+networks:
+  vivado-private:
+    external: true
+    name: vivado-private

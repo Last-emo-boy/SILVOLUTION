@@ -1,0 +1,16 @@
+[
+  {
+    "name": "silicon-agent-root",
+    "match": {"host": "silicon.w33d.xyz", "path_prefix": "/"},
+    "upstream": "http://silicon-agent:8765",
+    "protected": true,
+    "auth": "sso",
+    "waf": false,
+    "require_group": "",
+    "internal_only": false,
+    "require_permission": "studio.console.enter",
+    "permission_resource": "route:studio-root",
+    "risk": "medium",
+    "require_scope": ""
+  }
+]

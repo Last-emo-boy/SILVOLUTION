@@ -23,7 +23,13 @@ a deterministic generator (`silicon_agent/emit.py`) emits the RTL, so every desi
 is correct by construction and the generated names map straight back to IR fields
 in the critical-path report.
 
-Benchmark: output-stationary systolic INT matrix-multiply. Two backends:
+Two design kinds (`"design"` in the spec), two backends (`"backend"`):
+
+| design   | what                                         | planner knobs |
+|----------|----------------------------------------------|---------------|
+| `matmul` | output-stationary systolic INT matrix-multiply | `pe_rows`, `pe_cols`, `acc_width`, `pipe_mul`, `reg_in`, `dsp_regs`, `acc_in_dsp` |
+| `fir`    | fixed-coefficient FIR (transposed or folded)   | `symmetric`, `fold`, `acc_width`, `pipe_mul`, `reg_in`, `dsp_regs`, `acc_in_dsp` |
+
 
 | backend  | device                     | tools                         | per iteration |
 |----------|----------------------------|-------------------------------|---------------|
@@ -66,6 +72,21 @@ an unbreakable wall and that no IR field could move it. Measuring the four
 combinations of `dsp_regs × acc_in_dsp` on the real design (190 / 151 / 277 / 299 MHz)
 turned that into a new knob plus one line of device facts in the prompt.
 
+## Web console
+
+`https://silicon.w33d.xyz` — behind sluice SSO (route `silicon-agent-root`,
+permission `studio.console.enter`, same gate as the Vivado desktop). Pick a spec
+template, edit the JSON, Run; the page streams each iteration: constraint tiles,
+Fmax / LUT / DSP per iteration, a throughput-vs-LUT Pareto view, and the agent log
+(hypothesis → action → result with the summarized critical path). Past runs are
+rebuilt from `results/` on server start, so nothing is lost across restarts.
+
+Auth model: sluice injects `X-Auth-Subject` + `X-Auth-Sig` (HMAC-SHA256 over
+`subject\ngroups\nepoch-minute` with the gateway key). The server shares that key
+(`SA_GATEWAY_HMAC_KEY`) and verifies the signature for the current and previous
+minute, so a direct dial on the docker network cannot forge identity. The `sa`
+CLI keeps using its bearer token over the SSH tunnel.
+
 ## Quick start (remote: laptop is a thin client)
 
 ```bash
@@ -103,9 +124,15 @@ Persistent state on the host: `/srv/sa/{cache,runs,results}`. The oss-cad-suite
 Linux build lives in `/opt/silicon-agent/tools`. The server binds to
 `127.0.0.1:8765`; reach it through the SSH tunnel (or front it with the reverse proxy).
 
-API: `POST /jobs {spec, max_iter}` → `{id}`; `GET /jobs/<id>?after=N` → status +
-incremental events; `GET /jobs/<id>/files/<name>`; `GET /health`. One job runs at a
-time; others queue.
+API (all under `/api/`, legacy unprefixed paths still work for the CLI):
+`POST /jobs {spec, max_iter}` → `{id}`; `GET /jobs`; `GET /jobs/<id>?after=N` →
+status + incremental events; `GET /jobs/<id>/files/<name>`; `GET /jobs/<id>/rtl`
+(best design's SystemVerilog); `GET /specs`; `GET /me`; `GET /health`. One job runs
+at a time; others queue.
+
+Gateway route: `deploy/sluice-route.json`, applied with `deploy/sluice-add-route.sh`
+on the host (appends to the seed with a timestamped backup and upserts the live
+Postgres row; sluice reloads routes every 20 s).
 
 ## Spec format
 
@@ -143,18 +170,34 @@ On ECP5 the DSP is instantiated explicitly (yosys never packs pipeline registers
 into MULT18X18D); on XC7S50 the same knob emits behavioral registers that Vivado
 retimes into the DSP48E1.
 
+FIR, ECP5, 32-tap 16-bit lowpass, Fmax ≥ 120 MHz, DSP ≤ 6:
+
+```
+[1] transposed, behavioral mults           fmax=233.3 MHz dsp=12   ✗ DSP   (yosys already shares equal coefficients)
+[2] symmetric, fold=4, in_pipe_out         fmax=126.8 MHz dsp=4    ✓       0.25 samples/cycle
+[3] acc 40→38                              fmax=131.4 MHz lut=962  ✓  ← best
+[4] pipe_mul=1 (no gain: mux is critical)  fmax=130.1 MHz          ✓       planner stops
+```
+
+Adding a design kind = one IR dataclass + one emitter + one cocotb test + one
+registry entry in `designs.py` + a prompt block in `prompts.py`.
+
 ## Layout
 
 ```
 sa                         remote client (laptop side)
-silicon_agent/ir.py        architecture IR, constraints, metrics
-silicon_agent/emit.py      IR → SystemVerilog generator (backend-aware multiplier)
+silicon_agent/ir.py        matmul IR, constraints, metrics
+silicon_agent/emit.py      matmul IR → SystemVerilog (backend-aware multiplier)
+silicon_agent/fir.py       FIR IR + emitter (transposed / folded, symmetric sharing)
+silicon_agent/designs.py   design registry
+silicon_agent/prompts.py   per-design planner knowledge with measured device facts
 silicon_agent/eda.py       simulate / synth / P&R / report parsing / cache, per backend
-silicon_agent/loop.py      planner prompt (device facts per backend) + optimization loop
-silicon_agent/server.py    HTTP job server
+silicon_agent/loop.py      generic optimization loop
+silicon_agent/server.py    HTTP job server + static web UI, token or gateway-HMAC auth
+silicon_agent/web/         console (index.html, app.js, app.css — no build step)
 silicon_agent/llm.py       DeepSeek client
-silicon_agent/tb/          cocotb testbench, golden model, MULT18X18D sim model
+silicon_agent/tb/          cocotb testbenches, golden models, MULT18X18D sim model
 specs/                     task specs
-deploy/                    compose.yml, push.sh, vivado-docker.sh
+deploy/                    compose.yml, push.sh, sluice-route.json, sluice-add-route.sh
 setup.sh  run.sh           local toolchain install / local entry point
 ```

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>silicon-agent</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">▣</span> silicon-agent <span class="sub">autonomous RTL design loop</span></div>
+  <div class="who" id="who"></div>
+</header>
+
+<main class="grid">
+  <!-- left column: spec + jobs -->
+  <aside class="col-left">
+    <section class="card">
+      <h2>New run</h2>
+      <label>Template
+        <select id="tpl"></select>
+      </label>
+      <label>Spec (JSON)
+        <textarea id="spec" spellcheck="false" rows="18"></textarea>
+      </label>
+      <div class="row">
+        <label class="inline">Max iterations <input id="maxiter" type="number" min="1" max="20" value="8"></label>
+        <button id="submit" class="primary">Run</button>
+      </div>
+      <div id="submit-msg" class="msg"></div>
+    </section>
+
+    <section class="card">
+      <h2>Runs</h2>
+      <ul id="jobs" class="jobs"></ul>
+    </section>
+  </aside>
+
+  <!-- right column: the selected job -->
+  <section class="col-main" id="detail">
+    <div class="empty" id="empty">Select a run, or start one.</div>
+
+    <div id="job" hidden>
+      <div class="jobhead">
+        <div>
+          <h1 id="j-task"></h1>
+          <div class="meta" id="j-meta"></div>
+        </div>
+        <div class="verdict" id="j-verdict"></div>
+      </div>
+
+      <!-- constraints as a scoreboard -->
+      <section class="card">
+        <h2>Constraints <span class="hint">best feasible design, or latest attempt</span></h2>
+        <div class="tiles" id="tiles"></div>
+      </section>
+
+      <div class="two">
+        <section class="card">
+          <h2>Fmax per iteration <span class="hint">MHz; dashed = target</span></h2>
+          <div class="chart" id="c-fmax"></div>
+        </section>
+        <section class="card">
+          <h2>Resources per iteration <span class="hint">LUT (left axis) and DSP (right axis) — two charts, one row</span></h2>
+          <div class="chart-pair"><div class="chart" id="c-lut"></div><div class="chart" id="c-dsp"></div></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Pareto view <span class="hint">throughput vs LUT; filled = feasible, hollow = violates a constraint; numbered by iteration</span></h2>
+        <div class="chart" id="c-pareto"></div>
+      </section>
+
+      <section class="card">
+        <h2>Agent log <span class="hint">hypothesis → modification → result</span></h2>
+        <ol class="log" id="log"></ol>
+      </section>
+
+      <section class="card">
+        <h2>Best design <span class="hint">IR and generated RTL</span></h2>
+        <pre id="best-ir" class="code"></pre>
+        <details><summary>Generated SystemVerilog</summary><pre id="best-rtl" class="code rtl">loading…</pre></details>
+      </section>
+    </div>
+  </section>
+</main>
+
+<div class="tooltip" id="tip" hidden></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
