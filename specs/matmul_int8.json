@@ -1,0 +1,25 @@
+{
+  "task": "INT8 matrix multiplication accelerator",
+  "target": "Lattice ECP5 LFE5U-45F-6",
+  "locked": {
+    "data_width": 8
+  },
+  "constraints": {
+    "fmax_mhz": 120,
+    "max_dsp": 80,
+    "max_lut": 20000,
+    "objective": [
+      "maximize_throughput",
+      "minimize_lut"
+    ]
+  },
+  "initial_ir": {
+    "pe_rows": 16,
+    "pe_cols": 16,
+    "data_width": 8,
+    "acc_width": 32,
+    "pipe_mul": 0,
+    "dsp_regs": "none",
+    "reg_in": false
+  }
+}

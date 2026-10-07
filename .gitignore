@@ -1,0 +1,8 @@
+tools/
+cache/
+runs/
+results/
+__pycache__/
+*.pyc
+sim_build/
+.env
