@@ -45,12 +45,16 @@ def _extract_json(text: str) -> dict:
 EFFORT = os.environ.get("SA_EFFORT", "high")  # deepseek reasoning_effort for the first attempt
 
 
-def chat_json(system: str, user: str, max_tokens: int = 24000, retries: int = 3) -> dict:
+MAX_TOKENS = int(os.environ.get("SA_MAX_TOKENS", "131072"))  # model allows up to 393216
+
+
+def chat_json(system: str, user: str, max_tokens: int | None = None, retries: int = 3) -> dict:
     """One chat turn, JSON-object response, returned parsed. Retries on transport
     errors and on empty/unparseable content. A reasoning model that spends the whole
     budget thinking returns finish_reason=length with empty content; on that we step
     the reasoning effort down (high -> low) rather than just retrying the same call."""
-    efforts = [EFFORT, "low", "low"]
+    max_tokens = max_tokens or MAX_TOKENS
+    efforts = [EFFORT, EFFORT, "low"]
     last_err: Exception | None = None
     for attempt in range(retries):
         body = {
@@ -66,7 +70,7 @@ def chat_json(system: str, user: str, max_tokens: int = 24000, retries: int = 3)
                 data=json.dumps(body).encode(),
                 headers={"Authorization": f"Bearer {api_key()}", "Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=1800) as resp:
                 r = json.load(resp)
             choice = r["choices"][0]
             text = choice["message"].get("content") or ""
