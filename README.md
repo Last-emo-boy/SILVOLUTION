@@ -50,6 +50,22 @@ XC7S50 via Vivado, Fmax ≥ 200 MHz, DSP ≤ 64:
 [3] 8x8  acc 32→24                         fmax=239.6 MHz lut=1005 ✓  ← best, planner stops
 ```
 
+XC7S50 via Vivado, Fmax ≥ 300 MHz, DSP ≤ 32 (the hard one):
+
+```
+[1] 8x8  no pipelining                     fmax=189.8 MHz dsp=64   ✗ timing ✗ DSP
+[2] 4x8  in_pipe_out, acc_in_dsp=false,    fmax=299.9 MHz dsp=32   ✗ by 0.1 MHz
+         acc 24                                                       (critical: fabric CARRY4, route-dominated)
+[3] 2x16 (halve pe_rows → shorter drain/   fmax=319.5 MHz dsp=32   ✓  ← best, planner stops
+         skew nets, same 32 MAC/cycle)
+```
+
+Before `acc_in_dsp` existed this spec failed after 7 iterations at ~278 MHz: the
+planner correctly diagnosed that the DSP48E1 post-adder M→P stage (2.3 ns) was
+an unbreakable wall and that no IR field could move it. Measuring the four
+combinations of `dsp_regs × acc_in_dsp` on the real design (190 / 151 / 277 / 299 MHz)
+turned that into a new knob plus one line of device facts in the prompt.
+
 ## Quick start (remote: laptop is a thin client)
 
 ```bash
@@ -119,6 +135,7 @@ INT8 to INT4 to "minimize LUT").
 | `pipe_mul` | 0..3 | fabric registers between multiplier and accumulator |
 | `dsp_regs` | none/out/in_out/in_pipe_out | DSP-internal pipeline registers (MULT18X18D on ECP5; A/B/M/P regs on DSP48E1) |
 | `reg_in` | bool | boundary input registers |
+| `acc_in_dsp` | bool | xc7s50 only: accumulate in the DSP48E1 post-adder (fewer LUTs, M→P stage caps Fmax ~280 MHz) or in a fabric CARRY4 adder after the P register |
 
 The streaming interface (`in_valid`/`in_last` → `out_valid`/`c_row`) is
 latency-insensitive, so any pipeline change is verified by the same testbench.

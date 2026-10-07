@@ -26,6 +26,9 @@ IR fields and legal ranges:
   reg_in     bool        register the A/B inputs at the array boundary
   dsp_regs   str in {"none","out","in_out","in_pipe_out"}  DSP-internal pipeline registers
                          (none = combinational multiplier; each extra stage adds 1 cycle latency, no fabric cost)
+  acc_in_dsp bool        xc7s50 only (ignored on ecp5): true = accumulate inside the DSP48E1 post-adder
+                         (saves LUTs, but the M->P add is one unbreakable stage); false = fabric CARRY4 adder
+                         after the DSP P register (costs ~acc_width/4 LUTs per PE, lets the DSP run at its registered Fmax)
 
 @DEVICE_FACTS@
 
@@ -38,7 +41,7 @@ Respond with a JSON object:
 {
   "diagnosis": "<2-4 sentences: what limits the last design, citing the critical path>",
   "action": "<one sentence naming the IR change and why>",
-  "next_ir": {"pe_rows":..,"pe_cols":..,"data_width":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":".."},
+  "next_ir": {"pe_rows":..,"pe_cols":..,"data_width":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..},
   "stop": false
 }"""
 
@@ -50,11 +53,15 @@ path; the drain mux that selects one of pe_rows accumulator rows onto c_row grow
 at high Fmax. LUT4 count scales ~ pe_rows*pe_cols*acc_width. The 45F has 44k LUT4, 72 MULT18X18D, 108 DP16KD.
 Realistic Fmax range on this device: 60-250 MHz.""",
     "xc7s50": """Spartan-7 facts: each PE uses one DSP48E1 (25x18 multiplier with internal A/B/M/P registers) when data_width<=16;
-dsp_regs maps onto those internal registers (out=PREG, in_out=A/BREG+PREG, in_pipe_out=A/BREG+MREG+PREG) and a fully
-registered DSP48E1 runs well above 300 MHz; the accumulator is a CARRY4 chain (about 0.05 ns per bit) that Vivado can also
-absorb into the DSP48E1 post-adder when the path is simple; the dominant limiter is usually fabric routing (long nets with
-high fanout, e.g. the one-hot drain select to c_row, or the skew shift chains) rather than logic. LUT6 count scales
-~ pe_rows*pe_cols*acc_width/2. The XC7S50 has 32.6k LUT6, 120 DSP48E1, 75 BRAM36. Realistic Fmax range: 100-400 MHz.""",
+dsp_regs maps onto those internal registers (out=PREG, in_out=A/BREG+PREG, in_pipe_out=A/BREG+MREG+PREG).
+Measured on this exact design (8x4 INT8, acc 32): dsp_regs=none -> 190 MHz with acc_in_dsp=true, 151 MHz with false;
+dsp_regs=in_pipe_out -> 277 MHz with acc_in_dsp=true (critical path is the 2.3 ns DSP post-adder M->P stage, which no
+other field can shorten), 299 MHz with acc_in_dsp=false (critical path moves to the fabric CARRY4 accumulator, which
+acc_width then controls). So: unpipelined designs want acc_in_dsp=true; fully pipelined high-Fmax designs want false.
+pipe_mul>0 on this device makes Vivado map the extra product register into a second DSP48E1 per PE (doubles DSP use) -- avoid it.
+The one-hot drain select to c_row and the skew shift chains are long high-fanout nets and show up as LUT->FDRE routing
+paths at >250 MHz; fewer pe_rows shortens them. LUT6 count scales ~ pe_rows*pe_cols*acc_width/2 when acc_in_dsp=false,
+much less when true. The XC7S50 has 32.6k LUT6, 120 DSP48E1, 75 BRAM36. Realistic Fmax range: 100-400 MHz.""",
 }
 
 
@@ -120,11 +127,11 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             print(f"[{it}] LLM proposed an invalid IR ({errs}); asking again", flush=True)
             action = f"REJECTED (invalid IR: {errs}) -- propose a legal one"
             ir = MatmulArch.from_dict(history[-1]["ir"]) if history else MatmulArch()
-        if ir.digest() in seen:
+        if ir.digest(backend) in seen:
             print(f"[{it}] IR repeats an earlier design; nudging", flush=True)
             action = "REJECTED (duplicate of an earlier iteration) -- propose a different IR"
         else:
-            seen.add(ir.digest())
+            seen.add(ir.digest(backend))
             print(f"[{it}] evaluating {ir.to_dict()}", flush=True)
             emit({"kind": "evaluating", "iteration": it, "ir": ir.to_dict()})
             t0 = time.time()

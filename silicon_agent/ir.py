@@ -24,7 +24,8 @@ class MatmulArch:
     acc_width: int = 32
     pipe_mul: int = 1  # fabric register stages between multiplier and accumulator (0..3)
     reg_in: bool = True  # register A/B inputs at array boundary
-    dsp_regs: str = "none"  # MULT18X18D internal registers: none | out | in_out | in_pipe_out
+    dsp_regs: str = "none"  # DSP internal registers: none | out | in_out | in_pipe_out
+    acc_in_dsp: bool = True  # xc7s50 only: let Vivado fold the accumulate into the DSP48E1 post-adder
 
     def validate(self) -> list[str]:
         errs = []
@@ -54,8 +55,13 @@ class MatmulArch:
         known = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         return cls(**known)
 
-    def digest(self) -> str:
-        return hashlib.sha256(json.dumps(self.to_dict(), sort_keys=True).encode()).hexdigest()[:12]
+    def digest(self, backend: str = "ecp5") -> str:
+        """Identity of the design as the backend sees it; fields that have no effect
+        on a backend are dropped so the loop does not count them as new designs."""
+        d = self.to_dict()
+        if backend != "xc7s50":
+            d.pop("acc_in_dsp", None)
+        return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
 
 @dataclass
