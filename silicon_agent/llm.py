@@ -42,17 +42,24 @@ def _extract_json(text: str) -> dict:
         raise
 
 
-def chat_json(system: str, user: str, max_tokens: int = 16000, retries: int = 3) -> dict:
+EFFORT = os.environ.get("SA_EFFORT", "high")  # deepseek reasoning_effort for the first attempt
+
+
+def chat_json(system: str, user: str, max_tokens: int = 24000, retries: int = 3) -> dict:
     """One chat turn, JSON-object response, returned parsed. Retries on transport
-    errors and on empty/unparseable content."""
-    body = {
-        "model": MODEL,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "response_format": {"type": "json_object"},
-        "max_tokens": max_tokens,
-    }
+    errors and on empty/unparseable content. A reasoning model that spends the whole
+    budget thinking returns finish_reason=length with empty content; on that we step
+    the reasoning effort down (high -> low) rather than just retrying the same call."""
+    efforts = [EFFORT, "low", "low"]
     last_err: Exception | None = None
     for attempt in range(retries):
+        body = {
+            "model": MODEL,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "response_format": {"type": "json_object"},
+            "max_tokens": max_tokens,
+            "reasoning_effort": efforts[min(attempt, len(efforts) - 1)],
+        }
         try:
             req = urllib.request.Request(
                 f"{BASE_URL}/chat/completions",
@@ -68,6 +75,6 @@ def chat_json(system: str, user: str, max_tokens: int = 16000, retries: int = 3)
             return _extract_json(text)
         except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError) as e:
             last_err = e
-            print(f"     llm attempt {attempt + 1}/{retries} failed: {e}", flush=True)
+            print(f"     llm attempt {attempt + 1}/{retries} (effort={body['reasoning_effort']}) failed: {e}", flush=True)
             time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"LLM call failed after {retries} attempts: {last_err}")

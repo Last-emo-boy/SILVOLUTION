@@ -179,6 +179,18 @@ FIR, ECP5, 32-tap 16-bit lowpass, Fmax ≥ 120 MHz, DSP ≤ 6:
 [4] pipe_mul=1 (no gain: mux is critical)  fmax=130.1 MHz          ✓       planner stops
 ```
 
+FIR, **XC7S50 via Vivado**, 32-tap 16-bit lowpass, Fmax ≥ 250 MHz, DSP ≤ 8:
+
+```
+[1] transposed, acc in DSP                 fmax=495.5 MHz dsp=45   ✗ DSP   (Vivado absorbs the whole filter into DSP48E1 cascades)
+[2] symmetric fold=2, acc in DSP           fmax=163.1 MHz dsp=16   ✗ both  (each MAC = 2 DSPs)
+[3] symmetric fold=2, acc in fabric        fmax=150.0 MHz dsp=8    ✗ timing (8-way partial-sum combine)
+[4] symmetric fold=4, acc in DSP           fmax=236.6 MHz dsp=8    ✗ by 13 MHz (tap mux + pre-adder)
+[5] symmetric fold=8                       fmax=225.5 MHz dsp=4    ✗ (wider mux costs more than it saves)
+[6] fold=4, in_out regs                    fmax=152.1 MHz dsp=8    ✗
+[7] non-symmetric fold=8, acc 37           fmax=259.1 MHz dsp=8    ✓  ← pre-adder off the critical path, same MAC count
+```
+
 Adding a design kind = one IR dataclass + one emitter + one cocotb test + one
 registry entry in `designs.py` + a prompt block in `prompts.py`.
 

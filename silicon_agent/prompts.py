@@ -75,12 +75,16 @@ each multiplier is an explicit MULT18X18D: non-symmetric fold=1 -> 32 DSP, 187.9
 critical); symmetric fold=4 dsp_regs=out -> 87.3 MHz. So: to go *below* what yosys's own sharing gives you, fold;
 folding trades 1/F throughput for 1/F DSPs and loses Fmax to the operand mux; in_pipe_out is the right dsp_regs
 whenever an explicit DSP is in play. The 45F has 44k LUT4, 72 MULT18X18D. Realistic Fmax range: 60-250 MHz.""",
-    "xc7s50": """Spartan-7 facts: each multiplier is one DSP48E1; dsp_regs maps to its A/B/M/P registers and a fully registered
-DSP48E1 runs above 300 MHz. With acc_in_dsp=true the per-tap add folds into the DSP post-adder (zero LUTs, but the
-M->P stage is ~2.3 ns and cannot be split); with false the adder is a fabric CARRY4 chain after the P register.
-pipe_mul>0 may make Vivado spend a second DSP48E1 per multiplier -- prefer dsp_regs over pipe_mul. The folded form's
-operand mux and coefficient ROM are LUT6 logic in front of the DSP; at F>=8 that mux becomes the critical path.
-The XC7S50 has 32.6k LUT6, 120 DSP48E1. Realistic Fmax range: 120-400 MHz.""",
+    "xc7s50": """Spartan-7 facts, measured on this 32-tap 16x16 filter: with acc_in_dsp=true Vivado absorbs the WHOLE transposed
+form into DSP48E1s -- multipliers, the per-tap adds via the PCIN cascade, even the sum registers -- so fold=1 gave
+495 MHz and 1 LUT but 45 DSP48E1 (acc_width=40 needs extra slices beyond the 32 multipliers). That is the fastest
+FIR structure on this device and costs ~1.4 DSP per tap. With acc_in_dsp=false the adds are fabric CARRY4 chains
+after the DSP P register: 1 DSP per multiplier, LUTs ~ U*acc_width/2, Fmax set by the carry chain.
+Folded form (fold>1): the tap-operand mux + coefficient ROM in front of each DSP is LUT6 logic; measured
+symmetric fold=2 and fold=4 both land near 150 MHz regardless of acc_in_dsp -- the mux/partial-sum combine, not
+the DSP, is the wall, so folding on this device buys DSPs but caps Fmax around 150-170 MHz. For >250 MHz keep
+fold=1. dsp_regs: a fully registered DSP48E1 runs above 400 MHz; prefer dsp_regs over pipe_mul (pipe_mul may
+spend a second DSP). The XC7S50 has 32.6k LUT6, 120 DSP48E1. Realistic Fmax range: 120-500 MHz.""",
 }
 
 

@@ -160,7 +160,7 @@ const tip = $("#tip");
 const showTip = (ev, text) => { tip.hidden = false; tip.textContent = text; tip.style.left = `${ev.clientX + 14}px`; tip.style.top = `${ev.clientY + 14}px`; };
 const hideTip = () => { tip.hidden = true; };
 
-function frame(container, { left = 44, right = 12, top = 10, bottom = 24 } = {}) {
+function frame(container, { left = 44, right = 16, top = 14, bottom = 24 } = {}) {
   container.innerHTML = "";
   const W = container.clientWidth || 400, H = container.clientHeight || 200;
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}` });
@@ -271,8 +271,13 @@ function renderLog(rows, unit) {
       res = `<div class="res"><span class="${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span> · fmax ${fmt(m.fmax_mhz)} MHz · LUT ${m.lut} · FF ${m.ff} · DSP ${m.dsp} · ${r.throughput} ${unit} · sim ${m.sim_passed ? "pass" : "FAIL"} · ${r.eda_seconds}s${ok ? "" : `<br>${esc(r.violations.join("; "))}`}</div>`;
       if (m.critical_path?.length > 1) res += `<div class="cp">critical path ${fmt(m.critical_path[0].total_ns, 2)} ns: ` + m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl)}</i> ${fmt(s.logic_ns, 2)}+${fmt(s.route_ns, 2)}</span>`).join("") + `</div>`;
     }
-    const plan = r.plan ? `<div class="diag"><b>Hypothesis</b> ${esc(r.plan.diagnosis)}<br><b>Action</b> ${esc(r.plan.action)}</div>` : (r.n === 1 ? `<div class="diag"><b>Start</b> initial design from the spec</div>` : "");
-    const stop = r.next?.stop ? `<div class="diag"><b>Planner</b> ${esc(r.next.diagnosis)}<br><b>Decision</b> ${esc(r.next.action)} <b>· stop</b></div>` : "";
+    // the plan that produced this iteration: live runs carry it as a `plan` event, reconstructed
+    // runs carry the same text on the result itself (diagnosis/action fields)
+    const diag = r.plan?.diagnosis ?? r.diagnosis, act = r.plan?.action ?? r.action;
+    const plan = r.n === 1 ? `<div class="diag"><b>Start</b> initial design from the spec</div>`
+      : (diag || act) ? `<div class="diag"><b>Hypothesis</b> ${esc(diag || "")}<br><b>Action</b> ${esc(act || "")}</div>` : "";
+    const stop = r.next?.stop ? `<div class="diag"><b>Planner</b> ${esc(r.next.diagnosis)}<br><b>Decision</b> ${esc(r.next.action)} <b>· stop</b></div>`
+      : (r.next && !r.next.stop && rows.indexOf(r) === rows.length - 1) ? `<div class="diag pending">planner proposed iteration ${r.next.iteration}: ${esc(r.next.action)}</div>` : "";
     li.innerHTML = `<div class="n">${r.n}</div><div>${plan}<div class="ir">${esc(ir)}</div>${res}${stop}</div>`;
     ol.appendChild(li);
   }

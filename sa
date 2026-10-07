@@ -61,7 +61,7 @@ def fmt_event(ev: dict) -> str:
         return (f"{t} === RESULT: PASS after {ev['iterations']} iterations ===\n"
                 f"         ir={json.dumps(b['ir'])}\n"
                 f"         fmax={m['fmax_mhz']:.1f} MHz  lut={m['lut']}  ff={m['ff']}  dsp={m['dsp']}  "
-                f"throughput={b['throughput']} MAC/cycle  latency={b['latency_cycles']} cycles")
+                f"throughput={b['throughput']} {ev.get('throughput_unit', '')}  latency={b['latency_cycles']} cycles")
     return f"{t} {json.dumps(ev)}"
 
 

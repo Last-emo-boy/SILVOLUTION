@@ -84,8 +84,6 @@ def _events_from_history(history: list[dict]) -> list[dict]:
         evs.append({"t": 0, "kind": "evaluating", "iteration": h["iteration"], "ir": ir})
         evs.append({"t": 0, "kind": "result", **{k: v for k, v in h.items() if k not in ("metrics", "ir")},
                     "ir": ir, "metrics": {k: v for k, v in h["metrics"].items() if k != "sim_log"}})
-        if h.get("diagnosis") or h.get("action"):
-            pass  # the plan that led *to* this iteration is already in h["diagnosis"]/h["action"]
     return evs
 
 

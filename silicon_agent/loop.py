@@ -158,7 +158,13 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 f"## History\n{fmt_history(history, c, design.throughput_unit, locked)}\n\n"
                 f"Current best feasible: {json.dumps(ir_view(IR.from_dict(best['ir']), locked)) if best else 'none'}\n"
                 f"Propose iteration {it + 1}.")
-        reply = llm.chat_json(system, user)
+        try:
+            reply = llm.chat_json(system, user)
+        except RuntimeError as e:
+            # planner unavailable: keep what we have rather than losing the run
+            print(f"     planner failed: {e}", flush=True)
+            emit({"kind": "plan", "iteration": it + 1, "diagnosis": f"planner unavailable: {e}", "action": "stopping with best-so-far", "next_ir": None, "stop": True})
+            break
         (out / f"llm_{it:02d}.json").write_text(json.dumps({"system": system, "prompt": user, "reply": reply}, indent=2))
         diagnosis = reply.get("diagnosis", "")
         action = reply.get("action", "")
@@ -178,7 +184,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
     summary = {"run_id": run_id, "spec": spec, "design": design.kind, "backend": backend,
                "throughput_unit": design.throughput_unit, "iterations": len(history), "best": best, "history": history}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    emit({"kind": "done", "best": best, "iterations": len(history)})
+    emit({"kind": "done", "best": best, "iterations": len(history), "throughput_unit": design.throughput_unit})
     return summary
 
 
