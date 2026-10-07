@@ -19,8 +19,8 @@ import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
-from .emit import emit_matmul, min_k_full_rate
-from .ir import MatmulArch, Metrics
+from .designs import DESIGNS, Design
+from .ir import Metrics
 
 ROOT = Path(os.environ.get("SA_ROOT", Path(__file__).resolve().parent.parent))
 TOOLS = Path(os.environ.get("SA_TOOLS", ROOT / "tools" / "oss-cad-suite"))
@@ -54,26 +54,21 @@ def run(cmd: list[str], cwd: Path, log: Path, timeout: int = 1800, env: dict | N
 
 
 # ---------------------------------------------------------------- simulation
-def simulate(arch: MatmulArch, work: Path, tiles: int = 6, seed: int = 1) -> tuple[bool, str]:
-    rtl = work / "rtl" / "matmul_top.sv"
+def simulate(d: Design, arch, work: Path, seed: int = 1) -> tuple[bool, str]:
+    rtl = work / "rtl" / f"{d.top}.sv"
     sim_dir = work / "sim"
     sim_dir.mkdir(parents=True, exist_ok=True)
     env = tool_env()
-    env.update({
-        "SA_ARCH": json.dumps(arch.to_dict()),
-        "SA_MIN_K": str(min_k_full_rate(arch)),
-        "SA_TILES": str(tiles),
-        "SA_SEED": str(seed),
-        "PYTHONPATH": str(TB_DIR),
-    })
+    env.update({"SA_ARCH": json.dumps(arch.to_dict()), "SA_SEED": str(seed), "PYTHONPATH": str(TB_DIR), **d.sim_env(arch)})
+    sources = [rtl] + [TB_DIR / f for f in d.extra_sim_sources]
     driver = f"""
 from pathlib import Path
 from cocotb_tools.runner import get_runner
 from cocotb_tools.check_results import get_results
 r = get_runner("icarus")
-r.build(sources=[Path({str(rtl)!r}), Path({str(TB_DIR / "mult18x18d_sim.v")!r})], hdl_toplevel="matmul_top", build_dir={str(sim_dir / 'build')!r},
+r.build(sources=[Path(p) for p in {[str(x) for x in sources]!r}], hdl_toplevel={d.top!r}, build_dir={str(sim_dir / 'build')!r},
         build_args=["-g2012"], timescale=("1ns", "1ps"), always=True)
-xml = r.test(test_module="test_matmul", hdl_toplevel="matmul_top", build_dir={str(sim_dir / 'build')!r},
+xml = r.test(test_module={d.test_module!r}, hdl_toplevel={d.top!r}, build_dir={str(sim_dir / 'build')!r},
              test_dir={str(sim_dir)!r}, timescale=("1ns", "1ps"))
 total, failed = get_results(xml)
 print(f"COCOTB_RESULT total={{total}} failed={{failed}}")
@@ -90,16 +85,16 @@ raise SystemExit(1 if failed else 0)
 
 
 # ---------------------------------------------------------------- ECP5: yosys + nextpnr
-def synth_pnr_ecp5(work: Path, fmax_target: float) -> dict:
+def synth_pnr_ecp5(work: Path, fmax_target: float, top: str) -> dict:
     dev = BACKENDS["ecp5"]
-    rtl = work / "rtl" / "matmul_top.sv"
+    rtl = work / "rtl" / f"{top}.sv"
     out = work / "pnr"
     out.mkdir(parents=True, exist_ok=True)
     ys = out / "synth.ys"
     ys.write_text(
         f"plugin -i slang\n"
-        f"read_slang --top matmul_top {rtl} {TOOLS / 'share' / 'yosys' / 'lattice' / 'cells_bb_ecp5.v'}\n"
-        f"synth_ecp5 -top matmul_top -json {out / 'synth.json'}\n"
+        f"read_slang --top {top} {rtl} {TOOLS / 'share' / 'yosys' / 'lattice' / 'cells_bb_ecp5.v'}\n"
+        f"synth_ecp5 -top {top} -json {out / 'synth.json'}\n"
         f"tee -o {out / 'stat.json'} stat -json\n"
     )
     p = run(["yosys", "-q", "-s", str(ys)], out, out / "yosys.log")
@@ -198,7 +193,7 @@ set fh [open {out}/clk.xdc w]
 puts $fh "create_clock -period {period:.3f} -name clk \\[get_ports clk\\]"
 close $fh
 read_xdc {out}/clk.xdc
-synth_design -top matmul_top -mode out_of_context -flatten_hierarchy rebuilt
+synth_design -top {top} -mode out_of_context -flatten_hierarchy rebuilt
 set fh [open {out}/synth_metrics.json w]
 puts $fh "{{\\"lut\\": [llength [get_cells -hier -filter {{PRIMITIVE_GROUP == LUT}}]], \\"dsp\\": [llength [get_cells -hier -filter {{PRIMITIVE_SUBGROUP == DSP}}]]}}"
 close $fh
@@ -220,13 +215,13 @@ close $fh
 """
 
 
-def synth_pnr_xc7s50(work: Path, fmax_target: float) -> dict:
+def synth_pnr_xc7s50(work: Path, fmax_target: float, top: str) -> dict:
     dev = BACKENDS["xc7s50"]
-    rtl = work / "rtl" / "matmul_top.sv"
+    rtl = work / "rtl" / f"{top}.sv"
     out = work / "vivado"
     out.mkdir(parents=True, exist_ok=True)
     period = 1000.0 / fmax_target
-    (out / "run.tcl").write_text(VIVADO_TCL.format(threads=os.cpu_count() or 4, part=dev["part"], rtl=rtl, out=out, period=period))
+    (out / "run.tcl").write_text(VIVADO_TCL.format(threads=os.cpu_count() or 4, part=dev["part"], rtl=rtl, out=out, period=period, top=top))
     env = dict(os.environ)
     env.setdefault("HOME", str(out))
     p = run([VIVADO, "-mode", "batch", "-nolog", "-nojournal", "-source", str(out / "run.tcl")], out, out / "vivado.log", timeout=3600, env=env)
@@ -312,12 +307,8 @@ def summarize_critical_path_vivado(text: str) -> list[dict]:
 SYNTH = {"ecp5": synth_pnr_ecp5, "xc7s50": synth_pnr_xc7s50}
 
 
-def rtl_for(arch: MatmulArch, backend: str) -> str:
-    return emit_matmul(arch, backend=backend)
-
-
-def evaluate(arch: MatmulArch, fmax_target: float, runs_dir: Path, backend: str = "ecp5", tiles: int = 6) -> Metrics:
-    rtl_text = rtl_for(arch, backend)
+def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str = "ecp5") -> Metrics:
+    rtl_text = d.emit(arch, backend=backend)
     h = hashlib.sha256(f"{backend}\n{rtl_text}".encode()).hexdigest()[:16]
     cache_key = hashlib.sha256(f"{CACHE_VERSION}\n{backend}\n{rtl_text}".encode()).hexdigest()[:16]
     CACHE.mkdir(exist_ok=True)
@@ -327,14 +318,14 @@ def evaluate(arch: MatmulArch, fmax_target: float, runs_dir: Path, backend: str 
 
     work = runs_dir / h
     (work / "rtl").mkdir(parents=True, exist_ok=True)
-    (work / "rtl" / "matmul_top.sv").write_text(rtl_text)
-    (work / "arch.json").write_text(json.dumps({"backend": backend, **arch.to_dict()}, indent=2))
+    (work / "rtl" / f"{d.top}.sv").write_text(rtl_text)
+    (work / "arch.json").write_text(json.dumps({"design": d.kind, "backend": backend, **arch.to_dict()}, indent=2))
 
-    sim_ok, sim_log = simulate(arch, work, tiles=tiles)
+    sim_ok, sim_log = simulate(d, arch, work)
     if not sim_ok:
         m = Metrics(fmax_mhz=0, lut=0, ff=0, dsp=0, bram=0, critical_path=[], sim_passed=False, sim_log=sim_log)
     else:
-        r = SYNTH[backend](work, fmax_target)
+        r = SYNTH[backend](work, fmax_target, d.top)
         m = Metrics(**r, sim_passed=True, sim_log=sim_log)
     cached.write_text(json.dumps(asdict(m)))
     (work / "metrics.json").write_text(json.dumps(asdict(m), indent=2))

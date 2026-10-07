@@ -1,4 +1,8 @@
-"""The autonomous design loop: spec -> IR -> RTL -> sim -> synth/P&R -> diagnose -> next IR."""
+"""The autonomous design loop: spec -> IR -> RTL -> sim -> synth/P&R -> diagnose -> next IR.
+
+Generic over the design registry (silicon_agent.designs) and the backend table
+(silicon_agent.eda.BACKENDS). Design-specific planner knowledge lives in prompts.py.
+"""
 
 from __future__ import annotations
 
@@ -9,26 +13,16 @@ from dataclasses import asdict
 from pathlib import Path
 
 from . import llm
-from .eda import ROOT, evaluate
-from .emit import drain_latency
-from .ir import Constraints, MatmulArch, Metrics, throughput_macs_per_cycle
+from .designs import Design, design_for
+from .eda import BACKENDS, ROOT, evaluate
+from .ir import Constraints, Metrics
+from .prompts import PROMPTS
 
 SYSTEM = """You are a senior FPGA architect running an autonomous design-space exploration loop.
-The hardware is an output-stationary systolic INT matrix-multiply accelerator on @DEVICE_NAME@.
+The hardware is @WHAT@ on @DEVICE_NAME@.
 You never write Verilog. You edit an architecture IR; a verified generator emits the RTL. The EDA tools are ground truth.
 
-IR fields and legal ranges:
-  pe_rows    int 1..32   rows of processing elements (throughput = pe_rows*pe_cols MACs/cycle)
-  pe_cols    int 1..32
-  data_width int in {4,8,12,16}  operand width (bits)
-  acc_width  int 2*data_width+8 .. 48   accumulator width
-  pipe_mul   int 0..3    fabric register stages between the multiplier output and the accumulator
-  reg_in     bool        register the A/B inputs at the array boundary
-  dsp_regs   str in {"none","out","in_out","in_pipe_out"}  DSP-internal pipeline registers
-                         (none = combinational multiplier; each extra stage adds 1 cycle latency, no fabric cost)
-  acc_in_dsp bool        xc7s50 only (ignored on ecp5): true = accumulate inside the DSP48E1 post-adder
-                         (saves LUTs, but the M->P add is one unbreakable stage); false = fabric CARRY4 adder
-                         after the DSP P register (costs ~acc_width/4 LUTs per PE, lets the DSP run at its registered Fmax)
+@IR_SCHEMA@
 
 @DEVICE_FACTS@
 
@@ -41,39 +35,33 @@ Respond with a JSON object:
 {
   "diagnosis": "<2-4 sentences: what limits the last design, citing the critical path>",
   "action": "<one sentence naming the IR change and why>",
-  "next_ir": {"pe_rows":..,"pe_cols":..,"data_width":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..},
+  "next_ir": @IR_JSON@,
   "stop": false
 }"""
 
-DEVICE_FACTS = {
-    "ecp5": """ECP5 facts: each PE uses one MULT18X18D (DSP) when data_width<=16; the accumulator is a LUT4 carry chain whose
-delay grows linearly with acc_width (about 0.07 ns per bit plus routing); routing between the DSP output and the
-carry chain is the usual timing limiter unless both dsp_regs and pipe_mul isolate it; reg_in breaks the IO->array
-path; the drain mux that selects one of pe_rows accumulator rows onto c_row grows with pe_rows and can become critical
-at high Fmax. LUT4 count scales ~ pe_rows*pe_cols*acc_width. The 45F has 44k LUT4, 72 MULT18X18D, 108 DP16KD.
-Realistic Fmax range on this device: 60-250 MHz.""",
-    "xc7s50": """Spartan-7 facts: each PE uses one DSP48E1 (25x18 multiplier with internal A/B/M/P registers) when data_width<=16;
-dsp_regs maps onto those internal registers (out=PREG, in_out=A/BREG+PREG, in_pipe_out=A/BREG+MREG+PREG).
-Measured on this exact design (8x4 INT8, acc 32): dsp_regs=none -> 190 MHz with acc_in_dsp=true, 151 MHz with false;
-dsp_regs=in_pipe_out -> 277 MHz with acc_in_dsp=true (critical path is the 2.3 ns DSP post-adder M->P stage, which no
-other field can shorten), 299 MHz with acc_in_dsp=false (critical path moves to the fabric CARRY4 accumulator, which
-acc_width then controls). So: unpipelined designs want acc_in_dsp=true; fully pipelined high-Fmax designs want false.
-pipe_mul>0 on this device makes Vivado map the extra product register into a second DSP48E1 per PE (doubles DSP use) -- avoid it.
-The one-hot drain select to c_row and the skew shift chains are long high-fanout nets and show up as LUT->FDRE routing
-paths at >250 MHz; fewer pe_rows shortens them. LUT6 count scales ~ pe_rows*pe_cols*acc_width/2 when acc_in_dsp=false,
-much less when true. The XC7S50 has 32.6k LUT6, 120 DSP48E1, 75 BRAM36. Realistic Fmax range: 100-400 MHz.""",
-}
+
+def build_system(design: Design, backend: str) -> str:
+    p = PROMPTS[design.kind]
+    return (SYSTEM.replace("@WHAT@", p["what"]).replace("@DEVICE_NAME@", BACKENDS[backend]["name"])
+            .replace("@IR_SCHEMA@", p["ir"]).replace("@DEVICE_FACTS@", p["facts"][backend]).replace("@IR_JSON@", p["ir_json"]))
 
 
-def fmt_history(history: list[dict], c: Constraints) -> str:
+def ir_view(ir, locked: dict) -> dict:
+    """IR as shown to the planner: locked fields and bulky task data (coefficients) omitted."""
+    return {k: v for k, v in ir.to_dict().items() if k not in locked and k != "coefs"}
+
+
+def fmt_history(history: list[dict], c: Constraints, unit: str, locked: dict) -> str:
     lines = []
     for h in history:
         m = Metrics(**h["metrics"])
         v = m.violations(c)
         status = "FEASIBLE" if not v else "INFEASIBLE: " + "; ".join(v)
-        lines.append(f"### iteration {h['iteration']}  ir={json.dumps(h['ir'])}")
+        shown = {k: val for k, val in h["ir"].items() if k not in locked and k != "coefs"}
+        lines.append(f"### iteration {h['iteration']}  ir={json.dumps(shown)}")
         lines.append(f"fmax={m.fmax_mhz:.1f}MHz lut={m.lut} ff={m.ff} dsp={m.dsp} bram={m.bram} "
-                     f"throughput={h['throughput']} MAC/cycle  sim={'pass' if m.sim_passed else 'FAIL'}  -> {status}")
+                     f"throughput={h['throughput']} {unit}  latency={h['latency_cycles']} cycles  "
+                     f"sim={'pass' if m.sim_passed else 'FAIL'}  -> {status}")
         if m.critical_path:
             lines.append("critical path (ns, logic+route per stage): " + json.dumps(m.critical_path))
         if not m.sim_passed:
@@ -99,19 +87,26 @@ def pick_best(history: list[dict], c: Constraints) -> dict | None:
                 k.append(m.lut)
             elif obj == "minimize_dsp":
                 k.append(m.dsp)
+            elif obj == "minimize_latency":
+                k.append(h["latency_cycles"])
         return tuple(k)
 
     return min(feas, key=key)
 
 
 def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_event=None) -> dict:
+    design = design_for(spec)
+    IR = design.ir_cls
     c = Constraints.from_dict(spec["constraints"])
     backend = spec.get("backend", "ecp5")
-    from .eda import BACKENDS
-    system = SYSTEM.replace("@DEVICE_NAME@", BACKENDS[backend]["name"]).replace("@DEVICE_FACTS@", DEVICE_FACTS[backend])
+    system = build_system(design, backend)
     emit = on_event or (lambda ev: None)
-    locked = spec.get("locked", {})  # task-level fields the planner may not change, e.g. {"data_width": 8}
-    ir = MatmulArch.from_dict({**spec.get("initial_ir", {}), **locked})
+    locked = dict(spec.get("locked", {}))  # task-level fields the planner may not change
+    init = {**spec.get("initial_ir", {}), **locked}
+    ir = IR.from_dict(init)
+    # task data that is part of the design identity but never a planner knob (FIR coefficients)
+    if "coefs" in ir.to_dict():
+        locked["coefs"] = ir.to_dict()["coefs"]
     out = out_dir or (ROOT / "results" / time.strftime("%Y%m%d-%H%M%S"))
     run_id = out.name
     out.mkdir(parents=True, exist_ok=True)
@@ -126,22 +121,22 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
         if errs:
             print(f"[{it}] LLM proposed an invalid IR ({errs}); asking again", flush=True)
             action = f"REJECTED (invalid IR: {errs}) -- propose a legal one"
-            ir = MatmulArch.from_dict(history[-1]["ir"]) if history else MatmulArch()
+            ir = IR.from_dict(history[-1]["ir"]) if history else IR.from_dict(init)
         if ir.digest(backend) in seen:
             print(f"[{it}] IR repeats an earlier design; nudging", flush=True)
             action = "REJECTED (duplicate of an earlier iteration) -- propose a different IR"
         else:
             seen.add(ir.digest(backend))
-            print(f"[{it}] evaluating {ir.to_dict()}", flush=True)
-            emit({"kind": "evaluating", "iteration": it, "ir": ir.to_dict()})
+            print(f"[{it}] evaluating {ir_view(ir, locked)}", flush=True)
+            emit({"kind": "evaluating", "iteration": it, "ir": ir_view(ir, locked)})
             t0 = time.time()
-            m = evaluate(ir, c.fmax_mhz, ROOT / "runs", backend=backend)
+            m = evaluate(design, ir, c.fmax_mhz, ROOT / "runs", backend=backend)
             entry = {
                 "iteration": it,
                 "ir": ir.to_dict(),
                 "metrics": asdict(m),
-                "throughput": throughput_macs_per_cycle(ir),
-                "latency_cycles": drain_latency(ir) + ir.pe_rows,
+                "throughput": design.throughput(ir),
+                "latency_cycles": design.latency(ir),
                 "violations": m.violations(c),
                 "diagnosis": diagnosis,
                 "action": action,
@@ -152,36 +147,38 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             v = entry["violations"]
             print(f"     fmax={m.fmax_mhz:.1f} lut={m.lut} dsp={m.dsp} ff={m.ff} sim={'ok' if m.sim_passed else 'FAIL'} "
                   f"{'FEASIBLE' if not v else 'violations: ' + '; '.join(v)}  ({entry['eda_seconds']}s)", flush=True)
-            emit({"kind": "result", **{k: v for k, v in entry.items() if k != "metrics"},
-                  "metrics": {k: v for k, v in asdict(m).items() if k != "sim_log"}})
+            emit({"kind": "result", **{k: val for k, val in entry.items() if k not in ("metrics", "ir")},
+                  "ir": ir_view(ir, locked), "metrics": {k: val for k, val in asdict(m).items() if k != "sim_log"}})
 
         if it == max_iter:
             break
+        best = pick_best(history, c)
         user = (f"## Constraints\n{json.dumps(asdict(c))}\n"
-                f"## Locked fields (part of the task, never change these)\n{json.dumps(locked)}\n\n"
-                f"## History\n{fmt_history(history, c)}\n\n"
-                f"Current best feasible: {json.dumps(pick_best(history, c)['ir']) if pick_best(history, c) else 'none'}\n"
+                f"## Task-fixed parameters (never change these)\n{json.dumps({k: v for k, v in locked.items() if k != 'coefs'})}\n\n"
+                f"## History\n{fmt_history(history, c, design.throughput_unit, locked)}\n\n"
+                f"Current best feasible: {json.dumps(ir_view(IR.from_dict(best['ir']), locked)) if best else 'none'}\n"
                 f"Propose iteration {it + 1}.")
         reply = llm.chat_json(system, user)
-        (out / f"llm_{it:02d}.json").write_text(json.dumps({"prompt": user, "reply": reply}, indent=2))
+        (out / f"llm_{it:02d}.json").write_text(json.dumps({"system": system, "prompt": user, "reply": reply}, indent=2))
         diagnosis = reply.get("diagnosis", "")
         action = reply.get("action", "")
         print(f"     diagnosis: {diagnosis}\n     action: {action}", flush=True)
         emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": action,
               "next_ir": reply.get("next_ir"), "stop": bool(reply.get("stop"))})
-        if reply.get("stop") and pick_best(history, c):
+        if reply.get("stop") and best:
             print("     planner says stop.", flush=True)
             break
-        proposed = reply["next_ir"]
-        changed = {k: v for k, v in locked.items() if k in proposed and proposed[k] != v}
+        proposed = reply.get("next_ir") or {}
+        changed = {k: v for k, v in locked.items() if k in proposed and proposed[k] != v and k != "coefs"}
         if changed:
             print(f"     planner tried to change locked fields {changed}; reverting", flush=True)
-        ir = MatmulArch.from_dict({**proposed, **locked})
+        ir = IR.from_dict({**ir.to_dict(), **proposed, **locked})
 
     best = pick_best(history, c)
-    summary = {"run_id": run_id, "spec": spec, "backend": backend, "iterations": len(history), "best": best, "history": history}
-    emit({"kind": "done", "best": best, "iterations": len(history)})
+    summary = {"run_id": run_id, "spec": spec, "design": design.kind, "backend": backend,
+               "throughput_unit": design.throughput_unit, "iterations": len(history), "best": best, "history": history}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
+    emit({"kind": "done", "best": best, "iterations": len(history)})
     return summary
 
 
@@ -196,8 +193,8 @@ def main(argv: list[str]) -> int:
     if s["best"]:
         b = s["best"]
         m = b["metrics"]
-        print(f"PASS  ir={b['ir']}\nfmax={m['fmax_mhz']:.1f} MHz  lut={m['lut']}  ff={m['ff']}  dsp={m['dsp']}  "
-              f"throughput={b['throughput']} MAC/cycle  latency={b['latency_cycles']} cycles")
+        print(f"PASS  ir={ {k: v for k, v in b['ir'].items() if k != 'coefs'} }\nfmax={m['fmax_mhz']:.1f} MHz  lut={m['lut']}  ff={m['ff']}  dsp={m['dsp']}  "
+              f"throughput={b['throughput']} {s['throughput_unit']}  latency={b['latency_cycles']} cycles")
     else:
         print("FAIL: no feasible design found")
     print(f"results: results/{s['run_id']}/")

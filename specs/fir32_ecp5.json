@@ -1,0 +1,28 @@
+{
+  "task": "32-tap 16-bit lowpass FIR under a tight DSP budget",
+  "target": "Lattice ECP5 LFE5U-45F-6",
+  "design": "fir",
+  "backend": "ecp5",
+  "locked": {
+    "taps": 32,
+    "data_width": 16,
+    "coef_width": 16
+  },
+  "constraints": {
+    "fmax_mhz": 120,
+    "max_dsp": 6,
+    "max_lut": 3000,
+    "objective": [
+      "maximize_throughput",
+      "minimize_lut"
+    ]
+  },
+  "initial_ir": {
+    "symmetric": false,
+    "fold": 1,
+    "acc_width": 40,
+    "pipe_mul": 0,
+    "reg_in": false,
+    "dsp_regs": "none"
+  }
+}

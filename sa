@@ -96,14 +96,14 @@ def main() -> int:
         return 0
     if a.cmd == "list":
         for j in req("GET", "/jobs"):
-            print(f"{j['id']}  {j['status']:8s}  {j['backend']:7s}  {j['task']}")
+            print(f"{j['id']}  {j['status']:8s}  {j.get('design', 'matmul'):6s} {j['backend']:7s}  {j['task']}")
         return 0
     if a.cmd == "submit":
         spec = json.load(open(a.spec))
         if a.backend:
             spec["backend"] = a.backend
         r = req("POST", "/jobs", {"spec": spec, "max_iter": a.max_iter})
-        print(f"submitted {r['id']}  backend={spec.get('backend', 'ecp5')}  server={SERVER}")
+        print(f"submitted {r['id']}  design={spec.get('design', 'matmul')}  backend={spec.get('backend', 'ecp5')}  server={SERVER}")
         return 0 if a.no_watch else watch(r["id"])
     if a.cmd == "watch":
         return watch(a.job_id)

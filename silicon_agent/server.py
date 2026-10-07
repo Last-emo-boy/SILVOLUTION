@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
+from .designs import DESIGNS
 from .eda import ROOT, BACKENDS
 from .loop import run_loop
 
@@ -83,12 +84,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlsplit(self.path)
         if u.path == "/health":
-            return self._json(200, {"ok": True, "backends": list(BACKENDS), "queued": _queue.qsize()})
+            return self._json(200, {"ok": True, "backends": list(BACKENDS), "designs": list(DESIGNS), "queued": _queue.qsize()})
         if not self._auth():
             return self._json(401, {"error": "unauthorized"})
         if u.path == "/jobs":
             with _lock:
                 return self._json(200, [{"id": j, "status": v["status"], "task": v["spec"].get("task", ""),
+                                         "design": v["spec"].get("design", "matmul"),
                                          "backend": v["spec"].get("backend", "ecp5"), "created": v["created"]}
                                         for j, v in _jobs.items()])
         parts = u.path.strip("/").split("/")
@@ -130,6 +132,9 @@ class Handler(BaseHTTPRequestHandler):
             backend = spec.get("backend", "ecp5")
             if backend not in BACKENDS:
                 return self._json(400, {"error": f"unknown backend {backend!r}; have {list(BACKENDS)}"})
+            design = spec.get("design", "matmul")
+            if design not in DESIGNS:
+                return self._json(400, {"error": f"unknown design {design!r}; have {list(DESIGNS)}"})
             max_iter = int(body.get("max_iter", 8))
         except (KeyError, ValueError, json.JSONDecodeError) as e:
             return self._json(400, {"error": f"bad request: {e}"})
