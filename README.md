@@ -308,6 +308,10 @@ registry entry in `designs.py` + a prompt block in `prompts.py`.
   drives both with the same free inputs and asserts every output agrees cycle by cycle -- the guard for
   generator refactors. *Properties*: no `out_valid` in reset, defined outputs after reset, no handshake
   retraction. Positive and negative controls (a corrupted copy fails) are part of the check.
+- **Agent benchmark** (`bench run --agent --tag agent`): the same cases driven through the chat, so the harness
+  agent is measured end to end (did it interpret the sentence, start the right run, report the measured
+  numbers). First run on netcup: 4/4, mean first-feasible round 1.5, with the agent's turn taking 70-400 s on
+  top of the EDA time. Part of the nightly.
 - **Planner A/B**: `spec.planner` names the LLM that proposes for that job (default `SA_MODEL`); `bench run
   --planner <model> --tag <model>` runs the whole suite under one model so two reports can be compared case by
   case. The interpreter's "alternatives" also offer a *different generator* for the same request (a two-stage
