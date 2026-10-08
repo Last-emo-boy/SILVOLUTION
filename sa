@@ -51,8 +51,25 @@ def fmt_event(ev: dict) -> str:
         return (f"{t}      fmax={m['fmax_mhz']:.1f} MHz  lut={m['lut']}  dsp={m['dsp']}  ff={m['ff']}  "
                 f"sim={'ok' if m['sim_passed'] else 'FAIL'}  {status}  ({ev['eda_seconds']}s)")
     if k == "plan":
-        s = f"{t}      diagnosis: {ev['diagnosis']}\n{' ' * 9}      action:    {ev['action']}"
+        s = f"{t}      diagnosis: {ev['diagnosis']}\n{' ' * 9}      action:    {'[fallback] ' if ev.get('fallback') else ''}{ev['action']}"
+        for c in ev.get("candidates", []):
+            e = c.get("estimate")
+            tag = f"REJECTED {c['rejected']}" if c.get("rejected") else (f"est ~{e['fmax_mhz']:.0f} MHz ~{e['lut']} LUT ~{e['dsp']} DSP" + (" " + ",".join(c["est_violations"]) if c.get("est_violations") else " ok") if e else "")
+            s += f"\n{' ' * 15} #{c.get('rank', 'x')} {json.dumps(c['ir'])}  {tag}"
         return s + ("\n" + " " * 15 + "planner says stop." if ev["stop"] else "")
+    if k == "memory":
+        return f"{t}      memory: recalled {len(ev['lessons'])} lesson(s) " + ", ".join(f"{l['id']}({l['score']:+.1f})" for l in ev["lessons"])
+    if k == "lesson":
+        L = ev["lesson"]
+        return f"{t}      lesson [{L['id']}] {L['outcome']}: {L['text']}"
+    if k == "stage":
+        return f"{t}      sim {ev['stage']}: {'pass' if ev['passed'] else 'FAIL' if ev['passed'] is False else 'skipped'} @ {ev['period_ns']} ns"
+    if k == "user":
+        return f"{t}      you: {ev['message']}"
+    if k == "steer":
+        return f"{t}      (your {len(ev['messages'])} message(s) go into the next plan)"
+    if k == "rescreen":
+        return f"{t}      all candidates estimated infeasible; re-planning with the verdicts"
     if k == "done":
         b = ev["best"]
         if not b:
