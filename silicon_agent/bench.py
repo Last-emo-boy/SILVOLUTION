@@ -79,6 +79,19 @@ CASES: list[tuple[str, dict, dict]] = [
         "constraints": {"fmax_mhz": 100, "max_dsp": 20, "objective": ["maximize_throughput", "minimize_lut"]},
         "initial_ir": {"tw_width": 12, "growth": "scale", "tw_mem": "lut", "delay_mem": "auto", "bram_min": 16, "mul_regs": 0, "bf_regs": 1, "dsp_regs": "none"}},
      {"feasible": True, "max_rounds": 4}),
+    ("graph-ecp5-120", {
+        "task": "8-tap FIR -> 12-bit CORDIC datapath, ECP5, 120 MHz, 10 DSP", "design": "graph", "backend": "ecp5",
+        "locked": {"nodes": [{"kind": "fir", "ir": {"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.4}}, {"kind": "cordic", "ir": {"mode": "rotate", "width": 12}}]},
+        "constraints": {"fmax_mhz": 120, "max_dsp": 10, "objective": ["maximize_throughput", "minimize_lut"]},
+        "initial_ir": {"nodes": [{"kind": "fir", "ir": {"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.4, "acc_width": 28, "symmetric": False, "fold": 1, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"}},
+                                 {"kind": "cordic", "ir": {"mode": "rotate", "width": 12, "iterations": 12, "unroll": 1, "fold": 1, "guard_bits": 2, "scale_comp": False}}],
+                       "fifo_depth": 32, "adapt": "truncate"}},
+     {"feasible": True, "max_rounds": 3}),
+    ("fft256-gowin-100", {
+        "task": "256-point 16-bit FFT, natural order, Gowin, 100 MHz, 20 MULT", "design": "fft", "backend": "gowin", "locked": {"n": 256, "data_width": 16},
+        "constraints": {"fmax_mhz": 100, "max_dsp": 20, "objective": ["maximize_throughput", "minimize_lut"]},
+        "initial_ir": {"tw_width": 12, "growth": "scale", "tw_mem": "bram", "delay_mem": "auto", "bram_min": 32, "mul_regs": 1, "bf_regs": 1, "dsp_regs": "in_out", "bit_reverse": True, "cmul": "four"}},
+     {"feasible": True, "max_rounds": 3}),
     ("chain-ecp5-120", {
         "task": "8->32 tap FIR chain, ECP5, 120 MHz, 12 DSP", "design": "fir_chain", "backend": "ecp5",
         "locked": {"stages": [{"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.4}, {"taps": 32, "data_width": 12, "coef_width": 12, "cutoff": 0.2}]},

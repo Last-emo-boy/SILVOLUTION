@@ -283,7 +283,7 @@ registry entry in `designs.py` + a prompt block in `prompts.py`.
 
 ## Trust and delivery
 
-- **Benchmark + regression** (`python -m silicon_agent.bench run --tag nightly`): 14 fixed cases over six
+- **Benchmark + regression** (`python -m silicon_agent.bench run --tag nightly`): 16 fixed cases over six
   designs and four devices, each with an expectation (feasible, rounds to first feasible). Submitted as
   ordinary jobs, scored, written to `bench/<tag>-<ts>.json`; `bench show` tabulates the last reports and
   `compare()` flags any case that got worse than the previous report. `deploy/nightly.sh` runs the
