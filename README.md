@@ -5,6 +5,10 @@ LLM planner iterates architecture → RTL → simulation → synthesis → place
 until it meets the requirements, then hands you the Verilog. Real EDA tools are
 the ground truth; nothing is estimated.
 
+Designs: `matmul` (systolic INT matrix multiply), `fir` (fixed-coefficient FIR), `conv2d`
+(streaming K×K convolution with BRAM line buffers). Devices: Lattice ECP5, AMD Spartan-7
+(Vivado), Lattice iCE40 UP5K, Gowin GW1NR-9 — each a plugin under `silicon_agent/backends/`.
+
 ```
 laptop                              EDA host (netcup)
 ──────                              ─────────────────────────────────────────────
@@ -276,6 +280,28 @@ FIR, **XC7S50 via Vivado**, 32-tap 16-bit lowpass, Fmax ≥ 250 MHz, DSP ≤ 8:
 Adding a design kind = one IR dataclass + one emitter + one cocotb test + one
 registry entry in `designs.py` + a prompt block in `prompts.py`.
 
+## Platform: adding a design or a device
+
+A **design** is one module (see `fir.py`, `conv.py`): a frozen IR dataclass with `validate()`,
+`to_dict()/from_dict()`, `digest()`; an `emit(ir, backend)` that returns SystemVerilog with the
+valid/ready streaming interface; a cocotb test with a Python golden model under `tb/`; a vector
+generator + SystemVerilog bench in `vectors.py` for the netlist ladder; a closed-form estimator in
+`screen.py`; planner knowledge in `prompts.py` (what it is, the IR schema, measured device facts);
+and a `schema.py` entry (fields, presets, locked defaults) for the form and the NL interpreter.
+Register it in `designs.py`.
+
+A **device** is one module under `backends/` calling `register(Backend(...))` with the device
+facts (LUT/DSP/BRAM capacity, primitive names, realistic Fmax band, seconds per iteration), an
+`emit_style` telling emitters how to render multipliers (`ecp5` explicit MULT18X18D, `vivado`
+attributes, `behavioral` plain `*`), `synth_pnr(work, fmax, top)` returning Fmax / LUT / FF / DSP /
+BRAM / critical path, and `netlist_sims(...)` for whichever ladder stages the toolchain can run.
+Open-source backends share `_common.py` (nextpnr report parsing, iverilog netlist sims, flattened
+cell libraries); black-box primitives get simulation models in `tb/` (`bram_sim.v`,
+`gowin_mult_sim.v`). Devices whose P&R needs IO pins (iCE40, Gowin) are evaluated through a serial
+shell (`sa_wrap`) and report the core's synthesis counts with the routed Fmax. Prompts, estimates,
+the form and the NL interpreter pick up a new device from the registry; measured facts in
+`prompts.py` are optional and override the generic paragraph.
+
 ## Layout
 
 ```
@@ -283,9 +309,11 @@ sa                         remote client (laptop side)
 silicon_agent/ir.py        matmul IR, constraints, metrics
 silicon_agent/emit.py      matmul IR → SystemVerilog (backend-aware multiplier)
 silicon_agent/fir.py       FIR IR + emitter (transposed / folded, symmetric sharing)
+silicon_agent/conv.py      2-D convolution IR + emitter (BRAM/LUT line buffers, row-serial or parallel, adder tree)
 silicon_agent/designs.py   design registry
-silicon_agent/prompts.py   per-design planner knowledge with measured device facts
-silicon_agent/eda.py       simulate / synth / P&R / report parsing / cache, per backend
+silicon_agent/backends/    device plugins: ecp5, xc7s50 (Vivado), ice40, gowin; _common.py shared helpers
+silicon_agent/prompts.py   per-design planner knowledge with measured device facts (+ generic facts from the registry)
+silicon_agent/eda.py       behavioral simulation + cached evaluate() over the backend registry
 silicon_agent/loop.py      generic optimization loop
 silicon_agent/nl.py        natural language → spec; narration; Q&A about a run
 silicon_agent/server.py    HTTP job server + threads + static web UI, token or gateway-HMAC auth

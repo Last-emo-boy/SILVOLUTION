@@ -16,7 +16,7 @@ from . import llm, memory, screen
 from .designs import Design, design_for
 from .eda import BACKENDS, ROOT, evaluate
 from .ir import Constraints, Metrics
-from .prompts import PROMPTS
+from .prompts import PROMPTS, device_facts
 
 SYSTEM = """You are a senior FPGA architect running an autonomous design-space exploration loop.
 The hardware is @WHAT@ on @DEVICE_NAME@.
@@ -47,7 +47,7 @@ Respond with a JSON object:
 def build_system(design: Design, backend: str) -> str:
     p = PROMPTS[design.kind]
     return (SYSTEM.replace("@WHAT@", p["what"]).replace("@DEVICE_NAME@", BACKENDS[backend]["name"])
-            .replace("@IR_SCHEMA@", p["ir"]).replace("@DEVICE_FACTS@", p["facts"][backend]).replace("@IR_JSON@", p["ir_json"]))
+            .replace("@IR_SCHEMA@", p["ir"]).replace("@DEVICE_FACTS@", device_facts(design.kind, backend)).replace("@IR_JSON@", p["ir_json"]))
 
 
 def ir_view(ir, locked: dict) -> dict:

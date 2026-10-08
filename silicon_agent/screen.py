@@ -23,10 +23,24 @@ OBS_DIR = ROOT / "memory"
 _lock = threading.Lock()
 
 
+def _style(backend: str) -> str:
+    from .backends import BACKENDS
+    return BACKENDS[backend].emit_style if backend in BACKENDS else "behavioral"
+
+
+def _scale(backend: str) -> float:
+    """Fmax scale of a device relative to ECP5, from its advertised band (used only for devices without measured data)."""
+    from .backends import BACKENDS
+    if backend not in BACKENDS or backend in ("ecp5", "xc7s50"):
+        return 1.0
+    hi = float(BACKENDS[backend].fmax_range.split("-")[-1].split()[0])
+    return hi / 250.0
+
+
 def estimate_matmul(ir: dict, backend: str) -> dict:
     pe = ir["pe_rows"] * ir["pe_cols"]
     aw = ir["acc_width"]
-    if backend == "xc7s50":
+    if _style(backend) == "vivado":
         dsp = pe * (2 if ir.get("pipe_mul", 0) > 0 else 1)
         lut = pe * (aw / 2 if not ir.get("acc_in_dsp", True) else 6) + 40 * ir["pe_rows"] + 20 * ir["pe_cols"]
         if ir.get("dsp_regs", "none") == "none":
@@ -45,6 +59,7 @@ def estimate_matmul(ir: dict, backend: str) -> dict:
             fmax = 190 - 1.5 * max(aw - 24, 0) - 1.2 * max(pe - 32, 0)
             if ir.get("pipe_mul", 0) == 0:
                 fmax -= 40
+        fmax *= _scale(backend)
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": pe}
 
 
@@ -54,7 +69,7 @@ def estimate_fir(ir: dict, backend: str) -> dict:
     fold = ir.get("fold", 1)
     mults = math.ceil(U / fold)
     aw = ir["acc_width"]
-    if backend == "xc7s50":
+    if _style(backend) == "vivado":
         if fold == 1:
             dsp = int(mults * 1.4) if ir.get("acc_in_dsp", True) else mults
             lut = 1 if ir.get("acc_in_dsp", True) else U * aw / 2
@@ -74,10 +89,29 @@ def estimate_fir(ir: dict, backend: str) -> dict:
             dsp = mults
             fmax = (220 if fold == 1 else 125 - 5 * max(fold - 4, 0)) - 0.5 * max(aw - 38, 0)
             lut = mults * aw * 0.7 + taps * 12
+        fmax *= _scale(backend)
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(1 / fold, 4)}
 
 
-ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir}
+def estimate_conv(ir: dict, backend: str) -> dict:
+    k, pr, aw, dw, cw = ir["k"], ir.get("par_rows", ir["k"]), ir["acc_width"], ir["data_width"], ir["coef_width"]
+    mults = k * pr
+    levels = math.ceil(math.log2(mults)) if mults > 1 else 0
+    small_const = dw <= 8 and cw <= 8          # yosys folds small constant products into LUTs instead of DSPs
+    dsp = 0 if (small_const and _style(backend) != "vivado") else mults
+    lut = (mults * 20 if small_const else mults * 6) + (mults - 1) * aw / 2 + k * k * 2 + (ir["width"] * (k - 1) * dw if ir.get("line_mem") == "lut" else 60)
+    regs = ir.get("tree_regs", 0)
+    depth = max(1, levels - regs) if pr == k else max(1, levels - regs) + 1
+    fmax = 240 / (0.7 + 0.45 * depth) if _style(backend) == "vivado" else 180 / (0.7 + 0.45 * depth)
+    if ir.get("dsp_regs", "none") == "none" and ir.get("pipe_mul", 0) == 0:
+        fmax *= 0.7
+    if _style(backend) == "vivado":
+        fmax *= 1.6
+    fmax *= _scale(backend)
+    return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(pr / k, 4)}
+
+
+ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv}
 
 
 # ---------------------------------------------------------------- calibration from measured runs
@@ -92,9 +126,12 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
     if design == "matmul":
         f += [math.log2(ir["pe_rows"] * ir["pe_cols"]), ir["acc_width"] / 32, 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0,
               1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0), 1.0 if ir.get("reg_in") else 0.0, math.log2(max(ir["pe_rows"], 1))]
-    else:
+    elif design == "fir":
         f += [math.log2(ir["taps"]), math.log2(ir.get("fold", 1)), 1.0 if ir.get("symmetric") else 0.0, ir["acc_width"] / 40,
               1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0)]
+    else:
+        f += [math.log2(ir["k"] * ir.get("par_rows", ir["k"])), math.log2(ir["width"]), 1.0 if ir.get("line_mem") == "bram" else 0.0,
+              ir["acc_width"] / 32, ir.get("tree_regs", 0), 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, ir.get("pipe_mul", 0)]
     return f
 
 

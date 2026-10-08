@@ -23,6 +23,7 @@ from pathlib import Path
 TB_DIR = Path(__file__).resolve().parent / "tb"
 sys.path.insert(0, str(TB_DIR))
 
+from test_conv import golden as conv_golden, make_frames  # noqa: E402
 from test_fir import golden as fir_golden  # noqa: E402
 from test_matmul import golden as mm_golden, pack, to_signed  # noqa: E402
 
@@ -142,6 +143,63 @@ module tb;
       forever begin #(PERIOD*0.45); rdy = in_ready; @(posedge clk); if (rdy) break; @(negedge clk); end
     end
     in_valid = 0;
+    repeat (300) @(posedge clk);
+    if (n_got != n_exp) begin errors++; $display("COUNT got %0d expected %0d", n_got, n_exp); end
+    $display("RESULT %s samples=%0d errors=%0d", errors ? "FAIL" : "PASS", n_got, errors);
+    $finish;
+  end
+endmodule
+"""
+
+
+# ---------------------------------------------------------------- conv2d
+def conv_vectors(ir, seed: int = 1, n_rows: int | None = None) -> tuple[list[str], list[str]]:
+    K, W, DW, AW = ir.k, ir.width, ir.data_width, ir.acc_width
+    rng = random.Random(seed)
+    frames = make_frames(rng, K, W, DW, n_rows or K + 3, 2)
+    ys = conv_golden(frames, K, W, list(ir.coefs))
+    stim = []
+    for px in frames:
+        for i, x in enumerate(px):
+            gap = rng.choice([0, 0, 0, 1, 2]) if i % 7 == 0 else 0
+            stim.append(f"{gap:x} {1 if i == 0 else 0:x} {x & ((1 << DW) - 1):0{max(1, DW // 4)}x}")
+    exp = [f"{y & ((1 << AW) - 1):0{max(1, (AW + 3) // 4)}x}" for y in ys]
+    return stim, exp
+
+
+TB_CONV = """`timescale 1ns/1ps
+module tb;
+  parameter int DW = {DW}, AW = {AW};
+  parameter string STIM = "stim.hex", EXP = "exp.hex";
+  parameter real PERIOD = {period};
+  logic clk = 0, rst = 1, in_valid = 0, frame_start = 0;
+  logic [DW-1:0] in_data = 0;
+  wire in_ready, out_valid; wire [AW-1:0] out_data;
+  conv2d_top dut(.clk, .rst, .in_valid, .frame_start, .in_data, .in_ready, .out_valid, .out_data);
+  always #(PERIOD/2) clk = ~clk;
+  int fd, n_exp, n_got, errors, code, gap, fs; logic [DW-1:0] xv; logic rdy;
+  logic [AW-1:0] expv [0:65535];
+  initial begin
+    fd = $fopen(EXP, "r"); n_exp = 0;
+    while (!$feof(fd)) begin code = $fscanf(fd, "%h\\n", expv[n_exp]); if (code == 1) n_exp++; end
+    $fclose(fd);
+  end
+  always @(posedge clk) begin #(PERIOD*0.75); if (out_valid && !rst) begin
+    if (out_data !== expv[n_got]) begin errors++; if (errors < 5) $display("MISMATCH sample %0d got %h exp %h at %t", n_got, out_data, expv[n_got], $time); end
+    n_got++;
+  end end
+  initial begin
+    n_got = 0; errors = 0;
+    repeat (3) @(posedge clk); #120; @(negedge clk); rst = 0;
+    fd = $fopen(STIM, "r");
+    while (!$feof(fd)) begin
+      code = $fscanf(fd, "%h %h %h\\n", gap, fs, xv);
+      if (code != 3) break;
+      if (gap) begin in_valid = 0; repeat (gap) @(negedge clk); end
+      @(negedge clk); in_valid = 1; frame_start = fs[0]; in_data = xv;
+      forever begin #(PERIOD*0.45); rdy = in_ready; @(posedge clk); if (rdy) break; @(negedge clk); end
+    end
+    in_valid = 0; frame_start = 0;
     repeat (300) @(posedge clk);
     if (n_got != n_exp) begin errors++; $display("COUNT got %0d expected %0d", n_got, n_exp); end
     $display("RESULT %s samples=%0d errors=%0d", errors ? "FAIL" : "PASS", n_got, errors);

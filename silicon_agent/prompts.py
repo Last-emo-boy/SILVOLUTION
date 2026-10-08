@@ -88,7 +88,66 @@ spend a second DSP). The XC7S50 has 32.6k LUT6, 120 DSP48E1. Realistic Fmax rang
 }
 
 
+CONV_WHAT = "a streaming single-channel K x K 2-D convolution (line buffers + sliding window + multiply-adder tree)"
+
+CONV_IR = """IR fields and legal ranges:
+  k          int in {3,5,7}   kernel size (task parameter)
+  width      int 16..2048     image width in pixels (task parameter; each line buffer holds `width` pixels)
+  data_width int in {8,12,16} pixel bits (task parameter)
+  coef_width int in {8,12,16} kernel coefficient bits (task parameter)
+  acc_width  int >= data_width+coef_width+ceil(log2(k*k))+1 .. 48   output/adder-tree width
+  line_mem   str in {"bram","lut"}  the K-1 line buffers in block RAM (1 BRAM per line for 8-bit x <=2048 pixels) or
+                                     as LUT/FF shift registers (width*(K-1)*data_width flip-flops -- only sane for tiny widths)
+  par_rows   int, divides k   rows of the window multiplied per cycle: k -> fully parallel, k*k multipliers, 1 pixel/cycle;
+                              1 -> k multipliers, 1/k pixel/cycle (the window is held while its rows are multiplied in turn)
+  tree_regs  int 0..3         pipeline register levels inside the adder tree (each adds 1 cycle latency, splits the tree depth)
+  pipe_mul   int 0..3         fabric register stages after each multiplier
+  dsp_regs   str in {"none","out","in_out","in_pipe_out"}  multiplier register stages (coefficients are constants, so on
+                              every device these are fabric/DSP output registers; there is no DSP cascade here)
+
+Structure summary: multipliers = k*par_rows; throughput = par_rows/k pixels per cycle; the adder tree has
+ceil(log2(k*par_rows)) levels of acc_width-bit adders, which is the usual critical path when tree_regs=0;
+with par_rows<k a partial-sum accumulator follows the tree. BRAM read latency is already pipelined and is not on the
+critical path. The window shift registers cost k*k*data_width FFs regardless of par_rows."""
+
+CONV_IR_JSON = '{"acc_width":..,"line_mem":"..","par_rows":..,"tree_regs":..,"pipe_mul":..,"dsp_regs":".."}'
+
+CONV_FACTS = {
+    "ecp5": """ECP5 facts, measured on a 3x3 8-bit kernel, width 640, acc 24: line_mem=bram uses 2 DP16KD; par_rows=3 (9
+multipliers, 1 px/cycle) with dsp_regs=out, tree_regs=1 -> 140.7 MHz, 283 LUT, 0 DSP (yosys folds the constant 8x8
+products into LUTs: cheaper than MULT18X18D for small constants); par_rows=1 (3 multipliers) -> 48.8 MHz because the
+partial-sum accumulator loop (acc + tsum) has no register and the MULT18X18D path lands in it -- add pipe_mul/tree_regs
+to split it. A 5x5 at width 320, par_rows=5, tree_regs=2 -> 121 MHz, 680 LUT, 9 DSP, 4 BRAM. Critical path with
+tree_regs<=1 is the adder tree (LUT4 + carry chain ~1 ns per level plus routing).""",
+}
+
+
 PROMPTS = {
     "matmul": {"what": MATMUL_WHAT, "ir": MATMUL_IR, "ir_json": MATMUL_IR_JSON, "facts": MATMUL_FACTS},
     "fir": {"what": FIR_WHAT, "ir": FIR_IR, "ir_json": FIR_IR_JSON, "facts": FIR_FACTS},
+    "conv2d": {"what": CONV_WHAT, "ir": CONV_IR, "ir_json": CONV_IR_JSON, "facts": CONV_FACTS},
 }
+
+GENERIC_FACTS = {
+    "behavioral": """Multipliers are behavioral (`*`); yosys maps them to the device DSP ({dsp_kind}) when the operands fit
+({dsp_width}-bit) and the DSP has no usable internal pipeline from this flow, so dsp_regs stages are emitted as fabric
+registers (they still break the multiplier output away from the accumulator). Accumulators are {lut_kind} carry chains.
+The usual limiter is routing between the DSP output and the carry chain; reg_in breaks the IO->array path.""",
+    "ecp5": """Each multiplier is an explicit {dsp_kind}; dsp_regs selects its internal registers. Accumulators are {lut_kind}
+carry chains whose delay grows with acc_width.""",
+    "vivado": """Vivado infers {dsp_kind} and retimes dsp_regs/pipe_mul stages into it; acc_in_dsp chooses between the DSP
+post-adder and a fabric CARRY4 accumulator.""",
+}
+
+
+def device_facts(kind: str, backend: str) -> str:
+    """Measured facts when we have them for this (design, device); otherwise a generic paragraph built from the
+    backend record, with the device numbers the planner needs to reason about budgets."""
+    from .backends import BACKENDS
+    b = BACKENDS[backend]
+    text = PROMPTS[kind]["facts"].get(backend)
+    if text:
+        return text
+    core = GENERIC_FACTS.get(b.emit_style, GENERIC_FACTS["behavioral"]).format(dsp_kind=b.dsp_kind, dsp_width=b.dsp_width, lut_kind=b.lut_kind)
+    return (f"{b.name} ({b.toolchain}): {b.lut} {b.lut_kind}, {b.dsp} {b.dsp_kind}, {b.bram} BRAM. Realistic Fmax range: {b.fmax_range}. "
+            f"No measured runs of this design on this device yet -- treat the following as structure, not numbers.\n{core}")

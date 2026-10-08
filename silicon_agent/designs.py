@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from . import fir, vectors
+from . import conv, fir, vectors
 from .emit import drain_latency, emit_matmul, min_k_full_rate
 from .ir import MatmulArch, throughput_macs_per_cycle
 
@@ -57,6 +57,20 @@ DESIGNS: dict[str, Design] = {
         extra_sim_sources=("mult18x18d_sim.v",),
         vectors=vectors.fir_vectors,
         tb=lambda a, period: vectors.TB_FIR.format(DW=a.data_width, AW=a.acc_width, period=period),
+    ),
+    "conv2d": Design(
+        kind="conv2d",
+        ir_cls=conv.ConvArch,
+        top="conv2d_top",
+        emit=conv.emit_conv,
+        test_module="test_conv",
+        sim_env=lambda a: {"SA_ROWS": str(a.k + 3)},
+        throughput=conv.throughput,
+        throughput_unit="pixels/cycle",
+        latency=conv.latency_cycles,
+        extra_sim_sources=("mult18x18d_sim.v",),
+        vectors=vectors.conv_vectors,
+        tb=lambda a, period: vectors.TB_CONV.format(DW=a.data_width, AW=a.acc_width, period=period),
     ),
 }
 

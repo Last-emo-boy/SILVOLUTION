@@ -44,8 +44,11 @@ let T = zh ? L.zh : L.en;
 const t = (k, v) => T[k].replace("{n}", v).replace("{f}", v);
 function setLang(isZh) { zh = isZh; T = zh ? L.zh : L.en; $("#input").placeholder = T.placeholder; $("#chint").textContent = T.hint; $("#stop").textContent = T.stop; }
 const STAGE_KEYS = ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"];
-const TOP = { matmul: "matmul_top", fir: "fir_top" };
-const DEV = { ecp5: "ECP5 LFE5U-45F", xc7s50: "Spartan-7 XC7S50" };
+const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top" };
+let DEV = { ecp5: "ECP5 LFE5U-45F", xc7s50: "Spartan-7 XC7S50", ice40: "iCE40 UP5K", gowin: "Gowin GW1NR-9" };
+let BSTAGES = { ecp5: ["behavioral", "post_synth_func"], xc7s50: STAGE_KEYS_ALL(), ice40: ["behavioral", "post_synth_func"], gowin: ["behavioral", "post_synth_func"] };
+function STAGE_KEYS_ALL() { return ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"]; }
+const stagesOf = (backend) => BSTAGES[backend] || ["behavioral"];
 
 // ---------------------------------------------------------------- state
 let threads = [], tid = null, thread = null, timer = null;
@@ -58,6 +61,7 @@ const rtlShown = new Set();
   $("#hello h1").textContent = T.hello; $("#hello p").textContent = T.blurb; $("#input").placeholder = T.placeholder; $("#chint").textContent = T.hint; $("#stop").textContent = T.stop; $("#new-chat").title = T.newChat;
   for (const ex of T.examples) { const b = el(`<button>${esc(ex)}</button>`); b.onclick = () => send(ex); $("#examples").appendChild(b); }
   try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
+  try { const sc = await api("/schema"); DEV = Object.fromEntries(Object.entries(sc.backends).map(([k, v]) => [k, v])); BSTAGES = Object.fromEntries(Object.entries(sc.backend_facts).map(([k, v]) => [k, v.sim_stages])); } catch {}
   $("#new-chat").onclick = () => openThread(null);
   $("#send").onclick = () => send();
   $("#input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
@@ -236,9 +240,8 @@ function turns(events) {
 }
 
 function stageChips(r, backend) {
-  const xc = backend === "xc7s50";
   const st = r.pending ? r.stages : (r.metrics?.sim_stages || {});
-  const keys = xc ? STAGE_KEYS : ["behavioral", "post_synth_func"];
+  const keys = stagesOf(backend);
   return `<div class="stages">` + keys.map((k, i) => {
     let cls;
     if (k === "behavioral") cls = r.pending ? (r.ir ? "active" : "todo") : r.metrics?.sim_passed ? "done" : "fail";
@@ -287,10 +290,10 @@ function trajCard(jid, j, rows, done, liveRow, spec) {
 }
 
 function resultCard(jid, j, done, spec) {
-  const best = j.summary?.best, unit = j.summary?.throughput_unit || "", top = TOP[spec.design] || "top", xc = spec.backend === "xc7s50";
+  const best = j.summary?.best, unit = j.summary?.throughput_unit || "", top = TOP[spec.design] || "top", keys = stagesOf(spec.backend);
   const target = done.filter((r) => r.violations?.length).sort((a, b) => a.violations.length - b.violations.length || b.n - a.n)[0];
   const stg = best?.metrics?.sim_stages || {};
-  const signoff = xc && stg.post_impl_time?.passed === true;
+  const signoff = keys.includes("post_impl_time") && stg.post_impl_time?.passed === true;
   let sub;
   if (best) sub = `<span class="ok">${top}.sv</span> · ${fmt(best.metrics.fmax_mhz)} MHz · ${best.metrics.dsp} DSP · ${best.metrics.lut} LUT · ${best.throughput} ${esc(unit)}${signoff ? ` · ${T.signoff}` : ""}`;
   else if (j.status === "interrupted") sub = `<span class="bad">${T.stopped}</span>`;
@@ -308,7 +311,7 @@ function resultCard(jid, j, done, spec) {
     const purposes = zh ? ["RTL 逻辑 vs Python 黄金模型（cocotb + iverilog）", "综合后网表，unisim 模型，无延迟", "综合后网表 + 估算 SDF 延迟，目标周期", "布线后网表，无延迟", "布线后网表 + 真实 SDF 延迟，目标周期 — 签核"]
                         : ["RTL vs Python golden model (cocotb + iverilog)", "synthesized netlist, unisim models, no delays", "synthesized netlist with estimated SDF delays at target period", "placed-and-routed netlist, no delays", "placed-and-routed netlist with real SDF delays at target period — the signoff"];
     STAGE_KEYS.forEach((k, i) => {
-      if (!xc && i > 1) return;
+      if (!keys.includes(k)) return;
       let st, log = "";
       if (k === "behavioral") st = m.sim_passed ? "pass" : "fail";
       else { const s = (m.sim_stages || {})[k]; st = !s ? "–" : s.passed === true ? "pass" : s.passed === false ? "fail" : "skipped"; if (s?.passed === false) log = s.log || ""; }

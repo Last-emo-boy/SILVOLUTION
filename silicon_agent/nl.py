@@ -31,11 +31,11 @@ Available designs:
   matmul  output-stationary systolic INT matrix multiply. locked: data_width (4/8/12/16).
   fir     fixed-coefficient FIR filter; a windowed-sinc lowpass is generated from taps + cutoff (fraction of fs, 0.01-0.49).
           locked: taps, data_width, coef_width, cutoff. Throughput is 1/fold samples per cycle.
-Available backends:
-  ecp5    Lattice ECP5 LFE5U-45F (open-source flow, fast, ~30 s per iteration). 72 DSP, 44k LUT4. Fmax realistic 60-250 MHz.
-  xc7s50  AMD Spartan-7 XC7S50 (Vivado, 2-4 min per iteration, full 5-stage sim ladder). 120 DSP48E1, 32.6k LUT6. Fmax 100-500 MHz.
-Pick the backend from device words ("Spartan", "Xilinx", "7 series", "Vivado" -> xc7s50; "Lattice", "ECP5", "open source" -> ecp5);
-default xc7s50 when a timing-signoff flow is implied, else ecp5.
+  conv2d  streaming single-channel K x K 2-D convolution (image filter / blur / edge kernel) with line buffers.
+          locked: k (3/5/7), width (image width in pixels), data_width (8/12/16), coef_width (8/12/16).
+          Throughput is par_rows/k pixels per cycle. A pixel rate R MHz means fmax >= R*k/par_rows.
+Available backends (choose from device words; default xc7s50 when timing signoff is implied, else ecp5):
+@BACKENDS@
 
 Spec shape:
 {
@@ -47,7 +47,8 @@ Spec shape:
                   "objective": [<ordered subset of maximize_throughput, minimize_dsp, minimize_lut, maximize_fmax, minimize_latency>]},
   "initial_ir": {<a deliberately naive starting point so the agent has something to improve; matmul: pe_rows/pe_cols sized
                  to the throughput hint, acc_width 32, pipe_mul 0, reg_in false, dsp_regs "none", acc_in_dsp true;
-                 fir: fold 1, symmetric false, acc_width dw+cw+8, pipe_mul 0, reg_in false, dsp_regs "none", acc_in_dsp true>}
+                 fir: fold 1, symmetric false, acc_width dw+cw+8, pipe_mul 0, reg_in false, dsp_regs "none", acc_in_dsp true;
+                 conv2d: par_rows k, line_mem "bram", acc_width dw+cw+8, tree_regs 0, pipe_mul 0, dsp_regs "none">}
 }
 Objective order matters: the agent optimizes lexicographically, so whatever comes first is pushed to its extreme. Unless
 the user says the design itself should be as small/cheap as possible, maximize_throughput comes first -- someone asking
@@ -77,6 +78,13 @@ for the planner -- set is_request true and leave text empty; the caller will act
 Respond with JSON: {"text": "<answer>", "is_request": false}"""
 
 
+def _backend_lines() -> str:
+    from .backends import BACKENDS as REG
+    return "\n".join(f"  {b.key:7s} {b.name} ({b.toolchain}; {b.seconds_per_iter} per iteration; {len(b.sim_stages)}-stage sim ladder). "
+                     f"{b.dsp} {b.dsp_kind}, {b.lut // 1000}k {b.lut_kind}, {b.bram} BRAM. Fmax realistic {b.fmax_range}. Words: {', '.join(b.aliases)}"
+                     for b in REG.values())
+
+
 def _lang(text: str) -> str:
     return "zh" if re.search(r"[一-鿿]", text) else "en"
 
@@ -87,7 +95,7 @@ def interpret(message: str, context: dict | None = None) -> dict:
         ctx = ("\n\n## Current run (the user may be refining it)\n" + json.dumps({
             "spec": context.get("spec"), "status": context.get("status"),
             "best": context.get("best"), "last": context.get("last")}, ensure_ascii=False)[:4000])
-    r = llm.chat_json(INTERPRET_SYSTEM, f"## Request\n{message}{ctx}")
+    r = llm.chat_json(INTERPRET_SYSTEM.replace("@BACKENDS@", _backend_lines()), f"## Request\n{message}{ctx}")
     spec = r.get("spec") or {}
     # normalize + validate against the real schema; a fork inherits everything it does not mention
     base = context["spec"] if (context and r.get("fork")) else None

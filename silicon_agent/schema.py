@@ -12,7 +12,7 @@ SHARED = [
     {"name": "pipe_mul", "type": "int", "min": 0, "max": 3, "hint": "fabric register stages after the multiplier"},
     {"name": "reg_in", "type": "bool", "hint": "register the inputs at the boundary"},
     {"name": "dsp_regs", "type": "choice", "choices": ["none", "out", "in_out", "in_pipe_out"], "hint": "DSP-internal pipeline registers"},
-    {"name": "acc_in_dsp", "type": "bool", "hint": "accumulate inside the DSP48E1 post-adder", "backends": ["xc7s50"]},
+    {"name": "acc_in_dsp", "type": "bool", "hint": "accumulate inside the DSP post-adder (Vivado devices)", "backends": ["xc7s50"]},
 ]
 
 SCHEMAS = {
@@ -52,6 +52,28 @@ SCHEMAS = {
         },
         "constraints_default": {"fmax_mhz": 150, "max_dsp": 8, "max_lut": 3000},
         "locked_default": {"taps": 32, "data_width": 16, "coef_width": 16, "cutoff": 0.2},
+    },
+    "conv2d": {
+        "title": "streaming 2-D convolution (line buffers + window + adder tree)",
+        "locked_candidates": ["k", "width", "data_width", "coef_width"],
+        "fields": [
+            {"name": "k", "type": "choice", "choices": [3, 5, 7], "hint": "kernel size (task parameter)"},
+            {"name": "width", "type": "int", "min": 16, "max": 2048, "hint": "image width in pixels (line-buffer depth)"},
+            {"name": "data_width", "type": "choice", "choices": [8, 12, 16], "hint": "pixel bits"},
+            {"name": "coef_width", "type": "choice", "choices": [8, 12, 16], "hint": "kernel coefficient bits"},
+            {"name": "acc_width", "type": "int", "min": 16, "max": 48, "hint": "adder-tree/output bits; min = dw+cw+log2(k*k)+1"},
+            {"name": "line_mem", "type": "choice", "choices": ["bram", "lut"], "hint": "line buffers in block RAM or LUT shift registers"},
+            {"name": "par_rows", "type": "int", "min": 1, "max": 7, "hint": "window rows multiplied per cycle (divides k); throughput = par_rows/k px/cycle"},
+            {"name": "tree_regs", "type": "int", "min": 0, "max": 3, "hint": "register levels inside the adder tree"},
+            {"name": "pipe_mul", "type": "int", "min": 0, "max": 3, "hint": "fabric register stages after the multipliers"},
+            {"name": "dsp_regs", "type": "choice", "choices": ["none", "out", "in_out", "in_pipe_out"], "hint": "multiplier register stages"},
+        ],
+        "presets": {
+            "naive (parallel)": {"k": 3, "width": 640, "data_width": 8, "coef_width": 8, "acc_width": 24, "line_mem": "bram", "par_rows": 3, "tree_regs": 0, "pipe_mul": 0, "dsp_regs": "none"},
+            "row-serial": {"k": 3, "width": 640, "data_width": 8, "coef_width": 8, "acc_width": 24, "line_mem": "bram", "par_rows": 1, "tree_regs": 1, "pipe_mul": 1, "dsp_regs": "out"},
+        },
+        "constraints_default": {"fmax_mhz": 100, "max_dsp": 16, "max_lut": 2000},
+        "locked_default": {"k": 3, "width": 640, "data_width": 8, "coef_width": 8},
     },
 }
 

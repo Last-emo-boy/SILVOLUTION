@@ -28,6 +28,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 (async function boot() {
   try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
   specs = await api("/specs");
+  try { BFACTS = (await api("/schema")).backend_facts; BSTAGES = Object.fromEntries(Object.entries(BFACTS).map(([k, v]) => [k, v.sim_stages])); } catch {}
   ext = wire({ $, api, post, esc, el, fmt, specs, state, select, refreshJobs, show });
   await ext.initForm();
   ext.initActions();
@@ -182,12 +183,15 @@ function irChips(ir, prevIr, locked) {
   }).join("") + `</div>`;
 }
 const line = (lbl, html, cls = "") => `<div class="ln"><span class="lbl ${cls}">${lbl}</span><div class="txt">${html}</div></div>`;
+let BSTAGES = {}, BFACTS = {};
+const stagesOf = (backend) => BSTAGES[backend] || ["behavioral", "post_synth_func"];
 const stageChips = (r, backend) => {
-  if (backend !== "xc7s50") return "";
+  const keys = stagesOf(backend);
+  if (keys.length < 2) return "";
   const st = r.pending ? r.stages : (r.metrics?.sim_stages || {});
   const behav = r.pending ? (r.ir ? "active" : "todo") : (r.metrics?.sim_passed ? "done" : "fail");
   const cls = (k) => { const s = st[k]; if (!s) return r.pending ? "todo" : "todo"; return s.passed === true ? "done" : s.passed === false ? "fail" : "todo"; };
-  const parts = STAGES.map(([k, l], i) => `<span class="${k === "behavioral" ? behav : cls(k)}"><i></i>${l}</span>`);
+  const parts = STAGES.filter(([k]) => keys.includes(k)).map(([k, l]) => `<span class="${k === "behavioral" ? behav : cls(k)}"><i></i>${l}</span>`);
   return `<div class="stages">${parts.join("")}</div>`;
 };
 
@@ -207,7 +211,7 @@ function buildTurn(r, prevIr, unit, spec) {
   if (r.ir) b.appendChild(el(irChips(r.ir, prevIr, spec.locked)));
   if (r.pending) {
     b.appendChild(el(`<div class="head"><span class="verdict live">${r.ir ? "simulating · synthesizing · place & route" : "planning"}</span></div>`));
-    if (spec.backend === "xc7s50" && r.ir) b.appendChild(el(stageChips(r, spec.backend)));
+    if (r.ir) b.appendChild(el(stageChips(r, spec.backend)));
   } else {
     const m = r.metrics, ok = r.violations.length === 0;
     b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b> · ${m.lut} LUT · ${m.dsp} DSP · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
@@ -231,7 +235,7 @@ function buildTurn(r, prevIr, unit, spec) {
   if (!r.pending) {
     const m = r.metrics;
     if (m.critical_path?.length > 1) { inner.appendChild(el(line("critical", `<div class="cp">${fmt(m.critical_path[0].total_ns, 2)} ns: ` + m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl)}</i> ${fmt(s.logic_ns, 2)}+${fmt(s.route_ns, 2)}</span>`).join("") + `</div>`))); parts.push("critical path"); }
-    if (spec.backend === "xc7s50") { inner.appendChild(el(line("simulation", stageChips(r, spec.backend)))); }
+    inner.appendChild(el(line("simulation", stageChips(r, spec.backend))));
     if (r.lesson) {
       const L = r.lesson.lesson;
       const node = el(line("lesson", `<div class="lesson"><div class="ltxt">${esc(L.text)}</div><div class="vote"><span class="${L.outcome}">${L.outcome}</span><button data-v="up" title="confirm">👍</button><button data-v="down" title="contradict">👎</button></div></div>`, "warn"));
@@ -301,7 +305,7 @@ function switchTab(name) {
 function renderDesign(row, done, spec) {
   const p = $("#pane-design"); p.innerHTML = "";
   if (!row?.ir) { p.appendChild(el(`<div class="muted">no design yet</div>`)); return; }
-  const design = spec.design || "matmul", locked = spec.locked || {}, xc = spec.backend === "xc7s50";
+  const design = spec.design || "matmul", locked = spec.locked || {}, xc = spec.backend === "xc7s50", dspKind = (BFACTS[spec.backend] || {}).dsp_kind || "DSP";
   const ir = { ...locked, ...row.ir };
   const prev = done.filter((d) => d.n < row.n).at(-1)?.ir;
   const sec = el(`<div class="sec"><h3>Architecture <span class="hint">iteration ${row.n}${row.pending ? " (evaluating)" : ""}</span></h3></div>`);
@@ -310,7 +314,13 @@ function renderDesign(row, done, spec) {
     const R = Math.min(ir.pe_rows, 12), C = Math.min(ir.pe_cols, 16);
     for (let i = 0; i < R; i++) { const r = el(`<div class="r"></div>`); for (let j = 0; j < C; j++) r.appendChild(el(`<div class="pe">×+</div>`)); arch.appendChild(r); }
     sec.appendChild(arch);
-    sec.appendChild(el(`<div class="archlegend"><span>${ir.pe_rows}×${ir.pe_cols} output-stationary systolic${ir.pe_rows > 12 || ir.pe_cols > 16 ? " (clipped)" : ""} · A → rows, B ↓ columns</span><span>PE: ${xc ? "DSP48E1" : "MULT18X18D"} (${ir.dsp_regs}) + ${ir.acc_in_dsp && xc ? "DSP post-adder" : "fabric carry-chain"} accumulator, ${ir.acc_width} b${ir.pipe_mul ? ` + ${ir.pipe_mul} fabric pipe` : ""}</span><span>${ir.reg_in ? "registered inputs · " : ""}${row.throughput ?? ir.pe_rows * ir.pe_cols} MAC/cycle · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
+    sec.appendChild(el(`<div class="archlegend"><span>${ir.pe_rows}×${ir.pe_cols} output-stationary systolic${ir.pe_rows > 12 || ir.pe_cols > 16 ? " (clipped)" : ""} · A → rows, B ↓ columns</span><span>PE: ${dspKind} (${ir.dsp_regs}) + ${ir.acc_in_dsp && xc ? "DSP post-adder" : "fabric carry-chain"} accumulator, ${ir.acc_width} b${ir.pipe_mul ? ` + ${ir.pipe_mul} fabric pipe` : ""}</span><span>${ir.reg_in ? "registered inputs · " : ""}${row.throughput ?? ir.pe_rows * ir.pe_cols} MAC/cycle · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
+  } else if (design === "conv2d") {
+    const K = ir.k, PR = ir.par_rows;
+    const lines = el(`<div class="r"></div>`); for (let l = 0; l < K - 1; l++) lines.appendChild(el(`<div class="tap on" style="width:${Math.min(ir.width, 640) / 8}px" title="line buffer ${l}"></div>`)); arch.appendChild(lines);
+    for (let r = 0; r < K; r++) { const row = el(`<div class="r"></div>`); for (let c = 0; c < K; c++) row.appendChild(el(`<div class="pe ${r < PR ? "" : "mac"}" title="window[${r}][${c}]">×</div>`)); arch.appendChild(row); }
+    sec.appendChild(arch);
+    sec.appendChild(el(`<div class="archlegend"><span>${K}×${K} window on a ${ir.width}-px line · ${K - 1} line buffer${K > 2 ? "s" : ""} in ${ir.line_mem === "bram" ? "block RAM" : "LUT shift registers"}</span><span>${K * PR} multiplier${K * PR > 1 ? "s" : ""} (${PR} of ${K} rows per cycle) · adder tree with ${ir.tree_regs} register level${ir.tree_regs === 1 ? "" : "s"} · ${ir.acc_width} b</span><span>${row.throughput ?? PR / K} px/cycle · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
   } else {
     const U = ir.symmetric ? Math.ceil(ir.taps / 2) : ir.taps, M = Math.ceil(U / ir.fold);
     const taps = el(`<div class="r"></div>`); for (let k = 0; k < Math.min(ir.taps, 32); k++) taps.appendChild(el(`<div class="tap ${ir.symmetric && k >= ir.taps / 2 ? "" : "on"}"></div>`)); arch.appendChild(taps);
@@ -345,7 +355,7 @@ function renderDesign(row, done, spec) {
 function renderSim(row, spec) {
   const p = $("#pane-sim"); p.innerHTML = "";
   if (!row) { p.appendChild(el(`<div class="muted">no iteration yet</div>`)); return; }
-  const xc = spec.backend === "xc7s50";
+  const keys = stagesOf(spec.backend);
   const st = row.pending ? row.stages : (row.metrics?.sim_stages || {});
   const period = row.metrics ? (1000 / spec.constraints.fmax_mhz) : null;
   const sec = el(`<div class="sec"><h3>Simulation ladder <span class="hint">iteration ${row.n}${period ? ` · target period ${fmt(period, 3)} ns` : ""}</span></h3><table class="simtable"></table></div>`);
@@ -357,10 +367,10 @@ function renderSim(row, spec) {
   const names = { post_synth_func: "2 · Post-synthesis functional", post_synth_time: "3 · Post-synthesis timing", post_impl_func: "4 · Post-implementation functional", post_impl_time: "5 · Post-implementation timing" };
   for (const k of Object.keys(names)) {
     const s = st[k];
-    const state = !xc ? "n/a" : !s ? (row.pending ? "pending" : "—") : s.passed === true ? "pass" : s.passed === false ? "fail" : "skipped";
+    const state = !keys.includes(k) ? "n/a" : !s ? (row.pending ? "pending" : "—") : s.passed === true ? "pass" : s.passed === false ? "fail" : "skipped";
     t.insertAdjacentHTML("beforeend", rowHtml(names[k], purposes[k], state, s?.passed === false ? s.log : ""));
   }
-  if (!xc) sec.appendChild(el(`<div class="muted small-text">Netlist simulation (stages 2–5) runs on the Vivado backend only; the ECP5 flow has no SDF-annotated netlist path yet.</div>`));
+  if (!keys.includes("post_impl_time")) sec.appendChild(el(`<div class="muted small-text">Timing and post-implementation stages need an SDF-annotated netlist, which the open-source P&R tools do not produce; they run on the Vivado backend.</div>`));
   p.appendChild(sec);
 }
 

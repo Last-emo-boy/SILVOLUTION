@@ -130,7 +130,7 @@ class FirArch:
     def digest(self, backend: str = "ecp5") -> str:
         d = self.to_dict()
         d.pop("cutoff", None)  # the coefficients already carry it; keeps older cache entries valid
-        if backend != "xc7s50":
+        if _style(backend) != "vivado":
             d.pop("acc_in_dsp", None)
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
@@ -147,6 +147,11 @@ def latency_cycles(a: FirArch) -> int:
 # ---------------------------------------------------------------- emitter helpers
 def _coef_literal(cs: list[int]) -> str:
     return ", ".join(f"CW'(sd'({c}))" for c in cs)
+
+
+def _style(backend: str) -> str:
+    from .backends import BACKENDS
+    return BACKENDS[backend].emit_style if backend in BACKENDS else "behavioral"
 
 
 def _ecp5_dsp_body(mode: str) -> str:
@@ -182,10 +187,11 @@ def _mult_module(a: FirArch, backend: str) -> str:
     """`fir_mult`: prod = x * h with the configured DSP/fabric register stages.
     h may be a constant parameter (parallel forms) or a runtime input (folded ROM)."""
     lat = DSP_REG_MODES[a.dsp_regs]
-    attr = '(* use_dsp = "yes" *)\n' if backend == "xc7s50" else ""
+    style = _style(backend)
+    attr = '(* use_dsp = "yes" *)\n' if style == "vivado" else ""
     if lat == 0:
         body = "    assign m = x * h;\n"
-    elif backend == "ecp5":
+    elif style == "ecp5":
         # yosys neither packs pipeline registers into MULT18X18D nor reliably infers it for
         # constant-coefficient products, so instantiate the primitive explicitly (as matmul does)
         body = _ecp5_dsp_body(a.dsp_regs)

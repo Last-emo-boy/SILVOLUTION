@@ -59,7 +59,8 @@ class MatmulArch:
         """Identity of the design as the backend sees it; fields that have no effect
         on a backend are dropped so the loop does not count them as new designs."""
         d = self.to_dict()
-        if backend != "xc7s50":
+        from .backends import BACKENDS
+        if backend in BACKENDS and BACKENDS[backend].emit_style != "vivado":
             d.pop("acc_in_dsp", None)
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 

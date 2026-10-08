@@ -478,7 +478,8 @@ class Handler(BaseHTTPRequestHandler):
                                                         "created": j["created"], "task": j["spec"].get("task", "")} for jid, j in jobs_in.items()}})
         if path == "/schema":
             from .schema import SCHEMAS, OBJECTIVES
-            return self._json(200, {"designs": SCHEMAS, "objectives": OBJECTIVES, "backends": {k: v["name"] for k, v in BACKENDS.items()}})
+            return self._json(200, {"designs": SCHEMAS, "objectives": OBJECTIVES, "backends": {k: v["name"] for k, v in BACKENDS.items()},
+                                    "backend_facts": {k: dict(v) for k, v in BACKENDS.items()}})
         if path == "/calibration":
             from . import screen as _screen
             return self._json(200, {f"{d}/{b}": _screen.calibration_report(d, b) for d in DESIGNS for b in BACKENDS})
