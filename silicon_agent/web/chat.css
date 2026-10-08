@@ -25,7 +25,8 @@ button:disabled { opacity: .45; cursor: default; }
 .rail-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 8px; }
 .brand { font-weight: 600; font-size: 13px; } .brand .logo { color: var(--accent); margin-right: 4px; }
 .threads { list-style: none; margin: 0; padding: 0 8px; overflow: auto; flex: 1; min-height: 0; }
-.threads li { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.threads li { display: grid; grid-template-columns: 7px minmax(0, 1fr) 18px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.threads li .x { border: 0; padding: 0; width: 18px; height: 18px; line-height: 18px; color: var(--muted); font-size: 14px; opacity: 0; } .threads li:hover .x { opacity: 1; } .threads li .x:hover { color: var(--bad); background: transparent; }
 .threads li:hover, .threads li.sel { background: var(--surface-2); }
 .threads .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-3); }
 .threads .dot.running, .threads .dot.queued { background: var(--accent); animation: pulse 1.2s infinite; }
@@ -124,3 +125,8 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
   .shell.rail-shown .rail { display: flex; position: fixed; inset: 0 25% 0 0; z-index: 10; }
   .col { padding: 0 14px; } .hello { padding-top: 10vh; } .hello h1 { font-size: 22px; }
 }
+
+/* alternative requests the interpreter offered */
+.alts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+.alts button { border-radius: 10px; padding: 4px 10px; font-size: 12px; font-weight: 400; color: var(--text-2); border-color: var(--border-2); background: var(--surface); text-align: left; }
+.alts button:hover { color: var(--text); }

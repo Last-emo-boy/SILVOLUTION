@@ -61,9 +61,15 @@ margin, no rounding): "160 MHz or better" is fmax_mhz 160. Keep "assumptions" to
 choose), each one short. If the user is refining an existing run (context given), return "fork": true and only the fields
 that change in "constraints"/"locked"; keep the rest.
 
+If a different *device* or a meaningfully different *architecture setting* would also serve the request well (e.g. the
+same FIR on ECP5 instead of Spartan-7 for a 30 s iteration; a row-serial conv2d with a third of the multipliers; a
+smaller matmul array that still meets the rate), list up to 2 in "alternatives" as complete follow-up requests the
+user could send verbatim, each with a one-line trade-off. Leave it empty when nothing is worth offering.
+
 Respond with JSON:
 {"spec": {...}, "fork": false, "summary": "<one sentence: what you will build and the key assumptions>",
- "assumptions": ["..."], "questions": ["..."]}"""
+ "assumptions": ["..."], "questions": ["..."],
+ "alternatives": [{"request": "<a follow-up request in the user's language>", "why": "<trade-off in one line>"}]}"""
 
 NARRATE_SYSTEM = """You explain the outcome of an autonomous FPGA design run to the engineer who asked for it, in their language,
 like a capable colleague reporting back: what was tried and why it failed or worked, in 3-6 short sentences, numbers
@@ -125,8 +131,9 @@ def interpret(message: str, context: dict | None = None) -> dict:
     out_spec = {"task": spec.get("task") or message[:60], "design": design, "backend": backend, "locked": locked,
                 "constraints": cons, "initial_ir": {k: v for k, v in ir.to_dict().items() if k != "coefs"}}
     out_spec["task"] = (base["task"] if base and not spec.get("task") else out_spec["task"])
+    alts = [a for a in (r.get("alternatives") or []) if isinstance(a, dict) and a.get("request")][:2]
     return {"spec": out_spec, "fork": bool(r.get("fork")) and bool(base), "summary": r.get("summary", ""),
-            "assumptions": r.get("assumptions") or [], "questions": r.get("questions") or [], "errors": errs, "lang": _lang(message)}
+            "assumptions": r.get("assumptions") or [], "questions": r.get("questions") or [], "alternatives": alts, "errors": errs, "lang": _lang(message)}
 
 
 def narrate(summary: dict, events: list[dict], lang: str) -> str:

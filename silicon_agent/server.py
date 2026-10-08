@@ -18,7 +18,9 @@ API
   GET  /api/threads              conversations (newest first)
   GET  /api/threads/<id>         messages + the jobs they refer to
   POST /api/threads/<id>/chat    {"text": ...}  (id "new" opens a thread); interprets, then runs/forks/steers/answers
-  DELETE /api/threads/<id>
+  POST /api/threads/<id>/title    {"title": ...}  rename
+  DELETE /api/threads/<id>        (refused while its job runs)
+Conversations are per login subject unless SA_SHARED=1; the CLI token sees all.
   GET  /                         chat UI (static, no build step)
   GET  /work                     engineer's worktable (per-run transcript, inspector)
 
@@ -229,6 +231,14 @@ def _save_thread(tid: str) -> None:
     (THREADS / f"{tid}.json").write_text(json.dumps(_threads[tid], ensure_ascii=False, indent=1))
 
 
+SHARED = os.environ.get("SA_SHARED", "") == "1"  # 1: every login sees every conversation (single-team mode)
+
+
+def _visible(th: dict, sub: str) -> bool:
+    """Conversations belong to the subject that opened them; the token (CLI) identity sees everything."""
+    return SHARED or sub in ("cli", "anonymous") or th.get("subject", "") in ("", sub)
+
+
 def _thread_jobs(tid: str) -> list[str]:
     """Job ids bound to a thread, oldest first."""
     th = _threads.get(tid) or {"messages": []}
@@ -366,7 +376,8 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
     lines = [it["summary"]] + [("假设：" if lang == "zh" else "Assuming ") + a for a in it["assumptions"][:3]]
     if it["questions"]:
         lines.append(("先按上面的理解开始；如果不对告诉我：" if lang == "zh" else "Starting with that; tell me if this is wrong: ") + " ".join(it["questions"][:2]))
-    th["messages"].append({"role": "assistant", "kind": "run", "text": "\n".join(l for l in lines if l), "job": job_id, "lang": lang, "t": time.time(), "fork": bool(parent)})
+    th["messages"].append({"role": "assistant", "kind": "run", "text": "\n".join(l for l in lines if l), "job": job_id, "lang": lang, "t": time.time(), "fork": bool(parent),
+                           "alternatives": it.get("alternatives") or []})
     _save_thread(tid)
     return {"action": "fork" if parent else "run", "job": job_id}
 
@@ -466,7 +477,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/threads":
             with _lock:
                 rows = [{"id": t["id"], "title": t.get("title") or (t["messages"][0]["text"][:60] if t["messages"] else "untitled"),
-                         "created": t["created"], "job": (_thread_jobs(t["id"]) or [None])[-1]} for t in _threads.values()]
+                         "created": t["created"], "job": (_thread_jobs(t["id"]) or [None])[-1], "subject": t.get("subject", "")}
+                        for t in _threads.values() if _visible(t, sub)]
             for r in rows:
                 j = _jobs.get(r["job"]) if r["job"] else None
                 r["status"] = j["status"] if j else None
@@ -475,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, rows)
         if len(parts) == 2 and parts[0] == "threads":
             th = _threads.get(parts[1])
-            if not th:
+            if not th or not _visible(th, sub):
                 return self._json(404, {"error": "no such thread"})
             with _lock:
                 jobs_in = {jid: _jobs[jid] for jid in _thread_jobs(parts[1])}
@@ -622,6 +634,18 @@ class Handler(BaseHTTPRequestHandler):
                 with (RESULTS / parts[1] / "events.jsonl").open("a") as f:
                     f.write(json.dumps(rec) + "\n")
                 return self._json(200, {"ok": True, "queued_for_iteration": sum(1 for e in job["events"] if e["kind"] == "result") + 2})
+        if len(parts) == 3 and parts[0] == "threads" and parts[2] == "title":
+            th = _threads.get(parts[1])
+            if not th or not _visible(th, sub):
+                return self._json(404, {"error": "no such thread"})
+            try:
+                title = str(json.loads(self.rfile.read(n) or b"{}").get("title", "")).strip()[:120]
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            with _lock:
+                th["title"] = title
+                _save_thread(parts[1])
+            return self._json(200, {"ok": True, "title": title})
         if len(parts) == 3 and parts[0] == "threads" and parts[2] == "chat":
             try:
                 body = json.loads(self.rfile.read(n) or b"{}")
@@ -632,6 +656,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "empty"})
             tid = parts[1] if parts[1] != "new" else time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
             with _lock:
+                if tid in _threads and not _visible(_threads[tid], sub):
+                    return self._json(404, {"error": "no such thread"})
                 th = _threads.setdefault(tid, {"id": tid, "title": "", "messages": [], "created": time.time(), "subject": sub})
                 if th.get("busy"):
                     return self._json(409, {"error": "still thinking"})
@@ -757,9 +783,12 @@ class Handler(BaseHTTPRequestHandler):
             path = path[4:]
         parts = path.strip("/").split("/")
         if len(parts) == 2 and parts[0] == "threads":
-            th = _threads.pop(parts[1], None)
-            if not th:
+            th = _threads.get(parts[1])
+            if not th or not _visible(th, sub):
                 return self._json(404, {"error": "no such thread"})
+            if any(_jobs[j]["status"] in ("queued", "running") for j in _thread_jobs(parts[1])):
+                return self._json(409, {"error": "stop the running job first"})
+            _threads.pop(parts[1], None)
             (THREADS / f"{parts[1]}.json").unlink(missing_ok=True)
             with _lock:
                 for jid, j in _jobs.items():
