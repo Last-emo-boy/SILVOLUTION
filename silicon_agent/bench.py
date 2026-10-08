@@ -133,9 +133,29 @@ def _req(server: str, token: str, method: str, path: str, body=None, retries: in
             time.sleep(10)
 
 
+def run_agent_case(server: str, token: str, name: str, spec: dict, tag: str) -> tuple[str | None, dict]:
+    """End-to-end through the chat (the Agnes Harness agent): the case's task sentence is the request; the agent
+    must interpret it, start the run and report. Returns the job it started and the agent's reply."""
+    text = f"{spec['task']}. Run it and report what you measured."
+    r = _req(server, token, "POST", "/threads/new/chat", {"text": text})
+    tid = r["thread"]
+    t0 = time.time()
+    while time.time() - t0 < 5400:
+        th = _req(server, token, "GET", f"/threads/{tid}")
+        if not th.get("busy"):
+            break
+        time.sleep(10)
+    msgs = th.get("messages", [])
+    runs = [m["job"] for m in msgs if m.get("kind") == "run" and m.get("job")]
+    reply = next((m for m in reversed(msgs) if m.get("role") == "assistant" and m.get("kind") == "text"), {})
+    return (runs[-1] if runs else None), {"thread": tid, "reply": (reply.get("text") or "")[:600], "tools": [t.get("name") for t in reply.get("tools", [])],
+                                           "turn_seconds": round(time.time() - t0, 1)}
+
+
 def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str, reuse: str | None = None,
-             planner: str | None = None) -> dict:
-    """Submit through the job server (so it serializes with everything else and shows in the UI), wait, score."""
+             planner: str | None = None, agent: bool = False) -> dict:
+    """Submit through the job server (so it serializes with everything else and shows in the UI), wait, score.
+    With `agent`, the case goes through the chat instead: the harness agent interprets the task sentence itself."""
     spec = json.loads(json.dumps(spec))
     spec["task"] = f"[{tag}] {spec['task']}"
     if no_memory:
@@ -143,7 +163,15 @@ def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_i
     if planner:
         spec["planner"] = planner
     t0 = time.time()
-    jid = reuse or _req(server, token, "POST", "/jobs", {"spec": spec, "max_iter": max_iter})["id"]
+    agent_info = None
+    if agent and not reuse:
+        jid, agent_info = run_agent_case(server, token, name, spec, tag)
+        if not jid:
+            return {"name": name, "job": None, "design": spec["design"], "backend": spec["backend"], "status": "no-run", "feasible": False,
+                    "first_feasible": None, "rounds": 0, "planner_calls": 0, "eda_seconds": 0, "wall_seconds": round(time.time() - t0, 1),
+                    "best": None, "ok": False, "error": "the agent did not start a run", "agent": agent_info}
+    else:
+        jid = reuse or _req(server, token, "POST", "/jobs", {"spec": spec, "max_iter": max_iter})["id"]
     while True:
         j = _req(server, token, "GET", f"/jobs/{jid}")
         if j["status"] not in ("queued", "running"):
@@ -157,7 +185,7 @@ def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_i
     ok = bool(best) == expect.get("feasible", True) and (first is None or first <= expect.get("max_rounds", 99))
     if expect.get("feasible", True) and best is None:
         ok = False
-    return {"name": name, "job": jid, "design": spec["design"], "backend": spec["backend"], "status": j["status"], "feasible": bool(best),
+    return {"name": name, "job": jid, "design": spec["design"], "backend": spec["backend"], "status": j["status"], "feasible": bool(best), **({"agent": agent_info} if agent_info else {}),
             "first_feasible": first, "rounds": len(results), "planner_calls": plans, "eda_seconds": round(eda_s, 1), "wall_seconds": round(time.time() - t0, 1),
             "best": {"fmax_mhz": best["metrics"]["fmax_mhz"], "lut": best["metrics"]["lut"], "dsp": best["metrics"]["dsp"], "throughput": best["throughput"]} if best else None,
             "ok": ok, "expect": expect, "error": j.get("error")}
@@ -172,13 +200,13 @@ def cmd_run(a) -> int:
     existing = {j["task"]: j["id"] for j in _req(server, token, "GET", "/jobs")} if a.reuse else {}
     for name, spec, expect in cases:
         print(f"== {name} ({spec['design']}/{spec['backend']})", flush=True)
-        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"), a.planner)
+        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"), a.planner, a.agent)
         rows.append(r)
         b = r["best"]
         print(f"   {'OK ' if r['ok'] else 'REG'} feasible={r['feasible']} first@{r['first_feasible']} rounds={r['rounds']} "
               f"{(f'{b['fmax_mhz']:.1f} MHz {b['lut']} LUT {b['dsp']} DSP thr={b['throughput']}' if b else '-')} eda={r['eda_seconds']}s wall={r['wall_seconds']}s job={r['job']}"
               + (f"  ERROR {str(r['error'])[:160]}" if r["error"] else ""), flush=True)
-    rep = {"tag": a.tag, "t": time.time(), "max_iter": a.max_iter, "no_memory": a.no_memory, "planner": a.planner, "cases": rows,
+    rep = {"tag": a.tag, "t": time.time(), "max_iter": a.max_iter, "no_memory": a.no_memory, "planner": a.planner, "agent": a.agent, "cases": rows,
            "summary": {"n": len(rows), "ok": sum(r["ok"] for r in rows), "feasible": sum(r["feasible"] for r in rows),
                        "mean_first_feasible": round(sum(r["first_feasible"] or a.max_iter + 1 for r in rows) / max(len(rows), 1), 2),
                        "eda_seconds": round(sum(r["eda_seconds"] for r in rows), 1)}}
@@ -262,6 +290,7 @@ def main(argv: list[str]) -> int:
     r.add_argument("--server"); r.add_argument("--token"); r.add_argument("--out", help="report directory (default SA_ROOT/bench)")
     r.add_argument("--reuse", action="store_true", help="attach to jobs with the same [tag] task already on the server instead of resubmitting")
     r.add_argument("--planner", help="planner model for every case (A/B: run the suite once per model with distinct --tag)")
+    r.add_argument("--agent", action="store_true", help="drive each case through the chat (Agnes Harness agent) instead of submitting the spec directly")
     s = sub.add_parser("show"); s.add_argument("--last", type=int, default=5); s.add_argument("--dir")
     sub.add_parser("cases")
     a = ap.parse_args(argv)
