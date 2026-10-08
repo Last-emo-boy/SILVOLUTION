@@ -69,6 +69,11 @@ mux (U/F : 1) and a coefficient ROM in front of each multiplier, which costs LUT
 FIR_IR_JSON = '{"symmetric":..,"fold":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..}'
 
 FIR_FACTS = {
+    "gatemate": """GateMate facts, measured on a 16-tap 12x12 FIR: the multiplier is a cascade of ~20 CPE_MULT cells (CC_MULT) at
+0.2-0.6 ns each, about 9 ns for 12x12 plus routing; nothing in the IR pipelines inside that cascade (dsp_regs stages are
+fabric registers around it), so the unpipelined multiply caps Fmax near 55-60 MHz for 12-bit operands (56.6 MHz with
+symmetric fold=1, reg_in, dsp_regs in_out; the seed spread is tight). Narrower operands shorten the cascade; a register
+knob cannot. Each P&R takes ~1 min per seed.""",
     "ecp5": """ECP5 facts, measured on a 32-tap 16x16 lowpass, acc 40: with dsp_regs=none the multipliers are behavioral
 constants, so yosys constant-folds zero taps and shares equal coefficients itself -- the symmetric flag then changes
 nothing (12 DSP either way on that filter, ~230 MHz, critical path = accumulator carry chain). With dsp_regs != none

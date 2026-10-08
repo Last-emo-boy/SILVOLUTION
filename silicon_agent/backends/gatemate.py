@@ -1,4 +1,4 @@
-"""Cologne Chip GateMate CCGM1A1: yosys synth_gatemate (-luttree) + nextpnr-himbaechel. ~20-90 s per design.
+"""Cologne Chip GateMate CCGM1A1: yosys synth_gatemate (-luttree) + nextpnr-himbaechel. ~2-4 min per design (3 seeds).
 
 The GateMate CPE is a 2x LUT-tree + adder cell; the multiplier (CC_MULT) is implemented from CPE_MULT cells, so the
 "DSP" count below is the number of CC_MULT instances synthesis created, not a hard block count."""
@@ -72,6 +72,6 @@ DEV = register(Backend(
     key="gatemate", name="Cologne Chip GateMate CCGM1A1", vendor="colognechip",
     lut=20480, dsp=256, bram=32, lut_kind="CPE (LUT-tree)", dsp_kind="CC_MULT", dsp_width=20,
     synth_pnr=synth_pnr, netlist_sims=netlist_sims, sim_stages=("behavioral", "post_synth_func"),
-    seconds_per_iter="20-90 s", fmax_range="30-150 MHz", toolchain="yosys + nextpnr-himbaechel/gatemate (open source)",
+    seconds_per_iter="2-4 min", fmax_range="30-100 MHz", toolchain="yosys + nextpnr-himbaechel/gatemate (open source)",
     parallel=3, emit_style="behavioral", aliases=("gatemate", "cologne", "ccgm1a1", "colognechip"),
 ))
