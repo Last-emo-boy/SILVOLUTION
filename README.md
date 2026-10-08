@@ -1,9 +1,9 @@
 # silicon-agent
 
-Autonomous hardware design loop: a spec with PPA constraints goes in, and an
+Autonomous hardware design loop: say what you want in plain language, and an
 LLM planner iterates architecture → RTL → simulation → synthesis → place-and-route
-until the constraints are met. Real EDA tools are the ground truth; nothing is
-estimated.
+until it meets the requirements, then hands you the Verilog. Real EDA tools are
+the ground truth; nothing is estimated.
 
 ```
 laptop                              EDA host (netcup)
@@ -104,10 +104,38 @@ an unbreakable wall and that no IR field could move it. Measuring the four
 combinations of `dsp_regs × acc_in_dsp` on the real design (190 / 151 / 277 / 299 MHz)
 turned that into a new knob plus one line of device facts in the prompt.
 
-## Web console
+## Chat
 
 `https://silicon.w33d.xyz` — behind sluice SSO (route `silicon-agent-root`,
-permission `studio.console.enter`). A worktable, not a dashboard: a rail of runs,
+permission `studio.console.enter`). One conversation per design task, like a chat
+with an engineer:
+
+```
+you   一个 32 阶低通 FIR，Spartan-7，采样率 250 MHz，尽量少用 DSP
+agent 在 Spartan-7 上做 32 阶 16 位 FIR，250 MHz，先按对称折叠把乘法器压到 16 个 DSP…
+      ▸ 理解的规格 · fir · xc7s50 · ≥250 MHz · ≤16 DSP
+      ▸ 运行中 · 第 3 轮 / 8 · 实现后时序仿真          (live, updates in place)
+      …
+      7 轮后找到可行设计：非对称、fold=8、259 MHz、8 个 DSP…（prose report）
+      ▸ 轨迹 · 7 轮 · 1 轮可行
+      ▸ 结果 · fir_top.sv · 259.1 MHz · 8 DSP · 实现后时序仿真通过
+        [查看 Verilog] [下载 fir_top.sv] [打开 worktable] [在此基础上继续]
+you   DSP 可以放宽到 16，吞吐要满速
+agent (forks from the best design with the new constraints and continues)
+```
+
+`nl.py` turns the message into a spec (design, device, locked task parameters,
+constraints, objective order, a naive starting design) and states its
+assumptions; follow-ups in the same thread either refine (fork with edited
+constraints, seeded from the previous best or closest design), steer a running
+job, or are answered as questions. When a run ends, the agent narrates what was
+tried and what won. Cards are collapsed by default; simulation stages, IR
+changes, critical paths and logs appear only when expanded. The UI follows the
+language of the conversation. `sa ask "…" [--thread id]` is the same from a shell.
+
+## Worktable
+
+`/work` is the engineer's view (also linked from each result card): a rail of runs,
 one transcript with a turn per iteration (what the planner did, the IR, one
 verdict line, the simulation ladder; hypothesis / recalled memory / candidates
 with estimates / critical path / lesson behind a per-turn disclosure), and a
@@ -139,7 +167,9 @@ CLI keeps using its bearer token over the SSH tunnel.
 ssh -f -N -L 8765:127.0.0.1:8765 netcup               # tunnel to the job server
 export SA_TOKEN=$(security find-generic-password -s silicon-agent-token -w)
 ./sa health
-./sa submit specs/matmul_int8_xc7s50.json --max-iter 8   # streams progress until done
+./sa ask "INT8 matmul on ECP5, 180 MHz or better, at most 48 DSPs"   # natural language, streams until done
+./sa ask "try 300 MHz on Spartan-7 instead" --thread <thread-id>      # refine / ask in the same thread
+./sa submit specs/matmul_int8_xc7s50.json --max-iter 8   # explicit spec, streams progress until done
 ./sa list
 ./sa get <job-id> summary.json                           # or iter_03.json, llm_02.json
 ```
@@ -251,8 +281,9 @@ silicon_agent/designs.py   design registry
 silicon_agent/prompts.py   per-design planner knowledge with measured device facts
 silicon_agent/eda.py       simulate / synth / P&R / report parsing / cache, per backend
 silicon_agent/loop.py      generic optimization loop
-silicon_agent/server.py    HTTP job server + static web UI, token or gateway-HMAC auth
-silicon_agent/web/         console (index.html, app.js, app.css — no build step)
+silicon_agent/nl.py        natural language → spec; narration; Q&A about a run
+silicon_agent/server.py    HTTP job server + threads + static web UI, token or gateway-HMAC auth
+silicon_agent/web/         chat (index.html, chat.js, chat.css) and worktable (work.html, app.js, form.js, app.css) — no build step
 silicon_agent/llm.py       DeepSeek client
 silicon_agent/tb/          cocotb testbenches, golden models, MULT18X18D sim model
 specs/                     task specs

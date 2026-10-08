@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """silicon-agent remote client. Submits a spec to the job server and streams progress.
 
+    sa ask "a 32-tap lowpass FIR on Spartan-7 at 250 MS/s, few DSPs"   natural language -> run, streamed
+    sa ask "make it faster" --thread <thread-id>                         refine / ask about an earlier run
     sa submit specs/matmul_int8.json [--max-iter 8] [--backend ecp5|xc7s50]
     sa watch <job-id>
     sa list
@@ -56,14 +58,14 @@ def fmt_event(ev: dict) -> str:
             e = c.get("estimate")
             tag = f"REJECTED {c['rejected']}" if c.get("rejected") else (f"est ~{e['fmax_mhz']:.0f} MHz ~{e['lut']} LUT ~{e['dsp']} DSP" + (" " + ",".join(c["est_violations"]) if c.get("est_violations") else " ok") if e else "")
             s += f"\n{' ' * 15} #{c.get('rank', 'x')} {json.dumps(c['ir'])}  {tag}"
-        return s + ("\n" + " " * 15 + "planner says stop." if ev["stop"] else "")
+        return s + ("\n" + " " * 15 + "planner says stop." if ev.get("stop") else "")
     if k == "memory":
         return f"{t}      memory: recalled {len(ev['lessons'])} lesson(s) " + ", ".join(f"{l['id']}({l['score']:+.1f})" for l in ev["lessons"])
     if k == "lesson":
         L = ev["lesson"]
         return f"{t}      lesson [{L['id']}] {L['outcome']}: {L['text']}"
     if k == "stage":
-        return f"{t}      sim {ev['stage']}: {'pass' if ev['passed'] else 'FAIL' if ev['passed'] is False else 'skipped'} @ {ev['period_ns']} ns"
+        return f"{t}      sim {ev['stage']}: {'pass' if ev['passed'] else 'FAIL' if ev['passed'] is False else 'skipped'} @ {ev.get('period_ns', '?')} ns"
     if k == "user":
         return f"{t}      you: {ev['message']}"
     if k == "steer":
@@ -97,9 +99,36 @@ def watch(job_id: str) -> int:
         time.sleep(3)
 
 
+def ask(text: str, thread: str | None) -> int:
+    before = len(req("GET", f"/threads/{thread}")["messages"]) if thread else 0
+    r = req("POST", f"/threads/{thread or 'new'}/chat", {"text": text})
+    tid = r["thread"]
+    print(f"thread {tid}", flush=True)
+    shown, job_seen, job = before + 1, 0, None  # skip history and our own message
+    while True:
+        th = req("GET", f"/threads/{tid}")
+        for m in th["messages"][shown:]:
+            if m["role"] == "assistant":
+                print(f"\n{m['text']}\n", flush=True)
+                if m.get("kind") == "run":
+                    job, job_seen = m["job"], 0
+        shown = len(th["messages"])
+        if job:
+            j = req("GET", f"/jobs/{job}?after={job_seen}")
+            for ev in j["events"]:
+                print(fmt_event(ev), flush=True)
+            job_seen = j["n_events"]
+            if j["status"] not in ("queued", "running") and any(m.get("kind") == "report" and m.get("job") == job for m in th["messages"]):
+                return 0 if j["status"] == "done" else 1
+        elif not th.get("busy"):
+            return 0
+        time.sleep(3)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="sa")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    k = sub.add_parser("ask"); k.add_argument("text"); k.add_argument("--thread")
     s = sub.add_parser("submit"); s.add_argument("spec"); s.add_argument("--max-iter", type=int, default=8)
     s.add_argument("--backend", choices=["ecp5", "xc7s50"]); s.add_argument("--no-watch", action="store_true")
     sub.add_parser("list")
@@ -111,6 +140,8 @@ def main() -> int:
     if a.cmd == "health":
         print(json.dumps(req("GET", "/health")))
         return 0
+    if a.cmd == "ask":
+        return ask(a.text, a.thread)
     if a.cmd == "list":
         for j in req("GET", "/jobs"):
             print(f"{j['id']}  {j['status']:8s}  {j.get('design', 'matmul'):6s} {j['backend']:7s}  {j['task']}")

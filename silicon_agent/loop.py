@@ -162,6 +162,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
     # task data that is part of the design identity but never a planner knob (FIR coefficients)
     if "coefs" in ir.to_dict():
         locked["coefs"] = ir.to_dict()["coefs"]
+        locked.setdefault("cutoff", ir.to_dict().get("cutoff"))
     out = out_dir or (ROOT / "results" / time.strftime("%Y%m%d-%H%M%S"))
     run_id = out.name
     out.mkdir(parents=True, exist_ok=True)

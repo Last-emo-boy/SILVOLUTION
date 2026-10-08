@@ -57,6 +57,7 @@ class FirArch:
     taps: int = 32
     data_width: int = 16
     coef_width: int = 16
+    cutoff: float = 0.2  # normalized lowpass cutoff (fraction of fs) used to generate the coefficients
     acc_width: int = 40
     symmetric: bool = False
     fold: int = 1
@@ -90,6 +91,8 @@ class FirArch:
             errs.append("data_width must be one of 8, 12, 16, 18")
         if self.coef_width not in (8, 12, 16, 18):
             errs.append("coef_width must be one of 8, 12, 16, 18")
+        if not 0.01 <= self.cutoff <= 0.49:
+            errs.append("cutoff must be in 0.01..0.49 (fraction of the sample rate)")
         if not self.min_acc_width <= self.acc_width <= 64:
             errs.append(f"acc_width must be in {self.min_acc_width}..64 for these widths/taps")
         if not 1 <= self.fold <= 32:
@@ -119,12 +122,14 @@ class FirArch:
         known = {k: d[k] for k in cls.__dataclass_fields__ if k in d and k != "coefs"}
         taps = int(known.get("taps", 32))
         cw = int(known.get("coef_width", 16))
+        known["cutoff"] = float(known.get("cutoff", 0.2))
         coefs = d.get("coefs")
-        known["coefs"] = tuple(int(c) for c in coefs) if coefs else tuple(lowpass_taps(taps, width=cw))
+        known["coefs"] = tuple(int(c) for c in coefs) if coefs else tuple(lowpass_taps(taps, cutoff=known["cutoff"], width=cw))
         return cls(**known)
 
     def digest(self, backend: str = "ecp5") -> str:
         d = self.to_dict()
+        d.pop("cutoff", None)  # the coefficients already carry it; keeps older cache entries valid
         if backend != "xc7s50":
             d.pop("acc_in_dsp", None)
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]

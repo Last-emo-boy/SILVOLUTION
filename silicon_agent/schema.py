@@ -35,11 +35,12 @@ SCHEMAS = {
     },
     "fir": {
         "title": "fixed-coefficient FIR filter",
-        "locked_candidates": ["taps", "data_width", "coef_width"],
+        "locked_candidates": ["taps", "data_width", "coef_width", "cutoff"],
         "fields": [
             {"name": "taps", "type": "int", "min": 2, "max": 256, "hint": "filter length (task parameter)"},
             {"name": "data_width", "type": "choice", "choices": [8, 12, 16, 18], "hint": "sample bits"},
             {"name": "coef_width", "type": "choice", "choices": [8, 12, 16, 18], "hint": "coefficient bits"},
+            {"name": "cutoff", "type": "float", "min": 0.01, "max": 0.49, "hint": "lowpass cutoff as a fraction of the sample rate (coefficients are generated from it)"},
             {"name": "acc_width", "type": "int", "min": 16, "max": 64, "hint": "accumulator bits; min = dw+cw+log2(taps)(+1 if symmetric)"},
             {"name": "symmetric", "type": "bool", "hint": "share one multiplier per h[k]==h[N-1-k] pair"},
             {"name": "fold", "type": "int", "min": 1, "max": 32, "hint": "taps per multiplier; 1 = transposed, >1 = time-multiplexed (must divide unique taps)"},
@@ -50,7 +51,7 @@ SCHEMAS = {
             "folded x4 symmetric": {"taps": 32, "data_width": 16, "coef_width": 16, "acc_width": 38, "symmetric": True, "fold": 4, "pipe_mul": 0, "reg_in": True, "dsp_regs": "in_pipe_out", "acc_in_dsp": True},
         },
         "constraints_default": {"fmax_mhz": 150, "max_dsp": 8, "max_lut": 3000},
-        "locked_default": {"taps": 32, "data_width": 16, "coef_width": 16},
+        "locked_default": {"taps": 32, "data_width": 16, "coef_width": 16, "cutoff": 0.2},
     },
 }
 

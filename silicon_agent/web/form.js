@@ -104,10 +104,10 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
       let input;
       if (f.type === "bool") input = `<select ${locked ? "disabled" : ""}><option value="true" ${v === true ? "selected" : ""}>true</option><option value="false" ${v === false ? "selected" : ""}>false</option></select>`;
       else if (f.type === "choice") input = `<select ${locked ? "disabled" : ""}>${f.choices.map((c) => `<option value="${c}" ${String(c) === String(v) ? "selected" : ""}>${c}</option>`).join("")}</select>`;
-      else input = `<input type="number" min="${f.min}" max="${f.max}" value="${v ?? ""}" ${locked ? "disabled" : ""}>`;
+      else input = `<input type="number" min="${f.min}" max="${f.max}" ${f.type === "float" ? 'step="0.01"' : ""} value="${v ?? ""}" ${locked ? "disabled" : ""}>`;
       const row = el(`<div class="kr ${locked ? "locked" : ""}"><div class="kl"><span class="kk">${locked ? "🔒 " : ""}${esc(f.name)}</span><span class="kh" title="${esc(f.hint)}">${esc(f.hint)}</span></div>${input}</div>`);
       const ctl = row.querySelector("input, select");
-      ctl.onchange = () => { let val = ctl.value; if (f.type === "bool") val = val === "true"; else if (f.type === "int" || typeof f.choices?.[0] === "number") val = Number(val); form.initial_ir[f.name] = val; renderPresets(); estimate(); };
+      ctl.onchange = () => { let val = ctl.value; if (f.type === "bool") val = val === "true"; else if (f.type === "int" || f.type === "float" || typeof f.choices?.[0] === "number") val = Number(val); form.initial_ir[f.name] = val; renderPresets(); estimate(); };
       box.appendChild(row);
     }
   }

@@ -12,7 +12,12 @@ API
   POST /api/jobs/<id>/stop
   GET  /api/memory               lessons per (design, backend), scored
   POST /api/memory/<d>/<b>/vote  {"id": ..., "vote": "up"|"down"}
-  GET  /                         web UI (static, no build step)
+  GET  /api/threads              conversations (newest first)
+  GET  /api/threads/<id>         messages + the jobs they refer to
+  POST /api/threads/<id>/chat    {"text": ...}  (id "new" opens a thread); interprets, then runs/forks/steers/answers
+  DELETE /api/threads/<id>
+  GET  /                         chat UI (static, no build step)
+  GET  /work                     engineer's worktable (per-run transcript, inspector)
 
 Legacy paths without /api/ keep working for the `sa` CLI.
 
@@ -42,12 +47,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
-from . import memory
+from . import memory, nl
 from .designs import DESIGNS
 from .eda import ROOT, BACKENDS
 from .loop import run_loop
 
 RESULTS = ROOT / "results"
+THREADS = ROOT / "threads"
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 STATIC = Path(__file__).resolve().parent / "web"
 TOKEN = os.environ.get("SA_TOKEN", "")
@@ -175,6 +181,8 @@ def _worker():
         finally:
             with _lock:
                 job["finished"] = time.time()
+            if job["status"] not in ("queued", "running"):
+                _narrate_job_async(job_id)
 
 
 
@@ -186,6 +194,157 @@ def _gateway_sig_ok(subject: str, groups: str, sig: str) -> bool:
         if hmac.compare_digest(want, sig.lower()):
             return True
     return False
+
+
+# ---------------------------------------------------------------- conversation threads
+# A thread is the user-facing unit: a list of messages, some of which are bound to jobs.
+# Messages: {"role": "user"|"assistant", "text", "t", "job": <id>|None, "kind": "text"|"run"|"spec"}
+_threads: dict[str, dict] = {}
+
+
+def _load_threads() -> None:
+    THREADS.mkdir(parents=True, exist_ok=True)
+    for f in sorted(THREADS.glob("*.json")):
+        _threads[f.stem] = json.loads(f.read_text())
+        _threads[f.stem]["busy"] = False
+        for m in _threads[f.stem]["messages"]:
+            m.pop("narrating", None)
+    for tid in _threads:
+        threading.Thread(target=_narrate_if_done, args=(tid,), daemon=True).start()
+
+
+def _save_thread(tid: str) -> None:
+    THREADS.mkdir(parents=True, exist_ok=True)
+    (THREADS / f"{tid}.json").write_text(json.dumps(_threads[tid], ensure_ascii=False, indent=1))
+
+
+def _thread_context(th: dict) -> dict | None:
+    """The run the conversation is currently about, flattened for the LLM."""
+    jid = next((m["job"] for m in reversed(th["messages"]) if m.get("job")), None)
+    if not jid or jid not in _jobs:
+        return None
+    job = _jobs[jid]
+    results = [e for e in job["events"] if e["kind"] == "result"]
+    last = results[-1] if results else None
+    return {"job": jid, "spec": job["spec"], "status": job["status"], "best": (job.get("summary") or {}).get("best"),
+            "last": {k: last[k] for k in ("iteration", "ir", "violations", "throughput")} | {"metrics": {k: last["metrics"][k] for k in ("fmax_mhz", "lut", "dsp")}} if last else None,
+            "iterations": len(results), "max_iter": job.get("max_iter")}
+
+
+def _narrate_if_done(tid: str) -> None:
+    """Append the assistant's prose report once the thread's current job has finished (idempotent, blocking LLM call)."""
+    th = _threads.get(tid)
+    if not th:
+        return
+    for m in th["messages"]:
+        if m.get("kind") != "run" or m.get("narrated"):
+            continue
+        job = _jobs.get(m["job"])
+        if not job or job["status"] in ("queued", "running"):
+            continue
+        with _lock:
+            if m.get("narrating"):
+                continue
+            m["narrating"] = True
+        if job["status"] in ("done", "failed"):
+            text = nl.narrate({**(job.get("summary") or {}), "spec": job["spec"]}, job["events"], m.get("lang", "en"))
+        elif job["status"] == "interrupted":
+            text = "已停止。" if m.get("lang") == "zh" else "Stopped."
+        else:
+            text = f"Run ended with an error: {job.get('error', '')[:300]}"
+        with _lock:
+            th["messages"].append({"role": "assistant", "kind": "report", "text": text, "job": m["job"], "t": time.time()})
+            m["narrated"] = True
+            m.pop("narrating", None)
+            _save_thread(tid)
+
+
+def _narrate_job_async(job_id: str) -> None:
+    for tid, th in list(_threads.items()):
+        if any(m.get("job") == job_id and m.get("kind") == "run" for m in th["messages"]):
+            threading.Thread(target=_narrate_if_done, args=(tid,), daemon=True).start()
+
+
+def _submit(spec: dict, max_iter: int, sub: str, parent: dict | None = None) -> str:
+    job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+    with _lock:
+        _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [], "created": time.time(), "subject": sub, "parent": parent}
+        (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
+        (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
+        _save_state(job_id)
+    _queue.put(job_id)
+    return job_id
+
+
+def _handle_chat(tid: str, text: str, sub: str) -> dict:
+    """One user turn. Decides: new run, fork of the current run, steer the running job, or just answer."""
+    th = _threads[tid]
+    ctx = _thread_context(th)
+    lang = nl._lang(text)
+    # a running job: requests steer it instead of starting another run; questions are just answered
+    if ctx and ctx["status"] in ("queued", "running"):
+        ans = nl.reply(text, ctx)
+        if not ans["is_request"]:
+            th["messages"].append({"role": "assistant", "kind": "text", "text": ans["text"], "job": ctx["job"], "t": time.time()})
+            _save_thread(tid)
+            return {"action": "answer", "job": ctx["job"]}
+        job = _jobs[ctx["job"]]
+        with _lock:
+            job.setdefault("steer", []).append(text)
+            rec = {"t": round(time.time() - job.get("started", time.time()), 1), "kind": "user", "message": text, "subject": sub}
+            job["events"].append(rec)
+        with (RESULTS / ctx["job"] / "events.jsonl").open("a") as f:
+            f.write(json.dumps(rec) + "\n")
+        th["messages"].append({"role": "assistant", "kind": "text", "job": ctx["job"], "t": time.time(),
+                               "text": "收到，会在下一轮规划前生效。" if lang == "zh" else "Got it — the planner will take that into account before its next proposal."})
+        _save_thread(tid)
+        return {"action": "steer", "job": ctx["job"]}
+    # otherwise: is it a question about the run, or a (new/refined) request?
+    if ctx:
+        ans = nl.reply(text, ctx)
+        if not ans["is_request"]:
+            th["messages"].append({"role": "assistant", "kind": "text", "text": ans["text"], "job": ctx["job"], "t": time.time()})
+            _save_thread(tid)
+            return {"action": "answer", "job": ctx["job"]}
+    it = nl.interpret(text, ctx)
+    spec = it["spec"]
+    if it["errors"]:
+        th["messages"].append({"role": "assistant", "kind": "text", "text": ("我没法把这个变成合法的设计：" if lang == "zh" else "I could not turn that into a valid design: ") + "; ".join(it["errors"]), "t": time.time()})
+        _save_thread(tid)
+        return {"action": "error"}
+    parent = None
+    if it["fork"] and ctx:
+        # continue from where the previous run got to: its best design, else its closest miss
+        src = _jobs[ctx["job"]]
+        results = [e for e in src["events"] if e["kind"] == "result"]
+        start = (src.get("summary") or {}).get("best") or (min(results, key=lambda e: (len(e["violations"]), -e["iteration"])) if results else None)
+        if start:
+            seed = {k: v for k, v in start["ir"].items() if k != "coefs" and k not in spec["locked"]}
+            cand = {**spec["initial_ir"], **seed}
+            if not DESIGNS[spec["design"]].ir_cls.from_dict(cand).validate():
+                spec["initial_ir"] = cand
+            parent = {"id": ctx["job"], "iteration": start.get("iteration")}
+    max_iter = 8
+    job_id = _submit(spec, max_iter, sub, parent)
+    if not th["title"]:
+        th["title"] = spec["task"]
+    lines = [it["summary"]] + [("假设：" if lang == "zh" else "Assuming ") + a for a in it["assumptions"][:3]]
+    if it["questions"]:
+        lines.append(("先按上面的理解开始；如果不对告诉我：" if lang == "zh" else "Starting with that; tell me if this is wrong: ") + " ".join(it["questions"][:2]))
+    th["messages"].append({"role": "assistant", "kind": "run", "text": "\n".join(l for l in lines if l), "job": job_id, "lang": lang, "t": time.time(), "fork": bool(parent)})
+    _save_thread(tid)
+    return {"action": "fork" if parent else "run", "job": job_id}
+
+
+def _chat_turn(tid: str, text: str, sub: str) -> None:
+    try:
+        _handle_chat(tid, text, sub)
+    except Exception as e:
+        _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
+    finally:
+        with _lock:
+            _threads[tid]["busy"] = False
+            _save_thread(tid)
 
 
 # ---------------------------------------------------------------- http
@@ -248,6 +407,8 @@ class Handler(BaseHTTPRequestHandler):
         # static UI (public: sluice gates it before it reaches us)
         if path == "/" or path == "/index.html":
             return self._file(STATIC / "index.html")
+        if path == "/work":
+            return self._file(STATIC / "work.html")
         if path.startswith("/static/"):
             target = (STATIC / path[len("/static/"):]).resolve()
             if STATIC.resolve() in target.parents and target.is_file():
@@ -257,6 +418,7 @@ class Handler(BaseHTTPRequestHandler):
         sub = self._subject()
         if sub is None:
             return self._json(401, {"error": "unauthorized"})
+        parts = path.strip("/").split("/")
         if path == "/me":
             return self._json(200, {"subject": sub})
         if path == "/specs":
@@ -266,6 +428,23 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"name": f.stem, "task": s.get("task", ""), "design": s.get("design", "matmul"),
                             "backend": s.get("backend", "ecp5"), "spec": s})
             return self._json(200, out)
+        if path == "/threads":
+            with _lock:
+                rows = [{"id": t["id"], "title": t.get("title") or (t["messages"][0]["text"][:60] if t["messages"] else "untitled"),
+                         "created": t["created"], "job": next((m["job"] for m in reversed(t["messages"]) if m.get("job")), None)} for t in _threads.values()]
+            for r in rows:
+                j = _jobs.get(r["job"]) if r["job"] else None
+                r["status"] = j["status"] if j else None
+                r["best"] = (j.get("summary") or {}).get("best") if j else None
+            rows.sort(key=lambda r: r["created"], reverse=True)
+            return self._json(200, rows)
+        if len(parts) == 2 and parts[0] == "threads":
+            th = _threads.get(parts[1])
+            if not th:
+                return self._json(404, {"error": "no such thread"})
+            jobs_in = {m["job"]: _jobs[m["job"]] for m in th["messages"] if m.get("job") and m["job"] in _jobs}
+            return self._json(200, {**th, "jobs": {jid: {"status": j["status"], "spec": j["spec"], "summary": j.get("summary"), "error": j.get("error"),
+                                                        "n_events": len(j["events"]), "max_iter": j.get("max_iter"), "parent": j.get("parent")} for jid, j in jobs_in.items()}})
         if path == "/schema":
             from .schema import SCHEMAS, OBJECTIVES
             return self._json(200, {"designs": SCHEMAS, "objectives": OBJECTIVES, "backends": {k: v["name"] for k, v in BACKENDS.items()}})
@@ -291,7 +470,6 @@ class Handler(BaseHTTPRequestHandler):
                         for j, v in _jobs.items()]
             rows.sort(key=lambda r: r["created"], reverse=True)
             return self._json(200, rows)
-        parts = path.strip("/").split("/")
         if len(parts) >= 2 and parts[0] == "jobs":
             job_id = parts[1]
             with _lock:
@@ -365,6 +543,24 @@ class Handler(BaseHTTPRequestHandler):
                 with (RESULTS / parts[1] / "events.jsonl").open("a") as f:
                     f.write(json.dumps(rec) + "\n")
                 return self._json(200, {"ok": True, "queued_for_iteration": sum(1 for e in job["events"] if e["kind"] == "result") + 2})
+        if len(parts) == 3 and parts[0] == "threads" and parts[2] == "chat":
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+                text = str(body.get("text", "")).strip()[:4000]
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            if not text:
+                return self._json(400, {"error": "empty"})
+            tid = parts[1] if parts[1] != "new" else time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+            with _lock:
+                th = _threads.setdefault(tid, {"id": tid, "title": "", "messages": [], "created": time.time(), "subject": sub})
+                if th.get("busy"):
+                    return self._json(409, {"error": "still thinking"})
+                th["busy"] = True
+                th["messages"].append({"role": "user", "kind": "text", "text": text, "t": time.time()})
+                _save_thread(tid)
+            threading.Thread(target=_chat_turn, args=(tid, text, sub), daemon=True).start()
+            return self._json(200, {"thread": tid})
         if path == "/estimate":
             # cheap screening estimate + validation for the form, no EDA
             try:
@@ -467,6 +663,12 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             path = path[4:]
         parts = path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] == "threads":
+            th = _threads.pop(parts[1], None)
+            if not th:
+                return self._json(404, {"error": "no such thread"})
+            (THREADS / f"{parts[1]}.json").unlink(missing_ok=True)
+            return self._json(200, {"ok": True})
         if len(parts) == 2 and parts[0] == "jobs":
             with _lock:
                 job = _jobs.get(parts[1])
@@ -488,6 +690,7 @@ def main():
     port = int(os.environ.get("SA_PORT", "8765"))
     RESULTS.mkdir(parents=True, exist_ok=True)
     _load_from_disk()
+    _load_threads()
     threading.Thread(target=_worker, daemon=True).start()
     srv = ThreadingHTTPServer((host, port), Handler)
     print(f"silicon-agent server on http://{host}:{port}  root={ROOT}  backends={list(BACKENDS)} designs={list(DESIGNS)}  "
