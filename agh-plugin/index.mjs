@@ -59,8 +59,18 @@ export const siliconAgent = {
       const t = await token()
       return { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) }
     }
+    // A job-server redeploy leaves the worker's keep-alive sockets pointing at a container that is gone; the first
+    // request after that fails at the transport ("fetch failed"). Reads and the side-effect-free POSTs are retried
+    // once on a fresh connection; POST /jobs is not (a retry could start the run twice).
+    const idempotent = (method, path) => method === 'GET' || path === '/interpret' || path === '/estimate'
     const api = async (method, path, body, signal) => {
-      const r = await fetch(`${server}/api${path}`, { method, headers: await headers(), body: body === undefined ? undefined : JSON.stringify(body), signal })
+      const req = async () => fetch(`${server}/api${path}`, { method, headers: await headers(), body: body === undefined ? undefined : JSON.stringify(body), signal })
+      let r
+      try { r = await req() } catch (e) {
+        if (!idempotent(method, path) || signal?.aborted) throw e
+        await new Promise((ok) => setTimeout(ok, 500))
+        r = await req()
+      }
       const t = await r.text()
       let parsed
       try { parsed = JSON.parse(t) } catch { parsed = { raw: t.slice(0, 4000) } }

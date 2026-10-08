@@ -535,11 +535,11 @@ def _run_watcher(tid: str, lang: str):
                 with _lock:
                     th["live_note"] = note["text"].strip()
         elif kind == "tool_call":
+            # the narration stays on screen while the calls it announced run; the next narration replaces it
             note["text"] = ""
             trail.append({"id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind"), "status": upd.get("status", "pending"), "args": _tool_brief(upd.get("title") or "", upd.get("rawInput"))})
             with _lock:
                 th["live"] = trail[-40:]
-                th.pop("live_note", None)
         elif kind == "tool_call_update":
             for t in trail:
                 if t["id"] == upd.get("toolCallId"):
@@ -617,7 +617,7 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     lang = nl._lang(first)
     # the method itself is injected by the plugin's context hook (sessions keyed sa-thread-*); the bracketed line
     # only carries the thread id the tools need
-    prompt = f"[silicon-agent chat · thread {tid}]\n{text}"
+    prompt = f"[silicon-agent chat · thread {tid} · answer in {'Chinese' if lang == 'zh' else 'English'}]\n{text}"
     r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
     # the harness's ledger for this turn (tokens, estimated cost, wall time): shown under the reply
     r["usage"] = c.usage(sid)
