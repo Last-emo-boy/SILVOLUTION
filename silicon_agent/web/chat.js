@@ -169,8 +169,14 @@ function render() {
   });
   for (let i = thread.messages.length; i < existing.length; i++) existing[i].remove();
   let th = ol.querySelector("li.thinking-row");
-  if (thread.busy && !th) ol.appendChild(el(`<li class="msg assistant thinking-row"><span class="thinking"><i></i>${T.thinking}</span></li>`));
+  if (thread.busy && !th) { th = el(`<li class="msg assistant thinking-row"><span class="thinking"><i></i>${T.thinking}</span><div class="agent-tools live"></div></li>`); ol.appendChild(th); }
   if (!thread.busy && th) th.remove();
+  if (thread.busy && th) {
+    // the agent's live tool trail (Agnes Harness tool records as they happen)
+    const live = thread.live || [], box = th.querySelector(".agent-tools");
+    const sig = JSON.stringify(live.map((t) => [t.name, t.status]));
+    if (box.dataset.sig !== sig) { box.dataset.sig = sig; box.innerHTML = live.map((t) => `<span class="tchip ${t.status === "failed" ? "x" : t.status === "completed" ? "" : "run"}">${esc(t.name || "?")}</span>`).join(""); }
+  }
   if (atBottom) sc.scrollTop = sc.scrollHeight;
 }
 

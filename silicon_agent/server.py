@@ -475,7 +475,20 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
     started: list[str] = []
     seen: set[str] = set()
 
+    trail: list[dict] = []
+
     def on_event(kind, upd, meta):
+        # the live tool trail: the chat shows what the agent is doing while the turn runs
+        if kind == "tool_call":
+            trail.append({"id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind"), "status": upd.get("status", "pending")})
+            with _lock:
+                th["live"] = trail[-40:]
+        elif kind == "tool_call_update":
+            for t in trail:
+                if t["id"] == upd.get("toolCallId"):
+                    t["status"] = upd.get("status", t["status"])
+            with _lock:
+                th["live"] = trail[-40:]
         # a run started mid-turn gets its card immediately, not when the whole turn ends
         if kind == "tool_call_update" and (upd.get("title") or "") == "sa_run":
             out = upd.get("_result") or {}
@@ -501,6 +514,7 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
                     _save_state(jid)
                     th["messages"].append({"role": "assistant", "kind": "run", "text": _run_note(_jobs[jid]["spec"], lang), "job": jid, "lang": lang, "t": time.time(), "source": "agh"})
     with _lock:
+        th.pop("live", None)
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
                                "job": started[-1] if started else None, "t": time.time(), "source": "agh",
                                "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40]})
@@ -522,6 +536,7 @@ def _chat_turn(tid: str, text: str, sub: str) -> None:
     finally:
         with _lock:
             _threads[tid]["busy"] = False
+            _threads[tid].pop("live", None)
             _save_thread(tid)
 
 

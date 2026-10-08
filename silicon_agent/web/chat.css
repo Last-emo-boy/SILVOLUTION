@@ -149,3 +149,6 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .prose h4 { font-size: 13px; margin: 10px 0 4px; color: var(--text); }
 .prose table { border-collapse: collapse; margin: 4px 0 8px; font-size: 12.5px; }
 .prose th, .prose td { border: 1px solid var(--border); padding: 3px 8px; text-align: left; } .prose th { color: var(--muted); font-weight: 500; }
+.agent-tools.live { margin-top: 6px; }
+.agent-tools .tchip.run { color: var(--accent); border-color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }

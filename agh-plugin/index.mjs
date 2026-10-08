@@ -202,14 +202,18 @@ export const siliconAgent = {
 
     agnes.registerTool({
       name: 'sa_job_file',
-      description: 'Read an artifact of a run: the generated RTL (rtl/<top>.sv in the package), iteration records (iter_NN.json), planner replies (llm_NN.json), summary.json, or the formal/coverage reports. Large files are truncated to max_bytes.',
+      description: 'Read an artifact of a run. Paths: "rtl" = the best design\'s generated SystemVerilog; "summary.json"; "iter_NN.json" (one iteration: IR, metrics, critical path, sim logs); "llm_NN.json" (the planner\'s reply for iteration NN); "events.jsonl"; "formal/report.json". Large files are truncated to max_bytes (default 32768).',
       parameters: obj({ job: str({ maxLength: 64 }), path: str({ maxLength: 256 }), max_bytes: int({ minimum: 1024, maximum: 262144 }) }, ['job', 'path']),
       meta: readOnly,
       async execute({ job, path, max_bytes }, tctx) {
         try {
-          const r = await fetch(`${server}/api/jobs/${encodeURIComponent(job)}/files/${path.split('/').map(encodeURIComponent).join('/')}`, { headers: await headers(), signal: tctx?.signal })
+          const p = path.replace(/^\/+/, '')
+          const url = p === 'rtl' || /^rtl\/[^/]+\.sv$/.test(p)
+            ? `${server}/api/jobs/${encodeURIComponent(job)}/rtl`
+            : `${server}/api/jobs/${encodeURIComponent(job)}/files/${p.split('/').map(encodeURIComponent).join('/')}`
+          const r = await fetch(url, { headers: await headers(), signal: tctx?.signal })
           const t = await r.text()
-          if (!r.ok) return fail(`HTTP ${r.status}`)
+          if (!r.ok) return fail(`HTTP ${r.status} for ${p}: valid paths are rtl, summary.json, iter_NN.json, llm_NN.json, events.jsonl, formal/report.json`)
           const cap = max_bytes ?? 32768
           return { content: [{ type: 'text', text: t.length > cap ? `${t.slice(0, cap)}\n...[truncated ${t.length - cap} bytes]` : t }], structured: { bytes: t.length, truncated: t.length > cap } }
         } catch (e) { return fail(e) }

@@ -73,6 +73,16 @@ class AghClient:
             raise AghError(f"unsupported protocol {r.get('protocolVersion')}")
         self.initialized = True
 
+    def alive(self) -> bool:
+        """Cheap liveness: the reader thread is up and the daemon still answers (its owner record is current)."""
+        if not self._reader or not self._reader.is_alive():
+            return False
+        try:
+            path = json.loads(owner_file().read_text())["socketPath"]
+        except Exception:
+            return False
+        return path == self.socket_path
+
     def close(self) -> None:
         if self._sock:
             try:
@@ -86,12 +96,16 @@ class AghClient:
         with self._lock:
             if not self._sock:
                 raise AghError("not connected")
-            self._sock.sendall(data)
+            try:
+                self._sock.sendall(data)
+            except OSError as e:
+                self._sock = None
+                raise AghError(f"connection lost: {e}")
 
     def _read_loop(self) -> None:
         buf = b""
         sock = self._sock
-        while sock:
+        while sock and self._sock is sock:
             try:
                 chunk = sock.recv(1 << 16)
             except OSError:
@@ -110,6 +124,7 @@ class AghClient:
         for ev, slot in list(self._pending.values()):
             slot.append({"error": {"code": -1, "message": "connection closed"}})
             ev.set()
+        self._sock = None
 
     def _dispatch(self, msg: dict) -> None:
         if "id" in msg and ("result" in msg or "error" in msg):
@@ -298,10 +313,13 @@ _client_lock = threading.Lock()
 
 
 def client() -> AghClient:
+    """The process-wide connection; a dead one (daemon restarted, socket gone) is replaced."""
     global _client
     with _client_lock:
-        if _client and _client._sock:
+        if _client and _client._sock and _client.alive():
             return _client
+        if _client:
+            _client.close()
         c = AghClient(ensure_daemon())
         c.connect()
         _client = c
