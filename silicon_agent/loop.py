@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from . import llm
+from . import llm, memory
 from .designs import Design, design_for
 from .eda import BACKENDS, ROOT, evaluate
 from .ir import Constraints, Metrics
@@ -94,6 +94,50 @@ def pick_best(history: list[dict], c: Constraints) -> dict | None:
     return min(feas, key=key)
 
 
+LESSON_SYSTEM = """You distill one reusable lesson from a single hardware design move, for a planner that will face
+similar situations on the same device. Write ONE sentence, imperative, concrete, with the numbers: what situation,
+what was changed, what happened, and the mechanism if the critical path makes it clear. Do not restate the task.
+Example: "When a folded FIR on XC7S50 is timing-limited by the tap-operand mux, going non-symmetric at twice the
+fold keeps the MAC count and removes the pre-adder from the path (+22 MHz, feasible at 259 MHz)."
+Respond with JSON: {"lesson": "<sentence>", "confidence": 0.0-1.0}"""
+
+
+def _learn(design, backend: str, c: Constraints, run_id: str, prev: dict, cur: dict, shown: list[dict], emit) -> None:
+    """Turn (previous design, action, this result) into a scored lesson and reconcile the ones that were shown."""
+    taken = memory.action_of(prev["ir"], cur["ir"])
+    if not taken:
+        return
+    m0, m1 = Metrics(**prev["metrics"]), Metrics(**cur["metrics"])
+    eff = memory.effect_of(m0, m1, prev["violations"], cur["violations"], c)
+    touched = memory.reconcile(design.kind, backend, shown, taken, eff["outcome"])
+    sit = memory.situation(design.kind, prev["ir"], prev["metrics"], prev["violations"])
+    facts = {
+        "device": backend, "design": design.kind, "situation": sit, "action": taken, "effect": eff,
+        "before": {"fmax": m0.fmax_mhz, "lut": m0.lut, "dsp": m0.dsp, "critical_path": prev["metrics"].get("critical_path", [])[:4]},
+        "after": {"fmax": m1.fmax_mhz, "lut": m1.lut, "dsp": m1.dsp, "critical_path": cur["metrics"].get("critical_path", [])[:4]},
+        "planner_diagnosis": cur.get("diagnosis", ""), "planner_action": cur.get("action", ""),
+    }
+    try:
+        r = llm.chat_json(LESSON_SYSTEM, json.dumps(facts), retries=2)
+        text = str(r.get("lesson", "")).strip()
+        conf = float(r.get("confidence", 0.5))
+    except Exception as e:  # a lesson is a nice-to-have; never fail the run over it
+        print(f"     lesson distillation failed: {e}", flush=True)
+        return
+    if not text:
+        return
+    lesson = memory.add(design.kind, backend, {
+        "run_id": run_id, "iteration": cur["iteration"], "situation": sit, "action": taken, "effect": eff,
+        "text": text, "confidence": conf,
+        # the move's own outcome is its first piece of evidence
+        "confirmations": 1 if eff["outcome"] == "helped" else 0,
+        "contradictions": 1 if eff["outcome"] == "hurt" else 0,
+    })
+    print(f"     lesson [{lesson['id']}] ({eff['outcome']}): {text}", flush=True)
+    emit({"kind": "lesson", "iteration": cur["iteration"], "lesson": {"id": lesson["id"], "text": text, "outcome": eff["outcome"],
+          "action": taken, "effect": eff}, "reconciled": [{"id": t["id"], "score": memory.score(t)} for t in touched]})
+
+
 def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_event=None) -> dict:
     design = design_for(spec)
     IR = design.ir_cls
@@ -115,6 +159,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
     action = "initial design from spec"
     diagnosis = ""
     seen = set()
+    shown_lessons: list[dict] = []
 
     for it in range(1, max_iter + 1):
         errs = ir.validate()
@@ -149,13 +194,22 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                   f"{'FEASIBLE' if not v else 'violations: ' + '; '.join(v)}  ({entry['eda_seconds']}s)", flush=True)
             emit({"kind": "result", **{k: val for k, val in entry.items() if k not in ("metrics", "ir")},
                   "ir": ir_view(ir, locked), "metrics": {k: val for k, val in asdict(m).items() if k != "sim_log"}})
+            if len(history) >= 2 and not spec.get("no_memory"):
+                _learn(design, backend, c, run_id, history[-2], history[-1], shown_lessons, emit)
 
         if it == max_iter:
             break
         best = pick_best(history, c)
+        last = history[-1]
+        sit = memory.situation(design.kind, last["ir"], last["metrics"], last["violations"])
+        shown_lessons = [] if spec.get("no_memory") else memory.retrieve(design.kind, backend, sit, exclude_run=run_id)
+        if shown_lessons:
+            emit({"kind": "memory", "iteration": it + 1, "situation": sit,
+                  "lessons": [{"id": l["id"], "text": l["text"], "score": memory.score(l)} for l in shown_lessons]})
         user = (f"## Constraints\n{json.dumps(asdict(c))}\n"
                 f"## Task-fixed parameters (never change these)\n{json.dumps({k: v for k, v in locked.items() if k != 'coefs'})}\n\n"
                 f"## History\n{fmt_history(history, c, design.throughput_unit, locked)}\n\n"
+                f"{memory.fmt_lessons(shown_lessons)}\n\n"
                 f"Current best feasible: {json.dumps(ir_view(IR.from_dict(best['ir']), locked)) if best else 'none'}\n"
                 f"Propose iteration {it + 1}.")
         try:
