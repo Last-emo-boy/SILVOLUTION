@@ -278,6 +278,32 @@ class AghClient:
         """The harness's UI projection of a session: opState (a turn in flight?), nodes (messages / tool calls)."""
         return self.call("_agnes/v1/session.projectUI", {"sessionId": session_id, "surface": "web"}, timeout=60)
 
+    def usage(self, session_id: str) -> dict:
+        """What the last turn and the whole session cost, from the harness's own ledger: tokens, estimated USD,
+        wall time, model. {} when the projection has no turn yet."""
+        try:
+            p = self.project(session_id)
+        except AghError:
+            return {}
+        turns = p.get("turns") or []
+        if not turns:
+            return {}
+        last = turns[-1]
+        u = last.get("usage") or {}
+        tot = u.get("totals") or {}
+        calls = u.get("calls") or []
+        model = last.get("finalModel") or next((c.get("model") for c in reversed(calls) if c.get("model")), None)
+        su = (p.get("usage") or {})
+        st = su.get("totals") or {}
+        return {
+            "turn": last.get("turn"),
+            "input": tot.get("input", 0), "output": tot.get("output", 0), "cache_read": tot.get("cacheRead", 0), "reasoning": tot.get("reasoning", 0),
+            "usd_micros": (u.get("cost") or {}).get("usdMicros"), "ms": last.get("durationMs"), "calls": len(calls), "model": model,
+            "session": {"input": st.get("input", 0), "output": st.get("output", 0), "cache_read": st.get("cacheRead", 0),
+                        "usd_micros": (su.get("cost") or {}).get("usdMicros"), "turns": len(turns),
+                        "context_tokens": (su.get("context") or {}).get("tokens"), "context_window": (su.get("context") or {}).get("window")},
+        }
+
     def wait_idle(self, session_id: str, timeout: float = 3600, on_event=None) -> dict:
         """Follow a turn that another connection (a previous server process) started: attach for its session/update
         stream and return when the harness reports the turn over. Returns the same shape as prompt()."""

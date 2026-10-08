@@ -161,3 +161,8 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .threads li.group:hover { background: none; }
 .threads .m .dev { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; margin-right: 6px; }
 .threads .dot.busy { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+
+.usage { font: 11px var(--mono); color: var(--muted); margin: 6px 0 2px; }
+.usage .model { opacity: .7; }
+.sess-usage { font-size: 11px; white-space: nowrap; }
+@media (max-width: 720px) { .sess-usage { display: none; } }

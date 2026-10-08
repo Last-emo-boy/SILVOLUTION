@@ -244,6 +244,7 @@ def _resume_turns() -> None:
                     # like to it), so usually there is nothing to follow; when there is, take its outcome
                     r = c.wait_idle(sid, timeout=3600, on_event=_run_watcher(tid, lang)) if (c.project(sid) or {}).get("opState") else None
                     if r and (r["text"] or r["tools"]):
+                        r["usage"] = c.usage(sid)
                         _record_turn(tid, r, lang)
                     else:
                         raise agh.AghError("turn already over")
@@ -541,6 +542,7 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
         th.pop("live", None)
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
                                "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh", **({"resumed": True} if r.get("resumed") else {}),
+                               **({"usage": r["usage"]} if r.get("usage") else {}),
                                "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40],
                                "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status")} for st in r.get("steps", [])][:80]})
         if not th["title"] and started:
@@ -574,6 +576,8 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     # only carries the thread id the tools need
     prompt = f"[silicon-agent chat · thread {tid}]\n{text}"
     r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
+    # the harness's ledger for this turn (tokens, estimated cost, wall time): shown under the reply
+    r["usage"] = c.usage(sid)
     if resumed:
         r["resumed"] = True
     started = _record_turn(tid, r, lang)
