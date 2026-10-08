@@ -94,7 +94,7 @@ n = 0
 s = slide(); n += 1
 text(s, Inches(0.9), Inches(2.3), Inches(11), Inches(0.5), "▣ silicon-agent", size=16, color=ACCENT, bold=True, font=MONO)
 text(s, Inches(0.9), Inches(2.8), Inches(11.8), Inches(1.0), "一句话，换一份签核过的 Verilog", size=48, color=TEXT, bold=True)
-text(s, Inches(0.9), Inches(4.1), Inches(11), Inches(1.2), "自然语言 → 架构 IR → RTL → 仿真 → 综合 → 布局布线 → 诊断 → 下一轮，直到时序和资源约束全部满足。\n真实 EDA 工具是唯一的 ground truth：没有一个数字是估出来的。4 种器件 · 4 类生成器 · 已部署。", size=18, color=TEXT2)
+text(s, Inches(0.9), Inches(4.1), Inches(11), Inches(1.2), "自然语言 → 架构 IR → RTL → 仿真 → 综合 → 布局布线 → 诊断 → 下一轮，直到时序和资源约束全部满足。\n真实 EDA 工具是唯一的 ground truth：没有一个数字是估出来的。5 种器件 · 7 类生成器 · 形式等价 · 每晚回归 · 已部署。", size=18, color=TEXT2)
 text(s, Inches(0.9), Inches(6.3), Inches(11), Inches(0.4), "2026-10 · 路演 · w33d", size=12, color=MUTED, font=MONO)
 
 # ------------------------------------------------------------------ 2. problem
@@ -147,20 +147,21 @@ for i, (k, name, purpose, tool, dev) in enumerate(rows):
 text(s, Inches(0.7), Inches(5.85), Inches(12), Inches(1.0), [["真实案例：8×8 无流水 INT8 阵列 @ 300 MHz 目标——行为级、综合后/实现后功能仿真全部通过，但 ", ("两级时序仿真失败", {"color": BAD, "bold": True}), "；规划器据此加 DSP 寄存器后五级全过。"], ["向量 testbench 复用 cocotb 黄金模型（本版 cocotb 无 xsim VPI）；glbl.GSR 100 ns、负沿驱动 3/4 周期采样、Vivado 2025.2 网表注释多行 os-release 等坑都已踩平。"]], size=12.5, color=TEXT2, spacing=1.3)
 
 # ------------------------------------------------------------------ 6. results table
-s = slide(); n += 1; header(s, "真实结果：13 个任务 · 4 种器件 · 4 类设计，全部由真实 EDA 签核", "05 · 结果", n)
-res = [("INT8 matmul", "ECP5", "≥180 MHz · ≤48 DSP", "5", "4×12 · 188.5 MHz · 48 DSP · 48 MAC/cyc"),
-       ("INT8 matmul", "XC7S50", "≥200 MHz · ≤64 DSP", "3", "8×8 · 239.6 MHz · 64 DSP · 1005 LUT"),
-       ("INT8 matmul · 五级仿真", "XC7S50", "≥300 MHz · ≤32 DSP", "3", "2×16 · 315–319.5 MHz · 32 DSP · 五级全过"),
-       ("32 阶 FIR", "ECP5", "≥120 MHz · ≤6 DSP", "2", "对称 fold=4 · 125.8 MHz · 4 DSP"),
+s = slide(); n += 1; header(s, "真实结果：20+ 个任务 · 5 种器件 · 7 类设计，全部由真实 EDA 签核", "05 · 结果", n)
+res = [("INT8 matmul · 五级仿真", "XC7S50", "≥300 MHz · ≤32 DSP", "3", "2×16 · 315–319.5 MHz · 32 DSP · 五级全过"),
        ("32 阶 FIR", "XC7S50", "≥250 MHz · ≤8 DSP", "7", "非对称 fold=8 · 259.1 MHz · 8 DSP · 324 LUT"),
-       ("INT8 matmul（聊天 + 追问 fork）", "ECP5", "≥160 MHz · ≤32 DSP", "2+8", "1×1 216.8 → 1×32 · 214.2 MHz · 32 MAC/cyc"),
+       ("INT8 matmul（并行候选）", "Gowin GW1NR-9", "≥130 MHz · ≤16 DSP", "2", "2×8 · 205.3 MHz · 16 MULT · 975 LUT（第 2 轮 3 个候选并行）"),
+       ("INT8 matmul · 72 DSP 用满", "ECP5", "≥150 MHz · ≤72 DSP", "5", "3×24 · 167.6 MHz · 72 DSP · 72 MAC/cyc"),
+       ("16 位 sin/cos CORDIC · 0 DSP", "ECP5", "≥200 MHz · 省 LUT", "8", "4 级流水 · 211.8 MHz · 594 LUT · 0 DSP"),
+       ("FIR → CORDIC 数据通路（graph）", "ECP5", "≥120 MHz · ≤10 DSP", "3", "218.4 MHz · 1209 LUT · 3 DSP · 1 样本/周期"),
+       ("16 阶 FIR · 运行时系数端口", "GateMate CCGM1A1", "≥60 MHz", "8", "对称 fold=2 · 60.3 MHz · 4 CC_MULT · 1028 LUT"),
+       ("256 点 16 位 FFT · 自然序", "Gowin GW1NR-9", "≥100 MHz · ≤20 MULT", "@FFT_ROUNDS@", "@FFT_RESULT@"),
+       ("5×5 卷积 · 640 宽 · 五级仿真", "XC7S50", "≥200 MHz · ≤30 DSP", "@CONV_ROUNDS@", "@CONV_RESULT@"),
        ("3×3 高斯卷积（聊天）", "iCE40 UP5K", "≥60 MHz · ≤1500 LUT", "4", "全并行 · 70.6 MHz · 273 LUT · 0 DSP · 2 BRAM"),
        ("5×5 卷积 · 640 宽", "ECP5", "≥100 MHz · 省 LUT", "8", "125.7 MHz · 630 LUT · 9 DSP · 4 BRAM"),
        ("16 阶 FIR（聊天）", "Gowin GW1NR-9", "≥100 MHz · ≤4 DSP", "4", "fold=2 · 103.5 MHz · 4 MULT18X18 · 733 LUT"),
-       ("INT8 matmul", "Gowin GW1NR-9", "≥120 MHz · ≤16 DSP", "1", "153.5 MHz · 16 DSP · 976 LUT"),
-       ("INT8 matmul", "iCE40 UP5K", "≥40 MHz · ≤8 DSP", "1", "78.2 MHz · 8 SB_MAC16 · 304 LUT"),
-       ("3×3 卷积 · 640 宽", "ECP5", "≥100 MHz · ≤1500 LUT", "1", "140.2 MHz · 213 LUT · 0 DSP · 2 BRAM"),
-       ("两级 FIR 级联 8→32 阶", "ECP5", "≥120 MHz · ≤12 DSP", "4", "两级对称 fold=4 · 127.4 MHz · 5 DSP · 989 LUT")]
+       ("两级 FIR 级联 8→32 阶", "ECP5", "≥120 MHz · ≤12 DSP", "4", "两级对称 fold=4 · 127.4 MHz · 5 DSP · 989 LUT"),
+       ("INT8 matmul（聊天 + 追问 fork）", "ECP5", "≥160 MHz · ≤32 DSP", "2+8", "1×1 216.8 → 1×32 · 214.2 MHz · 32 MAC/cyc")]
 cols = [Inches(0.7), Inches(3.6), Inches(5.3), Inches(8.0), Inches(8.75)]
 for h_, c in zip(["任务", "器件", "约束", "轮数", "最终设计（真实 P&R）"], cols):
     text(s, c, Inches(1.75), Inches(3), Inches(0.3), h_, size=11, color=MUTED, font=MONO)
@@ -173,7 +174,7 @@ for i, (task, dev, cons, it, out) in enumerate(res):
     text(s, cols[3], y + Inches(0.05), Inches(0.8), Inches(0.3), it, size=11, color=TEXT, font=MONO)
     text(s, cols[4], y + Inches(0.05), Inches(4.2), Inches(0.3), [[("✓ " if it != "运行中" else "… ", {"color": GOOD if it != "运行中" else ACCENT, "bold": True}), out]], size=10.5, color=TEXT)
     y += Inches(0.36)
-text(s, Inches(0.7), Inches(6.85), Inches(12), Inches(0.4), "每轮成本：ECP5 / iCE40 / Gowin 15–60 秒（3 个布线种子取中位数），XC7S50 1.5–4 分钟（含五级仿真）。规划器 DeepSeek，每轮一次调用。回归基准集 8/8 通过，平均第 1.6 轮可行。", size=11, color=MUTED)
+text(s, Inches(0.7), Inches(6.85), Inches(12), Inches(0.4), "每轮成本：ECP5 / iCE40 / Gowin 15–60 秒、GateMate 2–4 分钟（3 个布线种子取中位数），XC7S50 1.5–4 分钟（含五级仿真）。规划器 DeepSeek，每轮一次调用，候选可并行评估。回归基准集 14 例，每晚 03:17 自动跑并与上一次比对。", size=11, color=MUTED)
 
 # ------------------------------------------------------------------ 7. trajectory charts (real data)
 s = slide(); n += 1; header(s, "两条真实轨迹：规划器是怎么「想」的", "06 · 轨迹", n)
@@ -227,37 +228,39 @@ text(s, Inches(9.6), Inches(1.85), Inches(3.3), Inches(5.0), [[("一轮一个 tu
 
 # ------------------------------------------------------------------ 9c. platform grid
 s = slide(); n += 1; header(s, "平台：生成器 × 器件是一张可以继续长的表", "09 · 平台", n)
-devs = [("ECP5", "LFE5U-45F · yosys + nextpnr", "15–60 s"), ("Spartan-7", "XC7S50 · Vivado 2025.2 · 五级仿真", "1.5–4 min"), ("iCE40", "UP5K · nextpnr-ice40", "10–40 s"), ("Gowin", "GW1NR-9 · himbächel", "15–60 s")]
-gens = [("matmul", "output-stationary systolic INT 阵列"), ("fir", "定系数 FIR：转置 / 折叠 / 对称共享"), ("conv2d", "K×K 流式卷积：BRAM 行缓冲 + 窗口 + 加法树"), ("fir_chain", "组合：多级 FIR 经 FIFO 级联（每级独立旋钮）")]
-x0, y0, cw, rh = Inches(3.3), Inches(1.85), Inches(2.35), Inches(0.95)
+devs = [("ECP5", "LFE5U-45F · nextpnr", "15–60 s"), ("Spartan-7", "XC7S50 · Vivado · 五级仿真", "1.5–4 min"), ("iCE40", "UP5K · nextpnr-ice40", "10–40 s"), ("Gowin", "GW1NR-9 · himbächel", "15–60 s"), ("GateMate", "CCGM1A1 · himbächel", "2–4 min")]
+gens = [("matmul", "output-stationary systolic INT 阵列"), ("fir", "定系数 / 运行时系数 FIR：转置 / 折叠 / 对称"), ("conv2d", "K×K 流式卷积：BRAM 行缓冲 + 加法树"), ("cordic", "旋转 / 向量模式，展开或折叠，位精确"), ("fft", "radix-2 SDF，16–4096 点，4/3/0 乘法器复乘"), ("graph", "通用 IR 图：任意 fir/conv/cordic/fft 节点经 FIFO 级联")]
+x0, y0, cw, rh = Inches(3.3), Inches(1.75), Inches(1.9), Inches(0.72)
 for j, (d, sub, t_) in enumerate(devs):
     x = x0 + j * cw
-    box(s, x, y0, cw - Inches(0.1), Inches(0.75), fill=SURF, line=BORDER)
-    text(s, x + Inches(0.12), y0 + Inches(0.08), cw - Inches(0.3), Inches(0.3), d, size=13, color=TEXT, bold=True)
-    text(s, x + Inches(0.12), y0 + Inches(0.36), cw - Inches(0.3), Inches(0.4), f"{sub} · {t_}", size=9, color=MUTED, font=MONO)
-verified = {("matmul", 0), ("matmul", 1), ("matmul", 2), ("matmul", 3), ("fir", 0), ("fir", 1), ("fir", 3), ("conv2d", 0), ("conv2d", 2), ("conv2d", 3), ("fir_chain", 0), ("fir_chain", 3), ("fir_chain", 2), ("fir", 2)}
-real = {("matmul", 0), ("matmul", 1), ("matmul", 2), ("matmul", 3), ("fir", 0), ("fir", 1), ("fir", 3), ("conv2d", 0), ("conv2d", 2), ("fir_chain", 0)}
+    box(s, x, y0, cw - Inches(0.1), Inches(0.7), fill=SURF, line=BORDER)
+    text(s, x + Inches(0.1), y0 + Inches(0.06), cw - Inches(0.25), Inches(0.3), d, size=12, color=TEXT, bold=True)
+    text(s, x + Inches(0.1), y0 + Inches(0.34), cw - Inches(0.25), Inches(0.36), f"{sub} · {t_}", size=8, color=MUTED, font=MONO)
+# (generator, device index): real task met / EDA + netlist sim verified
+real = {("matmul", 0), ("matmul", 1), ("matmul", 2), ("matmul", 3), ("fir", 0), ("fir", 1), ("fir", 3), ("fir", 4), ("conv2d", 0), ("conv2d", 2), ("conv2d", 1),
+        ("cordic", 0), ("fft", 3), ("graph", 0)}
+verified = real | {("fir", 2), ("conv2d", 3), ("conv2d", 4), ("cordic", 2), ("cordic", 3), ("cordic", 4), ("fft", 0), ("graph", 3), ("fir_chain", 0)}
 for i, (g, sub) in enumerate(gens):
-    y = y0 + Inches(0.9) + i * rh
-    box(s, Inches(0.7), y, Inches(2.5), rh - Inches(0.1), fill=SURF, line=BORDER)
-    text(s, Inches(0.85), y + Inches(0.1), Inches(2.3), Inches(0.3), g, size=13, color=TEXT, bold=True, font=MONO)
-    text(s, Inches(0.85), y + Inches(0.4), Inches(2.3), Inches(0.45), sub, size=9.5, color=MUTED)
-    for j in range(4):
+    y = y0 + Inches(0.82) + i * rh
+    box(s, Inches(0.7), y, Inches(2.5), rh - Inches(0.08), fill=SURF, line=BORDER)
+    text(s, Inches(0.85), y + Inches(0.05), Inches(2.3), Inches(0.3), g, size=12, color=TEXT, bold=True, font=MONO)
+    text(s, Inches(0.85), y + Inches(0.32), Inches(2.3), Inches(0.35), sub, size=8.5, color=MUTED)
+    for j in range(5):
         x = x0 + j * cw
         done_real = (g, j) in real; done_sim = (g, j) in verified
         c = GOOD if done_real else (ACCENT if done_sim else MUTED)
-        b = box(s, x, y, cw - Inches(0.1), rh - Inches(0.1), fill=SURF2 if done_sim else BG, line=c if done_sim else BORDER)
-        text(s, x + Inches(0.12), y + Inches(0.28), cw - Inches(0.3), Inches(0.4), "● 真实任务达标" if done_real else ("● EDA + 网表仿真通过" if done_sim else "○ 未跑"), size=10.5, color=c)
-text(s, Inches(0.7), Inches(6.15), Inches(12), Inches(0.8), [["加一种器件 = backends/ 下一个文件（器件事实 + 跑工具 + 解析报告）；加一类设计 = 一个 IR + 生成器 + 黄金模型 + 估算 + 规划知识。提示词、估算、表单、自然语言解释器都从注册表取。"], [("黑盒原语自己建模：", {"color": TEXT2}), "DP16KD / Gowin DPX9B、SP、SPX9、MULT9X9/18X18 的仿真模型按 yosys 的驱动方式写出，所以每个开源后端都能跑综合后网表仿真。"]], size=12, color=TEXT2, spacing=1.3)
+        box(s, x, y, cw - Inches(0.1), rh - Inches(0.08), fill=SURF2 if done_sim else BG, line=c if done_sim else BORDER)
+        text(s, x + Inches(0.1), y + Inches(0.18), cw - Inches(0.25), Inches(0.35), "● 真实任务达标" if done_real else ("● EDA + 网表仿真通过" if done_sim else "○ 未跑"), size=9.5, color=c)
+text(s, Inches(0.7), Inches(6.3), Inches(12), Inches(0.7), [["加一种器件 = backends/ 下一个文件（器件事实 + 跑工具 + 解析报告）；加一类设计 = 一个 IR + 生成器 + 黄金模型 + 估算 + 规划知识。提示词、估算、表单、自然语言解释器都从注册表取。"], [("黑盒原语自己建模：", {"color": TEXT2}), "DP16KD / Gowin BRAM / MULT 的仿真模型按 yosys 的驱动方式写出，所以每个开源后端都能跑综合后网表仿真。Artix-7 后端已写好，等 Vivado 装上器件文件即启用。"]], size=11, color=TEXT2, spacing=1.25)
 
 # ------------------------------------------------------------------ 9d. trust + delivery
 s = slide(); n += 1; header(s, "可信与交付：让结论可证明，让结果能直接用", "10 · 可信 · 交付", n)
-items = [("回归基准集", "11 个固定规格 × 期望（可行 / 几轮内可行），当作普通任务提交、打分、落盘；`bench show` 并排看最近几次。首轮开源 8 例 8/8，平均第 1.6 轮可行。", GOOD),
-         ("多种子 Fmax", "开源后端每个设计布线 3 个种子，报中位数并显示区间（ECP5 上 ±3–5%）。规划器也看到区间，不再被一次布线的运气判「差 4 MHz」。", GOOD),
-         ("停机必须给证据", "规划器只能带着 stop_reason 停：触到了哪个上界（DSP 上限、累加位宽下限、器件本征级）、试过哪些旋钮没用。叙述里直接说「为什么停」。", GOOD),
-         ("跨运行 Pareto 前沿", "同一设计类型在同一芯片上的所有实测点，取非支配集；「≥180 MHz、≤32 DSP 最好能到多少」直接从 20 个实测点里回答，不用重新跑。聊天回答也用它。", ACCENT),
-         ("功耗维度", "Vivado report_power 动态功耗 → power_mw，可作约束 max_power_mw 和目标 minimize_power。", ACCENT),
-         ("交付包", "zip：RTL + AXI4-Stream 包装（带输出 FIFO，随机反压下验证）+ 自检向量 testbench + 工具报告 + 轨迹 + README。拖进 Vivado IP Integrator 就能用。", ORANGE)]
+items = [("形式等价（SymbiYosys BMC）", "miter 把「实测过的 RTL」和「同一 IR 的重新生成」接同一组自由输入，逐拍断言所有输出相等；外加流形协议性质（复位期间无 valid、无握手撤回）。正/负对照都验证过：篡改一份就 FAIL。生成器重构从此有闸门。", GOOD),
+         ("功能覆盖率", "每个 cocotb 测试上报命名 bins（背靠背 / 间隔 / 反压停顿 / 极值操作数 / 帧重启…）进 sim_coverage；「仿真通过」会说明到底练了什么。", GOOD),
+         ("每晚回归 + 退化告警", "14 个固定规格 × 期望（可行 / 几轮内可行），03:17 由 cron 在 EDA 主机上跑开源后端，与上一份报告逐例比对，退化即标红（/api/bench）。多种子 Fmax：3 个种子取中位数并显示区间。", GOOD),
+         ("停机必须给证据", "规划器只能带着 stop_reason 停：触到了哪个上界（DSP 上限、累加位宽下限、乘法器本征级）。叙述里直接说「为什么停」；候选并行评估时，次优点也进历史。", ACCENT),
+         ("跨运行 Pareto + 功耗", "同一设计在同一芯片上的所有实测点取非支配集，「≥180 MHz、≤32 DSP 最好能到多少」从实测点回答；Vivado report_power → power_mw 可作约束与目标。", ACCENT),
+         ("交付包 + 板级工程", "zip：RTL + AXI4-Stream 包装（FIR 可带 AXI4-Lite 系数端口）+ 自检向量 testbench + 工具报告 + 轨迹 + README + create_vivado.tcl/XDC 或 build_oss.sh。拖进 IP Integrator 就能用。", ORANGE)]
 for i, (t_, b_, c) in enumerate(items):
     x = Inches(0.7 + (i % 2) * 6.15); y = Inches(1.8 + (i // 2) * 1.62)
     card(s, x, y, Inches(5.9), Inches(1.5), t_, b_, title_color=c, body_size=11)
@@ -292,9 +295,9 @@ text(s, Inches(0.7), Inches(6.7), Inches(12), Inches(0.4), "这些都写进了�
 
 # ------------------------------------------------------------------ 11. roadmap
 s = slide(); n += 1; header(s, "路线图：本周做完的，和下一步", "13 · 路线图", n)
-lanes = [("已完成（本周）", GOOD, ["✓ 后端插件化：ECP5 / Spartan-7 / iCE40 / Gowin", "✓ 第三、四类生成器：conv2d（BRAM）、fir_chain（组合数据通路）", "✓ 回归基准集 + 多种子 Fmax + 停机证据", "✓ 跨运行 Pareto 前沿 + 功耗维度", "✓ 交付包：RTL + AXI-Stream + testbench + 报告", "✓ 聊天：ETA、替代方案一键追问、会话隔离/重命名"]),
-         ("下一步 · 扩大空间", ACCENT, ["更多生成器：FFT、CORDIC、行缓冲 + 池化、systolic 以外的 matmul 形态（dot-product 折叠）", "架构级 A/B：同一规格先在多个生成器间做选择，再在选中者内优化", "通用 IR 图：任意 valid/ready 模块按图级联（fir_chain 的推广）", "每晚回归常态化 + 记忆/估算退化告警"]),
-         ("更远 · 平台化", WARN, ["UltraScale+、Artix-7、GateMate：一个后端文件一个器件", "有板后：ILA/VIO 在板验证作为第六级", "开放 IR 规范，让别人的生成器接入；设计记忆跨用户共享（可审计）", "多模型规划器（DeepSeek / Claude / GPT）A/B 与基准集对照"])]
+lanes = [("已完成（本周）", GOOD, ["✓ 5 种器件插件：ECP5 / Spartan-7 / iCE40 / Gowin / GateMate", "✓ 7 类生成器：matmul、FIR(+系数端口)、conv2d、FIR 级联、CORDIC、FFT、通用 IR 图", "✓ 并行候选评估 + kNN 校准估算（Gowin Fmax 误差 53%→13%）", "✓ 形式等价 + 覆盖率 + 每晚回归告警 + 多种子 Fmax", "✓ 交付包含板级工程；规划器多模型 A/B 开关", "✓ 聊天：ETA、架构替代方案一键追问、会话隔离"]),
+         ("下一步 · 扩大空间", ACCENT, ["Artix-7 / UltraScale+：装上 Vivado 器件文件即启用（后端已写好）", "更多节点：池化、滑窗 max、dot-product 折叠 matmul、CIC 抽取", "估算器上做贝叶斯优化：用 kNN 后验直接提候选，减少规划器调用", "多模型规划器基准对照（DeepSeek-reasoner / Claude / GPT）跑进每晚回归"]),
+         ("更远 · 平台化", WARN, ["有板后：ILA/VIO 在板验证作为第六级", "开放 IR 规范（/schema 已导出），让外部生成器接入；设计记忆跨用户共享（可审计）", "形式等价扩展到跨 IR（折叠 vs 展开同一滤波器）", "从 SDF 时序仿真到门级功耗估计"])]
 for i, (t_, c, items) in enumerate(lanes):
     x = Inches(0.7 + i * 4.1)
     box(s, x, Inches(1.8), Inches(3.9), Inches(5.0), fill=SURF, line=BORDER)
@@ -305,7 +308,7 @@ for i, (t_, c, items) in enumerate(lanes):
 # ------------------------------------------------------------------ 12. close
 s = slide(); n += 1
 text(s, Inches(0.9), Inches(2.0), Inches(11.5), Inches(1.2), "说一句话，拿到签核过的 Verilog。", size=40, color=TEXT, bold=True)
-text(s, Inches(0.9), Inches(3.3), Inches(11.5), Inches(2.4), [["• 4 类生成器（matmul、FIR、conv2d、FIR 级联）× 4 种器件（ECP5、Spartan-7、iCE40、Gowin），13 个真实任务达标，最高 319.5 MHz"], ["• 五级仿真阶梯 + 真实布局布线签核 + 3 种子中位数 Fmax，没有一个估算数字进结论"], ["• 88 条自动验证的设计经验；回归基准 8/8，平均第 1.6 轮可行；交付包含 AXI-Stream 包装"], ["• 2 天、约 7,100 行 Python/JS，27 次提交；已部署，笔记本是瘦客户端"]], size=16, color=TEXT2, spacing=1.4)
+text(s, Inches(0.9), Inches(3.3), Inches(11.5), Inches(2.4), [["• 7 类生成器（matmul、FIR、conv2d、FIR 级联、CORDIC、FFT、通用 IR 图）× 5 种器件，20+ 个真实任务达标，最高 319.5 MHz"], ["• 五级仿真阶梯 + 真实布局布线签核 + 3 种子中位数 Fmax + SymbiYosys 形式等价，没有一个估算数字进结论"], ["• 自动验证的设计经验池；14 例回归每晚自动跑并告警；交付包含 AXI-Stream 包装与板级工程"], ["• 3 天、约 @LOC@ 行 Python/JS，@COMMITS@ 次提交；已部署，笔记本是瘦客户端"]], size=16, color=TEXT2, spacing=1.4)
 text(s, Inches(0.9), Inches(6.2), Inches(11), Inches(0.5), "https://silicon.w33d.xyz   ·   ~/Playground/silicon-agent", size=13, color=ACCENT, font=MONO)
 
 out = "docs/silicon-agent-pitch.pptx"

@@ -48,7 +48,7 @@ set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
 set lut [llength [get_cells -hier -filter {{PRIMITIVE_GROUP == LUT}}]]
 set ff  [llength [get_cells -hier -filter {{PRIMITIVE_GROUP == FLOP_LATCH || PRIMITIVE_GROUP == REGISTER}}]]
 set dsp [llength [get_cells -hier -filter {{PRIMITIVE_SUBGROUP == DSP}}]]
-set bram [llength [get_cells -hier -filter {{PRIMITIVE_GROUP == BLOCKRAM || PRIMITIVE_GROUP == BRAM}}]]
+set bram [llength [get_cells -hier -filter {{PRIMITIVE_GROUP == BMEM || PRIMITIVE_GROUP == BLOCKRAM || PRIMITIVE_SUBGROUP == BRAM || PRIMITIVE_SUBGROUP == bram}}]]
 puts $fh "{{\\"wns\\": $wns, \\"period\\": {period:.3f}, \\"lut\\": $lut, \\"ff\\": $ff, \\"dsp\\": $dsp, \\"bram\\": $bram}}"
 close $fh
 """
