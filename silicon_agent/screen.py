@@ -134,10 +134,20 @@ def estimate_cordic(ir: dict, backend: str) -> dict:
 def estimate_fft(ir: dict, backend: str) -> dict:
     n, dw, tw = ir["n"], ir["data_width"], ir.get("tw_width", 16); S = int(math.log2(n))
     w_avg = dw + (S / 2 if ir.get("growth") == "grow" else 0)
-    dsp = 4 * (S - 1)
+    cmul = ir.get("cmul", "four")
+    dsp = (S - 1) * {"four": 4, "three": 3, "lut": 0}[cmul]
     regs = ir.get("mul_regs", 0) + {"none": 0, "out": 1, "in_out": 2, "in_pipe_out": 3}.get(ir.get("dsp_regs", "none"), 0)
     lut = S * (w_avg * 12 + 40) + (n * 2 * w_avg * 0.5 if ir.get("delay_mem") == "lut" else 0)
+    if cmul == "three":
+        lut += (S - 1) * 2 * (w_avg + tw)
+    elif cmul == "lut":
+        # measured: a 12x12 shift-add multiplier costs ~480 LUT4 on ECP5 (3.3 per bit-product); LUT6 fabrics about half
+        lut += (S - 1) * 4 * w_avg * tw * (1.8 if _style(backend) == "vivado" else 3.3)
     fmax = 45 if regs <= 1 else (90 if regs == 2 else 130)
+    if cmul == "three":
+        fmax *= 0.85
+    elif cmul == "lut":
+        fmax *= 0.6
     if ir.get("bf_regs", 1) == 0:
         fmax *= 0.7
     if _style(backend) == "vivado":
@@ -176,7 +186,8 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
               ir.get("guard_bits", 0) / 4, 1.0 if ir.get("scale_comp") else 0.0, 0.0]
     elif design == "fft":
         f += [math.log2(ir["n"]), ir["data_width"] / 16, 1.0 if ir.get("growth") == "grow" else 0.0, ir.get("mul_regs", 0) + {"none": 0, "out": 1, "in_out": 2, "in_pipe_out": 3}.get(ir.get("dsp_regs", "none"), 0),
-              float(ir.get("bf_regs", 1)), 1.0 if ir.get("delay_mem") == "lut" else 0.0, 1.0 if ir.get("bit_reverse") else 0.0]
+              float(ir.get("bf_regs", 1)), 1.0 if ir.get("delay_mem") == "lut" else 0.0, 1.0 if ir.get("bit_reverse") else 0.0,
+              {"four": 4.0, "three": 3.0, "lut": 0.0}[ir.get("cmul", "four")]]
     elif design == "graph":
         nodes = ir["nodes"]
         f += [float(len(nodes)), sum(1.0 for n in nodes if n["kind"] == "fir"), sum(1.0 for n in nodes if n["kind"] == "fft"), sum(1.0 for n in nodes if n["kind"] == "cordic"),

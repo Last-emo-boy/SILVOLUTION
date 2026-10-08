@@ -108,6 +108,7 @@ SCHEMAS = {
             {"name": "bf_regs", "type": "int", "min": 0, "max": 1, "hint": "register the butterfly output"},
             {"name": "dsp_regs", "type": "choice", "choices": ["none", "out", "in_out", "in_pipe_out"], "hint": "multiplier register stages"},
             {"name": "bit_reverse", "type": "bool", "hint": "natural-order output (adds an N-sample buffer)"},
+            {"name": "cmul", "type": "choice", "choices": ["four", "three", "lut"], "hint": "complex multiplier: 4 DSPs, 3 DSPs (Gauss) or LUT-only"},
         ],
         "presets": {"naive": {"n": 256, "data_width": 16, "tw_width": 16, "growth": "scale", "tw_mem": "lut", "delay_mem": "auto", "bram_min": 64, "mul_regs": 0, "bf_regs": 1, "dsp_regs": "none", "bit_reverse": False}},
         "constraints_default": {"fmax_mhz": 100, "max_dsp": 40, "max_lut": 6000},

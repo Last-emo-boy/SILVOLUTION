@@ -12,6 +12,8 @@ Knobs:
   mul_regs    int 0..3                    pipeline registers around each stage's complex multiplier
   bf_regs     int 0|1                     register the butterfly output
   dsp_regs    str                         as elsewhere (register stages inside/after the multiplier)
+  cmul        str four|three|lut          complex multiplier: 4 real multipliers (DSPs), the 3-multiplier Gauss form
+                                          (3 DSPs + 5 adders, one more adder level), or LUT-only (no DSPs at all)
 
 Structure: log2(N) stages, each one radix-2 butterfly with a delay line of N/2^(s+1) samples and (except the last)
 one complex multiplier (3 or 4 real multipliers -> DSPs). Throughput 1 sample/cycle in, 1 out, bit-reversed order
@@ -54,6 +56,7 @@ class FftArch:
     bf_regs: int = 1
     dsp_regs: str = "none"
     bit_reverse: bool = False
+    cmul: str = "four"
 
     @property
     def stages(self) -> int:
@@ -91,6 +94,8 @@ class FftArch:
             errs.append(f"dsp_regs must be one of {sorted(DSP_REG_MODES)}")
         elif self.mul_regs + DSP_REG_MODES[self.dsp_regs] > 3:
             errs.append("mul_regs + dsp_regs stages must not exceed 3")
+        if self.cmul not in ("four", "three", "lut"):
+            errs.append("cmul must be four, three or lut")
         return errs
 
     def to_dict(self) -> dict:
@@ -178,7 +183,7 @@ SDF_STAGE = r'''// One SDF stage, cycle-exact to this model:
 // The delay line is a HALF-deep circular buffer advanced on every valid sample. Outputs during the first
 // half of the very first block are not meaningful (nothing was written); `primed` masks them.
 module sdf_stage #(parameter int WIN = 16, WOUT = 16, HALF = 128, LOGH = 7, KW = 7, TW = 16,
-                   MREG = 1, BFREG = 1, SCALE = 1, BRAM = 1, LAST = 0) (
+                   MREG = 1, BFREG = 1, SCALE = 1, BRAM = 1, LAST = 0, CMUL = 0) (
     input  wire clk, input wire rst, input wire in_valid, input wire signed [WIN-1:0] in_re, in_im, input wire in_first,
     output logic out_valid, output logic signed [WOUT-1:0] out_re, out_im, output logic out_first,
     output logic [KW-1:0] tw_k, input wire signed [TW-1:0] cr, ci);
@@ -235,10 +240,41 @@ module sdf_stage #(parameter int WIN = 16, WOUT = 16, HALF = 128, LOGH = 7, KW =
     assign wb_im = second ? df_im : WOUT'(in_im);
     // first half: the value leaving the line is the previous block's a-b; multiply by W (k = 0 -> pass through)
     logic signed [PW-1:0] p_re, p_im;
-    always_comb begin
-        p_re = d_re * cr - d_im * ci;
-        p_im = d_re * ci + d_im * cr;
-    end
+    generate if (CMUL == 1) begin : g_three
+        // Gauss: k1 = cr*(d_re + d_im), k2 = d_re*(ci - cr), k3 = d_im*(cr + ci); re = k1 - k3, im = k1 + k2
+        logic signed [WOUT:0] s_d; logic signed [TW:0] s_c1, s_c2;
+        logic signed [PW:0] k1, k2, k3;
+        always_comb begin
+            s_d = (WOUT+1)'(d_re) + (WOUT+1)'(d_im); s_c1 = (TW+1)'(ci) - (TW+1)'(cr); s_c2 = (TW+1)'(cr) + (TW+1)'(ci);
+            k1 = s_d * cr; k2 = d_re * s_c1; k3 = d_im * s_c2;
+            p_re = PW'(k1 - k3); p_im = PW'(k1 + k2);
+        end
+    end else if (CMUL == 2) begin : g_lmul
+        // shift-and-add written out as partial-product adders so no synthesis tool recognises a $mul: fabric
+        // adders only, no DSP. Four products: rr = d_re*cr, ii = d_im*ci, ri = d_re*ci, ir = d_im*cr; the twiddle's
+        // top bit is its sign, so that partial product is subtracted
+        logic signed [PW-1:0] acc_rr [0:TW], acc_ii [0:TW], acc_ri [0:TW], acc_ir [0:TW];
+        logic [TW-1:0] crb, cib; assign crb = cr; assign cib = ci;
+        assign acc_rr[0] = '0; assign acc_ii[0] = '0; assign acc_ri[0] = '0; assign acc_ir[0] = '0;
+        for (genvar i = 0; i < TW; i++) begin : g_pp
+            logic signed [PW-1:0] sre, sim;
+            assign sre = PW'(d_re) <<< i; assign sim = PW'(d_im) <<< i;
+            if (i == TW-1) begin : gs
+                assign acc_rr[i+1] = acc_rr[i] - (crb[i] ? sre : '0); assign acc_ii[i+1] = acc_ii[i] - (cib[i] ? sim : '0);
+                assign acc_ri[i+1] = acc_ri[i] - (cib[i] ? sre : '0); assign acc_ir[i+1] = acc_ir[i] - (crb[i] ? sim : '0);
+            end else begin : gu
+                assign acc_rr[i+1] = acc_rr[i] + (crb[i] ? sre : '0); assign acc_ii[i+1] = acc_ii[i] + (cib[i] ? sim : '0);
+                assign acc_ri[i+1] = acc_ri[i] + (cib[i] ? sre : '0); assign acc_ir[i+1] = acc_ir[i] + (crb[i] ? sim : '0);
+            end
+        end
+        assign p_re = acc_rr[TW] - acc_ii[TW];
+        assign p_im = acc_ri[TW] + acc_ir[TW];
+    end else begin : g_four
+        always_comb begin
+            p_re = d_re * cr - d_im * ci;
+            p_im = d_re * ci + d_im * cr;
+        end
+    end endgenerate
     logic signed [WOUT-1:0] m_re, m_im;
     always_comb begin
         m_re = (LAST || k == 0) ? d_re : WOUT'((p_re + (PW'(1) <<< (TW-2))) >>> (TW-1));
@@ -302,7 +338,7 @@ endmodule""")
     logic [{max(1, int(math.log2(half))) - 1}:0] k{s}; logic signed [TW-1:0] cr{s}, ci{s};
     fft_tw{s} u_tw{s} (.k(k{s}), .cr(cr{s}), .ci(ci{s}));
     sdf_stage #(.WIN({win}), .WOUT({wout}), .HALF({half}), .LOGH({int(math.log2(half))}), .KW({max(1, int(math.log2(half)))}), .TW(TW),
-                .MREG({mreg}), .BFREG({a.bf_regs}), .SCALE({1 if a.growth == "scale" else 0}), .BRAM({1 if bram else 0}), .LAST({1 if s == S - 1 else 0}))
+                .MREG({mreg}), .BFREG({a.bf_regs}), .SCALE({1 if a.growth == "scale" else 0}), .BRAM({1 if bram else 0}), .LAST({1 if s == S - 1 else 0}), .CMUL({ {"four": 0, "three": 1, "lut": 2}[a.cmul] }))
         u_s{s} (.clk(clk), .rst(rst), .in_valid(v{s}), .in_re(r{s}), .in_im(i{s}), .in_first(f{s}),
                 .out_valid(v{s + 1}), .out_re(r{s + 1}), .out_im(i{s + 1}), .out_first(f{s + 1}), .tw_k(k{s}), .cr(cr{s}), .ci(ci{s}));""")
     wires = "\n".join(f"    logic v{s}, f{s}; logic signed [{DW + (s if a.growth == 'grow' else 0) - 1}:0] r{s}, i{s};" for s in range(S + 1))

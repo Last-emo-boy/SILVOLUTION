@@ -12,6 +12,8 @@ Adding a device = one module in this package that calls `register()`.
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -50,6 +52,8 @@ BACKENDS: dict[str, Backend] = {}
 
 
 def register(b: Backend) -> Backend:
+    if b.key in os.environ.get("SA_DISABLE_BACKENDS", "").split(","):
+        return b
     BACKENDS[b.key] = b
     return b
 
