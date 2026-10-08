@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from . import llm, memory
+from . import llm, memory, screen
 from .designs import Design, design_for
 from .eda import BACKENDS, ROOT, evaluate
 from .ir import Constraints, Metrics
@@ -27,15 +27,19 @@ You never write Verilog. You edit an architecture IR; a verified generator emits
 @DEVICE_FACTS@
 
 Decision rule: a design is FEASIBLE only if every constraint holds. Among feasible designs, prefer by the objective list in order.
-Each iteration you must (1) diagnose the last result from its critical path and resource numbers, (2) propose exactly one next IR.
-Be decisive: change the smallest number of fields that your diagnosis justifies. Never repeat an IR already in the history.
-When the current best is feasible and you believe no further improvement is likely, set "stop": true.
+Each iteration you must (1) diagnose the last result from its critical path and resource numbers, (2) propose up to three
+candidate IRs that attack the diagnosis from different angles, each with a one-line rationale. A cheap screening model
+ranks them and only the top candidate is sent through EDA this iteration; the others stay as fallbacks. Order the
+candidates by your own confidence. Never repeat an IR already in the history.
+When the current best is feasible and you believe no further improvement is likely, set "stop": true and give no candidates.
 
 Respond with a JSON object:
 {
   "diagnosis": "<2-4 sentences: what limits the last design, citing the critical path>",
-  "action": "<one sentence naming the IR change and why>",
-  "next_ir": @IR_JSON@,
+  "candidates": [
+    {"ir": @IR_JSON@, "why": "<one sentence: the mechanism this change exploits>"},
+    ...
+  ],
   "stop": false
 }"""
 
@@ -167,6 +171,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
     diagnosis = ""
     seen = set()
     shown_lessons: list[dict] = []
+    fallbacks: list[dict] = []  # screened candidates not yet evaluated, best first
 
     for it in range(1, max_iter + 1):
         errs = ir.validate()
@@ -207,6 +212,19 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
 
         if it == max_iter:
             break
+        last = history[-1]
+        if last["violations"] and fallbacks and not (control is not None and control.should_stop()):
+            nxt = fallbacks.pop(0)
+            nxt_ir = IR.from_dict(nxt["ir"])
+            if not nxt_ir.validate() and nxt_ir.digest(backend) not in seen:
+                diagnosis = f"candidate #{nxt['rank']} from the previous plan (the chosen one violated: {'; '.join(last['violations'])})"
+                action = nxt["why"]
+                print(f"     trying fallback candidate #{nxt['rank']} without re-planning", flush=True)
+                emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": action, "candidates": [], "fallback": True,
+                      "next_ir": ir_view(nxt_ir, locked), "stop": False})
+                ir = nxt_ir
+                continue
+        fallbacks = []
         if control is not None and control.should_stop():
             print("     stopped by user.", flush=True)
             emit({"kind": "plan", "iteration": it + 1, "diagnosis": "", "action": "stopped by user", "next_ir": None, "stop": True})
@@ -237,19 +255,72 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             break
         (out / f"llm_{it:02d}.json").write_text(json.dumps({"system": system, "prompt": user, "reply": reply}, indent=2))
         diagnosis = reply.get("diagnosis", "")
-        action = reply.get("action", "")
-        print(f"     diagnosis: {diagnosis}\n     action: {action}", flush=True)
-        emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": action,
-              "next_ir": reply.get("next_ir"), "stop": bool(reply.get("stop"))})
-        if reply.get("stop") and (best or steer):
-            # without a feasible design the planner may only stop when the engineer steered it to
-            print("     planner says stop.", flush=True)
+        # accept both the new multi-candidate shape and the old single next_ir
+        cands = reply.get("candidates") or ([{"ir": reply["next_ir"], "why": reply.get("action", "")}] if reply.get("next_ir") else [])
+        cands = [c for c in cands if isinstance(c, dict) and isinstance(c.get("ir"), dict)][:3]
+        if reply.get("stop") and (best or steer) and not cands:
+            print(f"     diagnosis: {diagnosis}\n     planner says stop.", flush=True)
+            emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": reply.get("action", "stop"), "candidates": [], "stop": True})
             break
-        proposed = reply.get("next_ir") or {}
-        changed = {k: v for k, v in locked.items() if k in proposed and proposed[k] != v and k != "coefs"}
-        if changed:
-            print(f"     planner tried to change locked fields {changed}; reverting", flush=True)
-        ir = IR.from_dict({**ir.to_dict(), **proposed, **locked})
+        if not cands:
+            cands = [{"ir": ir.to_dict(), "why": "planner returned no candidate; retrying from the last design"}]
+        # normalize: merge with current IR + locked, drop illegal ones, screen the rest
+        norm = []
+        for cnd in cands:
+            merged = {**ir.to_dict(), **cnd["ir"], **locked}
+            cand_ir = IR.from_dict(merged)
+            errs = cand_ir.validate()
+            dup = cand_ir.digest(backend) in seen
+            norm.append({"ir": cand_ir.to_dict(), "why": str(cnd.get("why", "")), "invalid": errs, "duplicate": dup})
+        legal = [n for n in norm if not n["invalid"] and not n["duplicate"]]
+        ranked = screen.screen(design.kind, backend, legal, c) if legal else []
+        chosen = ranked[0] if ranked else None
+        action = f"{chosen['why']}" if chosen else "no legal candidate"
+        print(f"     diagnosis: {diagnosis}", flush=True)
+        for r in ranked:
+            e = r["estimate"]
+            print(f"     candidate #{r['rank']}: {ir_view(IR.from_dict(r['ir']), locked)}  est fmax~{e['fmax_mhz']:.0f} lut~{e['lut']} dsp~{e['dsp']}  {r['est_violations'] or 'est-feasible'}  -- {r['why']}", flush=True)
+        for n in norm:
+            if n["invalid"] or n["duplicate"]:
+                print(f"     rejected: {ir_view(IR.from_dict(n['ir']), locked)}  {'invalid: ' + '; '.join(n['invalid']) if n['invalid'] else 'duplicate'}", flush=True)
+        emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": action,
+              "candidates": [{"ir": ir_view(IR.from_dict(r["ir"]), locked), "why": r["why"], "rank": r["rank"], "estimate": r["estimate"], "est_violations": r["est_violations"]} for r in ranked]
+                            + [{"ir": ir_view(IR.from_dict(n["ir"]), locked), "why": n["why"], "rejected": "invalid: " + "; ".join(n["invalid"]) if n["invalid"] else "duplicate"} for n in norm if n["invalid"] or n["duplicate"]],
+              "next_ir": ir_view(IR.from_dict(chosen["ir"]), locked) if chosen else None, "stop": False})
+        if not chosen:
+            action = "REJECTED (all candidates invalid or duplicates) -- propose different IRs"
+            continue
+        if chosen["est_violations"] and not reply.get("_rescreened"):
+            # every candidate looks infeasible by estimate: one re-plan with the screening verdicts attached
+            verdicts = "\n".join(f"- {json.dumps(ir_view(IR.from_dict(r['ir']), locked))}: est fmax~{r['estimate']['fmax_mhz']:.0f} MHz, lut~{r['estimate']['lut']}, dsp~{r['estimate']['dsp']} -> {', '.join(r['est_violations'])}" for r in ranked)
+            print("     all candidates estimated infeasible; asking the planner once more with the estimates", flush=True)
+            emit({"kind": "rescreen", "iteration": it + 1, "verdicts": [{"ir": ir_view(IR.from_dict(r["ir"]), locked), "est_violations": r["est_violations"]} for r in ranked]})
+            try:
+                reply2 = llm.chat_json(system, user + "\n\n## Screening verdicts on your candidates (closed-form estimates, not EDA)\n" + verdicts +
+                                       "\nEvery candidate is estimated to violate a constraint. Propose up to three different candidates that the estimates would accept, or keep one if you believe the estimate is wrong and say why.")
+                reply2["_rescreened"] = True
+                cands2 = [c2 for c2 in (reply2.get("candidates") or []) if isinstance(c2, dict) and isinstance(c2.get("ir"), dict)][:3]
+                if cands2:
+                    norm2 = []
+                    for cnd in cands2:
+                        cand_ir = IR.from_dict({**ir.to_dict(), **cnd["ir"], **locked})
+                        if not cand_ir.validate() and cand_ir.digest(backend) not in seen:
+                            norm2.append({"ir": cand_ir.to_dict(), "why": str(cnd.get("why", ""))})
+                    ranked2 = screen.screen(design.kind, backend, norm2, c) if norm2 else []
+                    if ranked2 and (not ranked2[0]["est_violations"] or not chosen["est_violations"]):
+                        ranked, chosen = ranked2, ranked2[0]
+                        diagnosis = reply2.get("diagnosis", diagnosis)
+                        action = chosen["why"]
+                        for r in ranked:
+                            e = r["estimate"]
+                            print(f"     re-candidate #{r['rank']}: {ir_view(IR.from_dict(r['ir']), locked)}  est fmax~{e['fmax_mhz']:.0f} lut~{e['lut']} dsp~{e['dsp']}  {r['est_violations'] or 'est-feasible'}  -- {r['why']}", flush=True)
+                        emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": action, "rescreened": True,
+                              "candidates": [{"ir": ir_view(IR.from_dict(r["ir"]), locked), "why": r["why"], "rank": r["rank"], "estimate": r["estimate"], "est_violations": r["est_violations"]} for r in ranked],
+                              "next_ir": ir_view(IR.from_dict(chosen["ir"]), locked), "stop": False})
+            except RuntimeError as e:
+                print(f"     re-plan failed: {e}; proceeding with the best estimated candidate", flush=True)
+        ir = IR.from_dict(chosen["ir"])
+        fallbacks = [r for r in ranked[1:] if not r["est_violations"]]
 
     best = pick_best(history, c)
     summary = {"run_id": run_id, "spec": spec, "design": design.kind, "backend": backend,
