@@ -222,7 +222,15 @@ export const siliconAgent = {
       parameters: obj({ job: str({ maxLength: 64 }), depth: int({ minimum: 4, maximum: 64 }) }, ['job']),
       meta: { ...readOnly, costHint: { wallMs: 60000 } },
       async execute({ job, depth }, tctx) {
-        try { return text(await api('GET', `/jobs/${encodeURIComponent(job)}/formal?depth=${depth ?? 16}`, undefined, tctx?.signal)) } catch (e) { return fail(e) }
+        // one call waits up to 80 s for the background check so the model is not tempted to spin on it
+        try {
+          const deadline = Date.now() + 80_000
+          for (;;) {
+            const r = await api('GET', `/jobs/${encodeURIComponent(job)}/formal?depth=${depth ?? 16}`, undefined, tctx?.signal)
+            if (r.status !== 'running' || Date.now() >= deadline) return text(r)
+            await new Promise((ok) => setTimeout(ok, 5000))
+          }
+        } catch (e) { return fail(e) }
       },
     })
 
