@@ -61,12 +61,17 @@ FIR_IR = """IR fields and legal ranges (taps, data_width, coef_width and the coe
   acc_in_dsp bool        xc7s50 only: accumulate inside the DSP48E1 post-adder (true) or in a fabric CARRY4 adder (false)
   coef_port  bool        task parameter (never change): coefficients in a writable register file instead of constants;
                          costs U*coef_width FFs + a decoder, and the multipliers can no longer be constant-folded
+  sum_tree   bool        fold>1 only: reduce the M=U/F partial sums in a registered balanced tree (ceil(log2 M) register
+                         stages, +ceil(log2 M) cycles latency, no throughput change) instead of one combinational M-way
+                         adder chain into the output register. When the critical path starts at part[*] and ends at
+                         out_data (the post-accumulator reduction), this is the knob that shortens it; pipe_mul/dsp_regs
+                         sit before the accumulator and cannot.
 
 Structure summary: multipliers = ceil(U / fold); throughput = 1/fold samples per cycle; the transposed form's adders
 are all local (mult -> add -> register), so its Fmax does not degrade with N; the folded form adds a tap-operand
 mux (U/F : 1) and a coefficient ROM in front of each multiplier, which costs LUTs and routing per fold step."""
 
-FIR_IR_JSON = '{"symmetric":..,"fold":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..}'
+FIR_IR_JSON = '{"symmetric":..,"fold":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..,"sum_tree":..}'
 
 FIR_FACTS = {
     "gatemate": """GateMate facts, measured on a 16-tap 12x12 FIR: the multiplier is a cascade of ~20 CPE_MULT cells (CC_MULT) at

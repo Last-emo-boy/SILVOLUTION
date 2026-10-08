@@ -66,6 +66,7 @@ class FirArch:
     dsp_regs: str = "none"
     acc_in_dsp: bool = True
     coef_port: bool = False  # true: coefficients live in a register file with a write port (coef_we/coef_addr/coef_data); false: constants
+    sum_tree: bool = False  # fold>1: reduce the M partial sums in a registered balanced tree (one stage per level) instead of one combinational chain
     coefs: tuple[int, ...] = field(default_factory=lambda: tuple(lowpass_taps(32)))
 
     @property
@@ -79,6 +80,11 @@ class FirArch:
     @property
     def mul_latency(self) -> int:
         return self.pipe_mul + DSP_REG_MODES[self.dsp_regs]
+
+    @property
+    def sum_levels(self) -> int:
+        """Register stages of the final reduction (fold>1 only): log2 of the multiplier count when sum_tree is on."""
+        return math.ceil(math.log2(self.multipliers)) if (self.fold > 1 and self.sum_tree and self.multipliers > 1) else 0
 
     @property
     def min_acc_width(self) -> int:
@@ -135,6 +141,8 @@ class FirArch:
         d.pop("cutoff", None)  # the coefficients already carry it; keeps older cache entries valid
         if _style(backend) != "vivado":
             d.pop("acc_in_dsp", None)
+        if not d.get("sum_tree"):
+            d.pop("sum_tree", None)  # the knob was added later; off = the RTL older entries were measured on
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -144,7 +152,7 @@ def throughput(a: FirArch) -> float:
 
 def latency_cycles(a: FirArch) -> int:
     base = (1 if a.reg_in else 0) + a.mul_latency + 2
-    return base if a.fold == 1 else base + a.fold + 1
+    return base if a.fold == 1 else base + a.fold + 1 + a.sum_levels
 
 
 # ---------------------------------------------------------------- emitter helpers
@@ -366,6 +374,67 @@ endmodule
 
 
 # ---------------------------------------------------------------- fold > 1: direct form, time-multiplexed
+_SUM_CHAIN = """    logic part_v;
+    always_ff @(posedge clk) part_v <= sv_m & sl_m & ~rst;
+    logic signed [AW-1:0] total;
+    always_comb begin
+        total = '0;
+        for (int m = 0; m < M; m++) total += part[m];
+    end
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            out_valid <= 1'b0;
+            out_data  <= '0;
+        end else begin
+            out_valid <= part_v;
+            out_data  <= total;
+        end
+    end"""
+
+
+def _sum_tree(levels: int) -> str:
+    """Registered balanced reduction of part[0..M-1]: level l holds ceil(M/2^l) sums; each level is one register stage,
+    so the longest adder on the output side is one AW-bit add. The valid travels alongside. Level 0 reads `part`
+    directly; levels 1..SL are one register array (iverilog refuses an unpacked array driven by both assigns and
+    always blocks)."""
+    return f"""    localparam int SL = {levels};
+    // sum_r[l][i] = sum of part[2^l*i .. 2^l*(i+1)-1] for l >= 1; level SL has one entry
+    logic signed [AW-1:0] sum_r [SL+1][M];
+    logic                 vld_r [SL+1];
+    logic                 part_v;
+    always_ff @(posedge clk) part_v <= sv_m & sl_m & ~rst;
+    generate
+        for (genvar l = 1; l <= SL; l++) begin : g_lvl
+            localparam int NI = (M + (1 << l) - 1) >> l;              // entries at this level
+            localparam int NP = (M + (1 << (l - 1)) - 1) >> (l - 1);  // entries at the previous level
+            if (l == 1) begin : g_v1
+                always_ff @(posedge clk) vld_r[l] <= part_v;
+            end else begin : g_vn
+                always_ff @(posedge clk) vld_r[l] <= vld_r[l-1];
+            end
+            for (genvar i = 0; i < NI; i++) begin : g_node
+                if (l == 1 && 2 * i + 1 < NP) begin : g_pair0
+                    always_ff @(posedge clk) sum_r[l][i] <= part[2*i] + part[2*i+1];
+                end else if (l == 1) begin : g_pass0
+                    always_ff @(posedge clk) sum_r[l][i] <= part[2*i];
+                end else if (2 * i + 1 < NP) begin : g_pair
+                    always_ff @(posedge clk) sum_r[l][i] <= sum_r[l-1][2*i] + sum_r[l-1][2*i+1];
+                end else begin : g_pass
+                    always_ff @(posedge clk) sum_r[l][i] <= sum_r[l-1][2*i];
+                end
+            end
+        end
+    endgenerate
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            out_valid <= 1'b0;
+            out_data  <= '0;
+        end else begin
+            out_valid <= vld_r[SL];
+            out_data  <= sum_r[SL][0];
+        end
+    end"""
+
 def _emit_folded(a: FirArch, backend: str) -> str:
     N, U, F, DW, CW, AW = a.taps, a.unique_taps, a.fold, a.data_width, a.coef_width, a.acc_width
     M = U // F
@@ -378,6 +447,7 @@ def _emit_folded(a: FirArch, backend: str) -> str:
     jw = max(1, math.ceil(math.log2(F)))
     svpipe = _delay_chain(ML, [("sv_m", "step_v"), ("sl_m", "step_last")])
     coef_ports, coef_store = _coef_snippets(a, U, coef_lit)
+    reduction = _sum_tree(a.sum_levels) if a.sum_levels else _SUM_CHAIN
     return f"""module fir_top #(
     parameter int N  = {N},
     parameter int U  = {U},
@@ -496,21 +566,6 @@ def _emit_folded(a: FirArch, backend: str) -> str:
     endgenerate
 
     // ---- final reduction of the M partial sums ----
-    logic part_v;
-    always_ff @(posedge clk) part_v <= sv_m & sl_m & ~rst;
-    logic signed [AW-1:0] total;
-    always_comb begin
-        total = '0;
-        for (int m = 0; m < M; m++) total += part[m];
-    end
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            out_valid <= 1'b0;
-            out_data  <= '0;
-        end else begin
-            out_valid <= part_v;
-            out_data  <= total;
-        end
-    end
+{reduction}
 endmodule
 """

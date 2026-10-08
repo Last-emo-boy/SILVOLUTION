@@ -89,6 +89,10 @@ def estimate_fir(ir: dict, backend: str) -> dict:
             dsp = mults
             fmax = (220 if fold == 1 else 125 - 5 * max(fold - 4, 0)) - 0.5 * max(aw - 38, 0)
             lut = mults * aw * 0.7 + taps * 12
+        if fold > 1 and ir.get("sum_tree") and mults > 1:
+            # the M-way output reduction becomes one adder per stage: the output side stops being the limiter
+            fmax *= 1.15
+            lut += mults * aw * 0.3
         fmax *= _scale(backend)
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(1 / fold, 4)}
 

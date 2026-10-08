@@ -45,6 +45,7 @@ SCHEMAS = {
             {"name": "symmetric", "type": "bool", "hint": "share one multiplier per h[k]==h[N-1-k] pair"},
             {"name": "fold", "type": "int", "min": 1, "max": 32, "hint": "taps per multiplier; 1 = transposed, >1 = time-multiplexed (must divide unique taps)"},
             {"name": "coef_port", "type": "bool", "hint": "coefficients writable at runtime (coef_we/addr/data port; AXI-Lite in the wrapper)"},
+            {"name": "sum_tree", "type": "bool", "hint": "fold>1: registered balanced reduction of the partial sums (+log2(multipliers) cycles) instead of one combinational adder chain"},
             *SHARED,
         ],
         "presets": {
