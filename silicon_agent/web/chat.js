@@ -67,7 +67,12 @@ const rtlShown = new Set();
   $("#input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
   $("#input").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px"; });
   $("#t-rail").onclick = () => { const sh = $(".shell"); if (window.innerWidth <= 800) sh.classList.toggle("rail-shown"); else sh.classList.toggle("rail-hidden"); };
-  $("#stop").onclick = async () => { const j = liveJob(); if (j) { await post(`/jobs/${j}/stop`); $("#stop").disabled = true; } };
+  $("#stop").onclick = async () => {
+    // stops the agent's turn (and the job it is running); without a turn in flight, just the live job
+    $("#stop").disabled = true;
+    if (thread?.busy && thread.id) await post(`/threads/${thread.id}/stop`);
+    else { const j = liveJob(); if (j) await post(`/jobs/${j}/stop`); }
+  };
   await refreshThreads();
   setInterval(refreshThreads, 6000);
   const h = location.hash.slice(1);
@@ -156,7 +161,7 @@ function render() {
   $("#title").textContent = thread.title || "";
   $("#wt-link").href = `/work?thread=${encodeURIComponent(tid)}`;
   const live = liveJob();
-  $("#stop").hidden = !live; $("#stop").disabled = false;
+  $("#stop").hidden = !live && !thread.busy; $("#stop").disabled = false;
   const sc = $("#scroll"), atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80;
   const ol = $("#msgs");
   const existing = [...ol.children];

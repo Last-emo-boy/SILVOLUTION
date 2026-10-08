@@ -504,6 +504,8 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
                     _save_thread(tid)
 
     r = c.prompt(sid, prompt, on_event=on_event, timeout=3600)
+    if r.get("stop") == "cancelled":
+        r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（已停止）" if lang == "zh" else "(stopped)")
     for t in r["tools"]:
         if t.get("name") == "sa_run" and isinstance(t.get("result"), dict):
             jid = t["result"].get("id")
@@ -797,6 +799,26 @@ class Handler(BaseHTTPRequestHandler):
                 with (RESULTS / parts[1] / "events.jsonl").open("a") as f:
                     f.write(json.dumps(rec) + "\n")
                 return self._json(200, {"ok": True, "queued_for_iteration": sum(1 for e in job["events"] if e["kind"] == "result") + 2})
+        if len(parts) == 3 and parts[0] == "threads" and parts[2] == "stop":
+            # stop the agent's turn: cancel the AGH session's prompt and ask any running job of the thread to stop
+            th = _threads.get(parts[1])
+            if not th or not _visible(th, sub):
+                return self._json(404, {"error": "no such thread"})
+            stopped = {"turn": False, "jobs": []}
+            if th.get("agh_session"):
+                try:
+                    from . import agh
+                    agh.client().cancel(th["agh_session"])
+                    stopped["turn"] = True
+                except Exception as e:
+                    stopped["error"] = str(e)[:200]
+            with _lock:
+                for jid in _thread_jobs(parts[1]):
+                    j = _jobs.get(jid)
+                    if j and j["status"] in ("queued", "running"):
+                        j["stop_requested"] = True
+                        stopped["jobs"].append(jid)
+            return self._json(200, stopped)
         if len(parts) == 3 and parts[0] == "threads" and parts[2] == "title":
             th = _threads.get(parts[1])
             if not th or not _visible(th, sub):
