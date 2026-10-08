@@ -112,6 +112,13 @@ card(s, Inches(4.75), Inches(1.8), Inches(3.9), Inches(4.3), "确定性生成器
 card(s, Inches(8.8), Inches(1.8), Inches(3.9), Inches(4.3), "EDA 是 ground truth", [[("cocotb + iverilog 对 Python 黄金模型；yosys + nextpnr / Vivado 2025.2 真实布局布线。", {})], [("", {})], [("Fmax、LUT、DSP、关键路径逐级分解——全部来自工具报告，喂回 LLM 做诊断。", {})], [("", {})], [("约束 = 硬过滤；目标 = 字典序。", {})]])
 text(s, Inches(0.7), Inches(6.35), Inches(12), Inches(0.5), "结果：LLM 的每一个决定都被真实工具立刻打分；它只能在一个「永远可综合、永远可仿真」的空间里搜索。", size=15, color=ACCENT)
 
+# ------------------------------------------------------------------ 3b. agent runtime: Agnes Harness
+s = slide(); n += 1; header(s, "智能体底座：Agnes Harness（AGH）跑模型循环，silicon-agent 是它的插件", "02b · 运行时", n)
+card(s, Inches(0.7), Inches(1.8), Inches(3.9), Inches(4.4), "AGH 负责什么", [[("模型循环（DeepSeek 作为 provider）、每次工具调用的输入/结构化输出记录、审批、会话历史与压缩、可恢复的任务状态。", {})], [("", {})], [("一个对话 = 一个 AGH 会话；前端显示的「智能体过程」就是 AGH 的工具账本。", {})]])
+card(s, Inches(4.75), Inches(1.8), Inches(3.9), Inches(4.4), "silicon-agent 提供什么", [[("agh-plugin：12 个 sa_* 工具（schema / interpret / estimate / run / job / steer / stop / jobs / pareto / job_file / formal / bench）+ 一个 Skill「怎么把需求跑到签核」。", {})], [("", {})], [("两个钩子：context 注入方法论，tool_call 在聊天会话里拒绝 write/shell 等宿主工具——所有变更都经作业服务器。", {})]])
+card(s, Inches(8.8), Inches(1.8), Inches(3.9), Inches(4.4), "魔改了什么", [[("fork 里加了 `silicon` 配方（只读宿主工具集）；DeepSeek 凭证走 AGH 的加密凭证库（目录必须 0700）。", {})], [("", {})], [("部署：compose 里第二个容器跑 agnesd，共享 /srv/sa，启动时自动配置 DeepSeek + 安装/信任/启用插件。", {})], [("", {})], [("agent 自己发现过一个仿真库 bug（Gowin ALU 模型常量输入下永远 X），修掉后它重跑收敛到 236 LUT。", {"color": GOOD})]])
+text(s, Inches(0.7), Inches(6.4), Inches(12), Inches(0.5), "结果：规划、工具记录、审批、会话都在一个有审计的底座上；silicon-agent 只写领域能力。换模型 = 换 AGH provider。", size=14, color=ACCENT)
+
 # ------------------------------------------------------------------ 4. loop diagram
 s = slide(); n += 1; header(s, "闭环：规划 → 生成 → 仿真 → 综合/P&R → 诊断 → 学习", "03 · 系统", n)
 nodes = [("用户\n自然语言", MUTED), ("nl.interpret\n→ 规格", ACCENT), ("规划器\n(DeepSeek)\n≤3 个候选 IR", ACCENT), ("筛选\n闭式估算 + 校准", WARN), ("生成器\nIR → SV", TEXT2), ("仿真阶梯\n行为级 … 实现后时序", GOOD), ("综合 + P&R\nnextpnr / Vivado", ORANGE), ("诊断\n关键路径分解", BAD), ("设计记忆\n经验沉淀 / 召回", GOOD)]
@@ -155,6 +162,7 @@ res = [("INT8 matmul · 五级仿真", "XC7S50", "≥300 MHz · ≤32 DSP", "3",
        ("16 位 sin/cos CORDIC · 0 DSP", "ECP5", "≥200 MHz · 省 LUT", "8", "4 级流水 · 211.8 MHz · 594 LUT · 0 DSP"),
        ("FIR → CORDIC 数据通路（graph）", "ECP5", "≥120 MHz · ≤10 DSP", "3", "218.4 MHz · 1209 LUT · 3 DSP · 1 样本/周期"),
        ("16 阶 FIR · 运行时系数端口", "GateMate CCGM1A1", "≥60 MHz", "8", "对称 fold=2 · 60.3 MHz · 4 CC_MULT · 1028 LUT"),
+       ("3×3 卷积（AGH 智能体全程驱动）", "Gowin GW1NR-9", "≥100 MHz · 省 LUT", "6+5", "286 LUT/1 px·cyc 与 236 LUT/⅓ px·cyc 两点前沿 · 形式检查通过"),
        ("256 点 16 位 FFT · 自然序", "Gowin GW1NR-9", "≥100 MHz · ≤20 MULT", "1", "cmul=three · 153.9 MHz · 18/20 MULT · 3250 LUT · 8 BRAM"),
        ("5×5 卷积 · 640 宽 · 五级仿真", "XC7S50", "≥200 MHz · ≤30 DSP", "2", "in_pipe_out · 219.8 MHz · 25 DSP · 469 LUT · 五级全过"),
        ("3×3 高斯卷积（聊天）", "iCE40 UP5K", "≥60 MHz · ≤1500 LUT", "4", "全并行 · 70.6 MHz · 273 LUT · 0 DSP · 2 BRAM"),
