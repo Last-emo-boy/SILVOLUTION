@@ -133,6 +133,8 @@ def pick_best(history: list[dict], c: Constraints) -> dict | None:
                 k.append(m.dsp)
             elif obj == "minimize_latency":
                 k.append(h["latency_cycles"])
+            elif obj == "minimize_area":
+                k.append(m.area_um2 if m.area_um2 is not None else m.lut)
             elif obj == "minimize_power":
                 k.append(m.power_mw if m.power_mw is not None else 0)
         return tuple(k)
@@ -419,10 +421,35 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("usage: python -m silicon_agent.loop <spec.json> [max_iter]")
+        print("usage: python -m silicon_agent.loop <spec.json> [max_iter] [--out DIR --events FILE --control FILE]")
         return 2
     spec = json.loads(Path(argv[1]).read_text())
-    max_iter = int(argv[2]) if len(argv) > 2 else 8
+    max_iter = int(argv[2]) if len(argv) > 2 and not argv[2].startswith("--") else 8
+    opts = {argv[i]: argv[i + 1] for i in range(2, len(argv) - 1) if argv[i].startswith("--")}
+    if "--events" in opts:
+        # driven by the job server (a proposal's A/B run on a patched generator tree): events stream to a file as
+        # JSON lines, steer/stop arrive through a control file the server rewrites
+        evf = open(opts["--events"], "a")
+        ctl = Path(opts["--control"]) if "--control" in opts else None
+
+        def on_event(ev):
+            evf.write(json.dumps(ev) + "\n"); evf.flush()
+
+        class Control:
+            def _read(self):
+                try:
+                    return json.loads(ctl.read_text()) if ctl and ctl.exists() else {}
+                except ValueError:
+                    return {}
+            def steer(self):
+                d = self._read(); msgs = d.get("steer") or []
+                if msgs and ctl:
+                    d["steer"] = []; ctl.write_text(json.dumps(d))
+                return msgs
+            def should_stop(self):
+                return bool(self._read().get("stop"))
+        s = run_loop(spec, max_iter=max_iter, out_dir=Path(opts["--out"]) if "--out" in opts else None, on_event=on_event, control=Control())
+        return 0 if s["best"] else 1
     s = run_loop(spec, max_iter=max_iter)
     print("\n=== RESULT ===")
     if s["best"]:

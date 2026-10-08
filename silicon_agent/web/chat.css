@@ -181,3 +181,6 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .modes button { font: 10.5px var(--mono); color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 1px 8px; cursor: pointer; }
 .modes button.on { color: var(--accent); border-color: var(--accent); }
 .agent-steps summary .x { color: var(--bad, #e5484d); }
+.gate-steps { margin: 6px 0; } .gstep { margin: 3px 0; } .gstep .v { color: var(--good); } .gstep .x { color: var(--bad, #e5484d); }
+.small { font-size: 12px; } pre.log { font: 11px var(--mono); white-space: pre-wrap; background: var(--surface-2); padding: 8px; border-radius: 6px; max-height: 320px; overflow: auto; }
+pre.diff { max-height: 480px; }

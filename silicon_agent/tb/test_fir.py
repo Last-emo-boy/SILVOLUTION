@@ -92,12 +92,15 @@ async def stream(dut):
         dut.in_valid.value = 1
         dut.in_data.value = x & ((1 << DW) - 1)
         # hold until the clock edge at which the DUT samples valid&&ready high
+        stall = 0
         while True:
             await ReadOnly()
             ready = bool(dut.in_ready.value)
             await RisingEdge(dut.clk)
             if ready:
                 break
+            stall += 1
+            assert stall < 4000, "in_ready stalled for 4000 cycles (dead handshake)"
             cov.hit("stall:ready-low")
         await Timer(1, unit="ns")  # move off the edge before driving the next value
     dut.in_valid.value = 0

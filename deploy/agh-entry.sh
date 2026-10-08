@@ -19,9 +19,11 @@ computerUse:
 approvals:
   mode: off
 # the forked harness ships a `silicon` preset (read-only host tools); standard stays allowed for the CLI
-presets: { default: silicon, allowed: [silicon, standard] }
+presets: { default: silicon, allowed: [silicon, author, standard] }
 EOF
 fi
+# older profiles: allow the author recipe the fork ships now
+sed -i 's/allowed: \[silicon, standard\]/allowed: [silicon, author, standard]/' "$AGH_HOME/profiles/$AGNES_PROFILE/profile.yaml"
 # the job-server bearer token for the plugin, readable by the worker process only
 if [ -n "${SA_TOKEN:-}" ]; then
   umask 077; printf '%s' "$SA_TOKEN" > "$AGH_HOME/sa-token"; umask 022

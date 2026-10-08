@@ -57,10 +57,13 @@ async def stream(dut):
         if i % 5 == 0:
             dut.in_valid.value = 0; await ClockCycles(dut.clk, rng.randint(1, 3))
         dut.in_valid.value = 1; dut.in_x.value = x & mask; dut.in_y.value = y & mask; dut.in_z.value = z & mask
+        stall = 0
         while True:
             await ReadOnly(); ready = bool(dut.in_ready.value); await RisingEdge(dut.clk)
             if ready:
                 break
+            stall += 1
+            assert stall < 4000, "in_ready stalled for 4000 cycles (dead handshake)"
         await Timer(1, unit="ns")
     dut.in_valid.value = 0
     await ClockCycles(dut.clk, 40 + a.iterations * 2)

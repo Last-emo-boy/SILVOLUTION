@@ -73,6 +73,7 @@ class Constraints:
     max_bram: int | None = None
     max_ff: int | None = None
     max_power_mw: float | None = None  # dynamic power estimate (Vivado report_power); None on devices without a power model
+    max_area_um2: float | None = None  # standard-cell area (ASIC backends); None on FPGAs
     objective: list[str] = field(default_factory=lambda: ["maximize_throughput", "minimize_lut"])
 
     @classmethod
@@ -96,6 +97,7 @@ class Metrics:
     fmax_seeds: list = field(default_factory=list)  # per-seed Fmax when P&R ran with several seeds; fmax_mhz is their median
     power_mw: float | None = None  # dynamic power estimate where the toolchain reports one (Vivado)
     sim_coverage: dict = field(default_factory=dict)  # functional-coverage bins hit by the behavioral testbench
+    area_um2: float | None = None  # standard-cell area after place-and-route (ASIC backends); lut then counts cells
 
     def violations(self, c: Constraints) -> list[str]:
         v = []
@@ -113,6 +115,8 @@ class Metrics:
                 v.append(f"{name} {getattr(self, name)} > {limit}")
         if c.max_power_mw is not None and self.power_mw is not None and self.power_mw > c.max_power_mw:
             v.append(f"power {self.power_mw} mW > {c.max_power_mw} mW")
+        if c.max_area_um2 is not None and self.area_um2 is not None and self.area_um2 > c.max_area_um2:
+            v.append(f"area {self.area_um2:.0f} um2 > {c.max_area_um2} um2")
         return v
 
 

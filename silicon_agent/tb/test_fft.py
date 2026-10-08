@@ -59,10 +59,13 @@ async def stream(dut):
             if i % 9 == 0 and rng.random() < 0.3:
                 dut.in_valid.value = 0; await ClockCycles(dut.clk, rng.randint(1, 2))
             dut.in_valid.value = 1; dut.in_first.value = 1 if i == 0 else 0; dut.in_re.value = re & mask; dut.in_im.value = im & mask
+            stall = 0
             while True:
                 await ReadOnly(); ready = bool(dut.in_ready.value); await RisingEdge(dut.clk)
                 if ready:
                     break
+                stall += 1
+                assert stall < 4000, "in_ready stalled for 4000 cycles (dead handshake)"
             await Timer(1, unit="ns")
     dut.in_valid.value = 0; dut.in_first.value = 0
     # flush: a zero frame pushes the last real frame out (same as the golden model's flush)

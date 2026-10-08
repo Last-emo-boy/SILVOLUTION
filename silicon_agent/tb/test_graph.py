@@ -92,18 +92,24 @@ async def stream(dut):
         if i % 11 == 0 and rng.random() < 0.3:
             dut.in_valid.value = 0; await ClockCycles(dut.clk, rng.randint(1, 2))
         dut.in_valid.value = 1; dut.in_frame.value = 1 if i == 0 else 0; dut.in_data.value = x & ((1 << DW) - 1)
+        stall = 0
         while True:
             await ReadOnly(); ready = bool(dut.in_ready.value); await RisingEdge(dut.clk)
             if ready:
                 break
+            stall += 1
+            assert stall < 4000, "in_ready stalled for 4000 cycles (dead handshake)"
         await Timer(1, unit="ns")
     # flush with zeros for the longest node latency (FFT needs a frame)
     for i in range(unit):
         dut.in_valid.value = 1; dut.in_frame.value = 0; dut.in_data.value = 0
+        stall = 0
         while True:
             await ReadOnly(); ready = bool(dut.in_ready.value); await RisingEdge(dut.clk)
             if ready:
                 break
+            stall += 1
+            assert stall < 4000, "in_ready stalled for 4000 cycles (dead handshake)"
         await Timer(1, unit="ns")
     dut.in_valid.value = 0
     await ClockCycles(dut.clk, 400 + 3 * unit)

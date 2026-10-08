@@ -15,6 +15,9 @@ API
   POST /api/estimate             {"spec"} or {"design","backend","ir"} -> screening estimate, no EDA
   POST /api/jobs/<id>/steer      {"message": "..."}  -> read by the planner before its next proposal
   POST /api/jobs/<id>/stop
+  POST /api/proposals            {"diff", "title", "rationale", "designs": [..], "irs"?: [{design, backend, ir}], "ab_spec"?, "thread"?}
+                                 a change to the generators: gated on a scratch copy (emit/sim/formal/mutation), then an A/B run
+  GET  /api/proposals[/<id>]     gate verdict per step; POST /api/proposals/<id>/merge records the operator's decision (token only)
   GET  /api/memory               lessons per (design, backend), scored
   GET  /api/bench                last nightly regression status + report
   GET  /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]   every measured point, the Pareto front, best under constraints
@@ -48,6 +51,7 @@ import queue
 import secrets
 import shutil
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -177,7 +181,10 @@ def _worker():
                     with _lock:
                         return bool(job.get("stop_requested")) or _shutting_down.is_set()
 
-            summary = run_loop(job["spec"], max_iter=job["max_iter"], out_dir=RESULTS / job_id, on_event=on_event, control=Control())
+            if job["spec"].get("generator_tree"):
+                summary = _run_loop_on_tree(job, job_id, on_event, Control())
+            else:
+                summary = run_loop(job["spec"], max_iter=job["max_iter"], out_dir=RESULTS / job_id, on_event=on_event, control=Control())
             with _lock:
                 if _shutting_down.is_set() and not job.get("stop_requested"):
                     # loop ended because we are going down: leave it queued for the next start
@@ -198,6 +205,45 @@ def _worker():
             if job["status"] not in ("queued", "running"):
                 _narrate_job_async(job_id)
 
+
+
+def _run_loop_on_tree(job: dict, job_id: str, on_event, control) -> dict:
+    """A proposal's A/B: the loop runs in a subprocess whose silicon_agent is the patched scratch tree (the server's
+    own modules stay what they are). Events come back as JSON lines; steer/stop go through a control file."""
+    tree = Path(job["spec"]["generator_tree"])
+    out = RESULTS / job_id
+    specf = out / "spec.json"; evf = out / "loop_events.jsonl"; ctl = out / "control.json"
+    evf.write_text(""); ctl.write_text("{}")
+    env = dict(os.environ); env["PYTHONPATH"] = str(tree); env.pop("SA_AGH", None)
+    p = subprocess.Popen([sys.executable, "-m", "silicon_agent.loop", str(specf), str(job["max_iter"]), "--out", str(out), "--events", str(evf), "--control", str(ctl)],
+                         cwd=str(tree), env=env, stdout=subprocess.DEVNULL, stderr=open(out / "loop_stderr.log", "w"))
+    seen = 0
+    while True:
+        rc = p.poll()
+        with evf.open() as f:
+            lines = f.read().splitlines()
+        for line in lines[seen:]:
+            try:
+                on_event(json.loads(line))
+            except ValueError:
+                pass
+        seen = len(lines)
+        msgs = control.steer()
+        if msgs or control.should_stop():
+            try:
+                d = json.loads(ctl.read_text()) if ctl.exists() else {}
+            except ValueError:
+                d = {}
+            d["steer"] = (d.get("steer") or []) + msgs
+            d["stop"] = d.get("stop") or control.should_stop()
+            ctl.write_text(json.dumps(d))
+        if rc is not None:
+            break
+        time.sleep(2)
+    summ = out / "summary.json"
+    if not summ.exists():
+        raise RuntimeError(f"A/B loop on {tree} exited {rc} without a summary: {(out / 'loop_stderr.log').read_text()[-1500:]}")
+    return json.loads(summ.read_text())
 
 
 def _gateway_sig_ok(subject: str, groups: str, sig: str) -> bool:
@@ -231,15 +277,16 @@ def _resume_turns() -> None:
     for tid, th in list(_threads.items()):
         if not th.get("busy"):
             continue
-        if agh.enabled() and th.get("agh_session"):
+        if agh.enabled() and (th.get("agh_session") or th.get("agh_author_session")):
             def go(tid=tid):
                 th = _threads[tid]
                 first = next((m["text"] for m in th["messages"] if m["role"] == "user"), "")
                 lang = nl._lang(first)
                 try:
                     c = agh.client()
-                    sid = th["agh_session"]
-                    c.load_session(sid, agh.workspace())
+                    author = (agh.MODES.get(th.get("mode") or "") or {}).get("session") == "author" and th.get("agh_author_session")
+                    sid = th["agh_author_session"] if author else th["agh_session"]
+                    c.load_session(sid, _author_tree(tid) if author else agh.workspace())
                     # the harness aborts a turn whose client connection went away (that is what a restart looks
                     # like to it), so usually there is nothing to follow; when there is, take its outcome
                     r = c.wait_idle(sid, timeout=3600, on_event=_run_watcher(tid, lang)) if (c.project(sid) or {}).get("opState") else None
@@ -475,6 +522,84 @@ def _formal_start(job_id: str, job: dict, k: int, fresh_req: bool) -> dict:
     return {"status": "running", "depth": k, "note": "formal check started; call again in a minute"}
 
 
+# ---------------------------------------------------------------- proposals (changes to the generators, gated)
+PROPOSALS = ROOT / "proposals"
+_proposals: dict[str, dict] = {}
+_proposal_threads: dict[str, threading.Thread] = {}
+
+
+def _load_proposals() -> None:
+    if not PROPOSALS.exists():
+        return
+    for d in sorted(PROPOSALS.iterdir()):
+        meta = d / "proposal.json"
+        if meta.exists():
+            try:
+                pr = json.loads(meta.read_text())
+                rep = d / "gate" / "report.json"
+                if rep.exists():
+                    pr["report"] = json.loads(rep.read_text())
+                if pr.get("status") == "gating":
+                    pr["status"] = "interrupted"
+                _proposals[d.name] = pr
+            except ValueError:
+                pass
+
+
+def _save_proposal(pid: str) -> None:
+    pr = _proposals[pid]
+    (PROPOSALS / pid).mkdir(parents=True, exist_ok=True)
+    (PROPOSALS / pid / "proposal.json").write_text(json.dumps({k: v for k, v in pr.items() if k != "report"}, ensure_ascii=False, indent=1))
+
+
+def _proposal_view(pid: str) -> dict:
+    pr = _proposals[pid]
+    rep = pr.get("report") or {}
+    steps = [{"name": st["name"], "ok": st.get("ok"), "seconds": st.get("seconds"), **({"error": st["error"][-400:]} if st.get("error") else {}),
+              **({"mutation": st["mutation"]} if "mutation" in st else {}), **({"equivalence": st["equivalence"]} if "equivalence" in st else {}),
+              **({"failures": st["failures"]} if st.get("failures") else {}), **({"sims": [x for x in st["sims"] if not x["ok"]]} if st.get("sims") and not st["ok"] else {})}
+             for st in rep.get("steps", [])]
+    return {"id": pid, "title": pr.get("title"), "rationale": pr.get("rationale"), "status": pr.get("status"), "designs": pr.get("designs"),
+            "files": rep.get("files") or pr.get("files"), "diff_lines": rep.get("diff_lines"), "created": pr.get("created"), "thread": pr.get("thread"), "subject": pr.get("subject"),
+            "gate_ok": rep.get("ok"), "scope_errors": rep.get("scope_errors"), "apply_error": rep.get("apply_error"), "steps": steps,
+            "ab": pr.get("ab"), "merged": pr.get("merged")}
+
+
+def _start_proposal(pid: str) -> None:
+    from . import proposals as P
+    pr = _proposals[pid]
+
+    def run():
+        try:
+            rep = P.gate(pr["diff"], PROPOSALS / pid / "gate", designs=pr["designs"], irs=pr.get("irs") or [], timeout=5400)
+        except Exception as e:
+            rep = {"ok": False, "steps": [], "log": f"gate crashed: {e}"}
+        with _lock:
+            pr["report"] = rep
+            pr["status"] = "passed" if rep.get("ok") else "failed"
+            _save_proposal(pid)
+        # a measured A/B for the IRs the proposal names: the patched generator's RTL goes through the real flow as a
+        # normal run bound to the proposal's thread, so the chat shows its cards next to the gate verdict
+        if rep.get("ok") and pr.get("ab_spec"):
+            try:
+                spec = dict(pr["ab_spec"]); spec["task"] = f"[proposal {pid}] {spec.get('task', '')}"[:200]
+                spec["generator_tree"] = str(PROPOSALS / pid / "gate" / "tree")
+                jid = _submit(spec, int(pr.get("ab_max_iter") or 3), pr.get("subject", "cli"), thread=pr.get("thread"))
+                with _lock:
+                    pr["ab"] = {"job": jid}
+                    _save_proposal(pid)
+                if pr.get("thread") in _threads:
+                    _note_agent_run(pr["thread"], jid, nl._lang(pr.get("title") or ""))
+            except Exception as e:
+                with _lock:
+                    pr["ab"] = {"error": str(e)[:300]}
+                    _save_proposal(pid)
+
+    t = threading.Thread(target=run, daemon=True)
+    _proposal_threads[pid] = t
+    t.start()
+
+
 def _run_note(spec: dict, lang: str) -> str:
     c = spec.get("constraints", {})
     cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
@@ -594,6 +719,25 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
     return started
 
 
+def _author_tree(tid: str) -> str:
+    """The scratch copy of the package an author session edits: made once per conversation, under SA_ROOT so the
+    AGH worker (another container sharing /srv/sa) can read and write it. A git repo, so `git diff` yields the
+    proposal; the base commit is the deployed code."""
+    from . import proposals as P
+    root = ROOT / "author" / tid
+    if not (root / "silicon_agent").exists():
+        # `a/` is the deployed code, untouched; the author edits `b/`. No git in the containers, so the proposal is
+        # `diff -ruN a b` (the gate applies it with patch -p1, so the a/ b/ prefixes are exactly right)
+        P.scratch_copy(root / "a"); P.scratch_copy(root / "b")
+        (root / "README-author.md").write_text(
+            "Scratch copies of silicon_agent/ for one proposal.\n"
+            "  a/  the deployed generators (do not edit)\n"
+            "  b/  your working copy: edit here, test here\n"
+            "Test:    cd b && python3 -c 'from silicon_agent.fir import ...'   (PYTHONPATH is b/)\n"
+            "Diff:    diff -ruN a b   -> paths come out as a/silicon_agent/x.py b/silicon_agent/x.py, which is what sa_propose wants\n")
+    return str(root)
+
+
 def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     """The same user turn, but run by Agnes Harness: the LLM loop, tool records, approvals and session history
     live in AGH; silicon-agent's capabilities are the `sa_*` tools of the agh-plugin. Runs the agent starts become
@@ -602,25 +746,33 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     from . import agh
     th = _threads[tid]
     c = agh.client()
-    sid = th.get("agh_session")
+    mode_name = th.get("mode") or agh.DEFAULT_MODE
+    mode = agh.MODES.get(mode_name) or agh.MODES[agh.DEFAULT_MODE]
+    # author mode runs in its own AGH session whose workspace is a scratch copy of the package (made once per
+    # conversation); chat modes share the conversation's session
+    author = mode.get("session") == "author"
+    skey = "agh_author_session" if author else "agh_session"
+    sid = th.get(skey)
+    cwd = _author_tree(tid) if author else agh.workspace()
     if sid:
         try:
-            c.load_session(sid, agh.workspace())
+            c.load_session(sid, cwd)
         except agh.AghError:
             sid = None
     if not sid:
-        sid = c.new_session(agh.workspace(), preset=os.environ.get("SA_AGH_PRESET") or None, session_key=f"sa-thread-{tid}")
+        sid = c.new_session(cwd, preset=mode.get("preset") or os.environ.get("SA_AGH_PRESET") or None,
+                            session_key=f"sa-author-{tid}" if author else f"sa-thread-{tid}")
         with _lock:
-            th["agh_session"] = sid
+            th[skey] = sid
             _save_thread(tid)
-    # the conversation's agent mode (fast / deep) selects the harness model slot; applied before every turn so a
-    # session created under one mode follows a later switch
-    mode = agh.MODES.get(th.get("mode") or agh.DEFAULT_MODE) or agh.MODES[agh.DEFAULT_MODE]
-    if th.get("agh_mode_applied") != (th.get("mode") or agh.DEFAULT_MODE):
+    # the conversation's agent mode selects the harness model slot; applied before every turn so a session created
+    # under one mode follows a later switch
+    applied_key = "agh_author_mode_applied" if author else "agh_mode_applied"
+    if th.get(applied_key) != mode_name:
         try:
             c.set_model(sid, mode["route"], mode["model"], mode["thinking"])
             with _lock:
-                th["agh_mode_applied"] = th.get("mode") or agh.DEFAULT_MODE
+                th[applied_key] = mode_name
         except agh.AghError as e:
             print(f"agh: setModel failed for {tid}: {e}", flush=True)
     first = next((m["text"] for m in th["messages"] if m["role"] == "user"), text)
@@ -628,7 +780,7 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     # the method itself is injected by the plugin's context hook (sessions keyed sa-thread-*); the bracketed line
     # only carries the thread id the tools need
     # the reply follows the language of this message (a thread opened in English may continue in Chinese)
-    prompt = f"[silicon-agent chat · thread {tid} · answer in {'Chinese' if nl._lang(text) == 'zh' else 'English'}]\n{text}"
+    prompt = f"[silicon-agent {'author' if author else 'chat'} · thread {tid} · answer in {'Chinese' if nl._lang(text) == 'zh' else 'English'}]\n{text}"
     r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
     # the harness's ledger for this turn (tokens, estimated cost, wall time): shown under the reply
     r["usage"] = c.usage(sid)
@@ -772,9 +924,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(404, {"error": "no such thread"})
             with _lock:
                 jobs_in = {jid: _jobs[jid] for jid in _thread_jobs(parts[1])}
+                props = {pid: _proposal_view(pid) for pid, pr in _proposals.items() if pr.get("thread") == parts[1]}
             return self._json(200, {**th, "jobs": {jid: {"status": j["status"], "spec": j["spec"], "summary": j.get("summary"), "error": j.get("error"),
                                                         "n_events": len(j["events"]), "max_iter": j.get("max_iter"), "parent": j.get("parent"),
-                                                        "created": j["created"], "task": j["spec"].get("task", "")} for jid, j in jobs_in.items()}})
+                                                        "created": j["created"], "task": j["spec"].get("task", "")} for jid, j in jobs_in.items()},
+                                    "proposals": props})
         if path == "/bench":
             bdir = ROOT / "bench"
             reps = sorted(bdir.glob("*.json")) if bdir.exists() else []
@@ -808,6 +962,23 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"design": design, "backend": backend, "count": len(ls),
                             "lessons": sorted(({**l, "score": memory.score(l)} for l in ls), key=lambda l: -l["score"])})
             return self._json(200, out)
+        if path == "/proposals":
+            with _lock:
+                rows = [_proposal_view(pid) for pid in _proposals]
+            rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
+            return self._json(200, rows)
+        if len(parts) == 2 and parts[0] == "proposals":
+            with _lock:
+                if parts[1] not in _proposals:
+                    return self._json(404, {"error": "no such proposal"})
+                v = _proposal_view(parts[1])
+                v["diff"] = _proposals[parts[1]].get("diff", "")
+            return self._json(200, v)
+        if len(parts) == 3 and parts[0] == "proposals" and parts[2] == "report":
+            rep = PROPOSALS / parts[1] / "gate" / "report.json"
+            if not rep.exists():
+                return self._json(404, {"error": "no report yet"})
+            return self._json(200, json.loads(rep.read_text()))
         if path == "/jobs":
             # ?thread=<id>: that conversation's runs; ?thread= (empty): runs bound to no conversation; absent: everything
             q = parse_qs(u.query, keep_blank_values=True)
@@ -940,13 +1111,14 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 # stop means stop: what was waiting behind the turn is dropped too
                 th.pop("queue", None)
-            if th.get("agh_session"):
-                try:
-                    from . import agh
-                    agh.client().cancel(th["agh_session"])
-                    stopped["turn"] = True
-                except Exception as e:
-                    stopped["error"] = str(e)[:200]
+            for key in ("agh_session", "agh_author_session"):
+                if th.get(key):
+                    try:
+                        from . import agh
+                        agh.client().cancel(th[key])
+                        stopped["turn"] = True
+                    except Exception as e:
+                        stopped["error"] = str(e)[:200]
             with _lock:
                 for jid in _thread_jobs(parts[1]):
                     j = _jobs.get(jid)
@@ -1007,6 +1179,67 @@ class Handler(BaseHTTPRequestHandler):
                 _save_thread(tid)
             threading.Thread(target=_chat_turn, args=(tid, text, sub), daemon=True).start()
             return self._json(200, {"thread": tid})
+        if path == "/proposals":
+            # a change to the generators: gated on a scratch copy (emit, sim, formal equivalence, mutation score), then an
+            # optional measured A/B; the diff is merged only by the operator (POST /proposals/<id>/merge from the CLI)
+            from . import proposals as P
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            diff = str(body.get("diff", ""))
+            if not diff.strip() or len(diff) > 400_000:
+                return self._json(400, {"error": "diff missing or too large"})
+            errs = P.check_scope(diff)
+            if errs:
+                return self._json(400, {"error": "out of scope", "scope_errors": errs})
+            designs = [d for d in (body.get("designs") or []) if d in DESIGNS]
+            if not designs:
+                return self._json(400, {"error": f"designs: which generators the change touches, from {list(DESIGNS)}"})
+            pid = time.strftime("%Y%m%d-%H%M%S") + "-p" + secrets.token_hex(2)
+            pr = {"id": pid, "title": str(body.get("title", ""))[:160], "rationale": str(body.get("rationale", ""))[:4000], "diff": diff,
+                  "designs": designs, "irs": body.get("irs") or [], "ab_spec": body.get("ab_spec"), "ab_max_iter": body.get("ab_max_iter"),
+                  "thread": body.get("thread"), "subject": sub, "created": time.time(), "status": "gating", "files": P._files_in_diff(diff)}
+            if pr["ab_spec"] and pr["ab_spec"].get("design") not in designs:
+                return self._json(400, {"error": "ab_spec.design must be one of the proposal's designs"})
+            with _lock:
+                _proposals[pid] = pr
+                _save_proposal(pid)
+            _start_proposal(pid)
+            if pr["thread"] in _threads:
+                th = _threads[pr["thread"]]
+                with _lock:
+                    th["messages"].append({"role": "assistant", "kind": "proposal", "proposal": pid, "text": pr["title"], "t": time.time(), "source": "agh"})
+                    _save_thread(pr["thread"])
+            return self._json(200, {"id": pid, "status": "gating", "note": "the gate takes 1-10 minutes; poll GET /proposals/<id>"})
+        if path == "/author/check":
+            # the author's inner loop: emit + elaborate + behavioral sim of one IR on the conversation's working copy
+            from . import proposals as P
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            tid = str(body.get("thread", ""))
+            if tid not in _threads or not _visible(_threads[tid], sub):
+                return self._json(404, {"error": "no such thread"})
+            design = body.get("design"); backend = body.get("backend", "ecp5")
+            if design not in DESIGNS or backend not in BACKENDS:
+                return self._json(400, {"error": f"design/backend: have {list(DESIGNS)} / {list(BACKENDS)}"})
+            tree = Path(_author_tree(tid)) / "b"
+            return self._json(200, P.quick_check(tree, design, backend, body.get("ir") or {}))
+        if len(parts) == 3 and parts[0] == "proposals" and parts[2] == "merge":
+            # operator only (token identity): records the decision; the actual `git apply` is the deploy script's job
+            if sub != "cli":
+                return self._json(403, {"error": "merge is an operator action"})
+            with _lock:
+                pr = _proposals.get(parts[1])
+                if not pr:
+                    return self._json(404, {"error": "no such proposal"})
+                if pr.get("status") != "passed":
+                    return self._json(409, {"error": f"proposal is {pr.get('status')}, not passed"})
+                pr["merged"] = {"t": time.time(), "by": sub}
+                _save_proposal(parts[1])
+            return self._json(200, {"ok": True, "diff_path": str(PROPOSALS / parts[1] / "gate" / "tree" / "proposal.diff")})
         if path == "/interpret":
             # the NL interpreter alone: spec + assumptions + alternatives, no run (the AGH plugin drives runs separately)
             try:
@@ -1187,6 +1420,7 @@ def main():
     RESULTS.mkdir(parents=True, exist_ok=True)
     _load_from_disk()
     _load_threads()
+    _load_proposals()
     threading.Thread(target=_worker, daemon=True).start()
     threading.Thread(target=_resume_turns, daemon=True).start()
     srv = ThreadingHTTPServer((host, port), Handler)

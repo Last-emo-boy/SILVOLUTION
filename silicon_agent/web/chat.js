@@ -21,7 +21,7 @@ L.zh = {
   placeholder: "描述你要的硬件，或者对当前结果提要求…", hint: "⏎ 发送 · ⇧⏎ 换行", stop: "■ 停止", thinking: "思考中", newChat: "新对话",
   spec: "理解的规格", progress: "运行中", traj: "轨迹", result: "结果", noResult: "未找到可行设计", iter: "第 {n} 轮", iters: "{n} 轮", feasible: "{n} 轮可行",
   planning: "规划下一轮", sim: "行为级仿真", synth: "综合", pnr: "布局布线", queued: "排队中", stopped: "已停止", error: "出错",
-  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", covTitle: "行为级仿真覆盖的场景（次数）", formal: "形式验证", formalTitle: "SymbiYosys：实测 RTL 与当前生成器输出的有界等价 + 流协议属性", formalRunning: "验证中…", queued: "排队中，等这一轮结束后发送", failedCalls: "{n} 次失败", modeFast: "快", modeDeep: "深思", modeTitle: "智能体模式（下一轮生效）：", pendingMode: "新对话将以此模式开始", agentSteps: "智能体过程 · {n} 次工具调用", usage: "{calls} 次模型调用 · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness 账本：这一轮的模型调用、输入/输出 token（含缓存命中）、估算费用与用时", sessUsage: "本会话 {turns} 轮 · {tok} tokens · {usd}", sessUsageTitle: "本会话累计（Agnes Harness 账本）· 当前上下文 {ctx} tokens", today: "今天", earlier: "更早", agentAt: "智能体 ·", runs: "次运行", resumed: "重启后续接", resumedTitle: "服务器重启打断了上一轮，智能体根据自己的记录继续", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续",
+  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", covTitle: "行为级仿真覆盖的场景（次数）", formal: "形式验证", formalTitle: "SymbiYosys：实测 RTL 与当前生成器输出的有界等价 + 流协议属性", formalRunning: "验证中…", queued: "排队中，等这一轮结束后发送", failedCalls: "{n} 次失败", modeFast: "快", modeDeep: "深思", modeAuthor: "改生成器", proposal: "生成器改动提案", gating: "门禁中…", gatePassed: "门禁通过", gateFailed: "门禁未通过", gateSteps: ["发射 + 展开所有预设", "行为级仿真", "形式等价（未改动的 IR）", "测试台变异分数"], abRun: "A/B 实测", merged: "已合并", viewDiff: "查看 diff", lines: "行", modeTitle: "智能体模式（下一轮生效）：", pendingMode: "新对话将以此模式开始", agentSteps: "智能体过程 · {n} 次工具调用", usage: "{calls} 次模型调用 · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness 账本：这一轮的模型调用、输入/输出 token（含缓存命中）、估算费用与用时", sessUsage: "本会话 {turns} 轮 · {tok} tokens · {usd}", sessUsageTitle: "本会话累计（Agnes Harness 账本）· 当前上下文 {ctx} tokens", today: "今天", earlier: "更早", agentAt: "智能体 ·", runs: "次运行", resumed: "重启后续接", resumedTitle: "服务器重启打断了上一轮，智能体根据自己的记录继续", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续",
   stages: ["行为级仿真", "综合后功能", "综合后时序", "实现后功能", "实现后时序"], signoff: "实现后时序仿真通过",
   design: "设计", backend: "器件", constraints: "约束", objective: "目标", locked: "固定参数", start: "起点", closest: "最接近",
   secs: "秒", critical: "关键路径", startFrom: "从起点设计开始。", fork: "基于上一次的最佳设计继续。",
@@ -33,7 +33,7 @@ L.en = {
   placeholder: "Describe the hardware you want, or ask for changes to the current result…", hint: "⏎ send · ⇧⏎ newline", stop: "■ Stop", thinking: "Thinking", newChat: "New chat",
   spec: "Understood spec", progress: "Running", traj: "Trajectory", result: "Result", noResult: "No feasible design", iter: "iteration {n}", iters: "{n} iterations", feasible: "{n} feasible",
   planning: "planning", sim: "behavioral sim", synth: "synthesis", pnr: "place & route", queued: "queued", stopped: "stopped", error: "error",
-  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", covTitle: "scenarios the behavioral testbench exercised (hit counts)", formal: "Formal check", formalTitle: "SymbiYosys: bounded equivalence of the measured RTL vs the current generator + stream properties", formalRunning: "checking…", queued: "queued · sent when this turn ends", failedCalls: "{n} failed", modeFast: "fast", modeDeep: "deep", modeTitle: "agent mode (from the next turn): ", pendingMode: "a new conversation starts in this mode", agentSteps: "Agent steps · {n} tool calls", usage: "{calls} model calls · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness ledger: this turn's model calls, input/output tokens (cache hits included), estimated cost and wall time", sessUsage: "{turns} turns · {tok} tokens · {usd}", sessUsageTitle: "this conversation so far (Agnes Harness ledger) · context {ctx} tokens", today: "Today", earlier: "Earlier", agentAt: "agent ·", runs: "runs", resumed: "resumed", resumedTitle: "a server restart cut the previous turn short; the agent continued from its own records", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here",
+  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", covTitle: "scenarios the behavioral testbench exercised (hit counts)", formal: "Formal check", formalTitle: "SymbiYosys: bounded equivalence of the measured RTL vs the current generator + stream properties", formalRunning: "checking…", queued: "queued · sent when this turn ends", failedCalls: "{n} failed", modeFast: "fast", modeDeep: "deep", modeAuthor: "author", proposal: "Generator change proposal", gating: "gating…", gatePassed: "gate passed", gateFailed: "gate failed", gateSteps: ["emit + elaborate every preset", "behavioral simulation", "formal equivalence (unchanged IRs)", "testbench mutation score"], abRun: "measured A/B", merged: "merged", viewDiff: "View diff", lines: "lines", modeTitle: "agent mode (from the next turn): ", pendingMode: "a new conversation starts in this mode", agentSteps: "Agent steps · {n} tool calls", usage: "{calls} model calls · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness ledger: this turn's model calls, input/output tokens (cache hits included), estimated cost and wall time", sessUsage: "{turns} turns · {tok} tokens · {usd}", sessUsageTitle: "this conversation so far (Agnes Harness ledger) · context {ctx} tokens", today: "Today", earlier: "Earlier", agentAt: "agent ·", runs: "runs", resumed: "resumed", resumedTitle: "a server restart cut the previous turn short; the agent continued from its own records", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here",
   stages: ["behavioral", "post-synth func", "post-synth timing", "post-impl func", "post-impl timing"], signoff: "post-implementation timing sim passed",
   design: "design", backend: "device", constraints: "constraints", objective: "objective", locked: "locked", start: "start", closest: "closest",
   secs: "s", critical: "critical path", startFrom: "Start from the initial design.", fork: "Continue from the previous best design.",
@@ -131,7 +131,7 @@ function renderModes() {
   box.hidden = false; box.innerHTML = "";
   box.appendChild(el(`<span class="muted">${esc(T.modeTitle)}</span>`));
   for (const [k, desc] of Object.entries(MODES)) {
-    const b = el(`<button class="${k === cur ? "on" : ""}" title="${esc(desc)}">${esc(k === "fast" ? T.modeFast : k === "deep" ? T.modeDeep : k)}</button>`);
+    const b = el(`<button class="${k === cur ? "on" : ""}" title="${esc(desc)}">${esc(k === "fast" ? T.modeFast : k === "deep" ? T.modeDeep : k === "author" ? T.modeAuthor : k)}</button>`);
     b.onclick = async () => {
       if (thread?.id && tid) { try { await post(`/threads/${tid}/mode`, { mode: k }); thread.mode = k; } catch (e) { alert(e.message); return; } }
       else pendingMode = k;   // applied to the thread the first message opens
@@ -161,7 +161,7 @@ async function poll() {
   }
   render();
   const live = liveJob();
-  const busy = thread.busy || !!live || thread.messages.some((m) => m.kind === "run" && !m.narrated && jobs[m.job]?.done);
+  const busy = thread.busy || !!live || thread.messages.some((m) => m.kind === "run" && !m.narrated && jobs[m.job]?.done) || Object.values(thread.proposals || {}).some((p) => p.status === "gating");
   timer = setTimeout(poll, busy ? 2000 : 8000);
 }
 
@@ -258,7 +258,41 @@ function md(text) {
 
 function msgSignature(m) {
   const j = m.job && jobs[m.job];
-  return JSON.stringify([m.role, m.kind, m.text, m.job, j?.seen, j?.status, j?.error && 1, [...open].filter((k) => k.startsWith(m.job + ":")), rtlShown.has(m.job)]);
+  const pr = m.proposal && thread.proposals?.[m.proposal];
+  return JSON.stringify([m.role, m.kind, m.text, m.job, j?.seen, j?.status, j?.error && 1, [...open].filter((k) => k.startsWith((m.job || m.proposal) + ":")), rtlShown.has(m.job), pr?.status, pr?.steps?.length, pr?.ab?.job, pr?.merged && 1]);
+}
+
+// a generator change the agent proposed: the gate's verdict per step, then the A/B run (its own run card follows)
+function proposalCard(m) {
+  const pr = thread.proposals?.[m.proposal];
+  if (!pr) return el(`<div class="prose dim">${esc(T.proposal)} · ${esc(m.proposal)}</div>`);
+  const st = pr.status;
+  const sub = st === "gating" ? `<span class="live">${T.gating}</span>` : st === "passed" ? `<span class="ok">${T.gatePassed}</span>` : `<span class="bad">${T.gateFailed}${pr.scope_errors ? " · scope" : pr.apply_error ? " · patch" : ""}</span>`;
+  const d = card(`${m.proposal}:prop`, T.proposal, `${sub} · ${esc((pr.files || []).map((f) => f.replace(/^silicon_agent\//, "")).join(", "))}${pr.diff_lines ? ` · ${pr.diff_lines} ${T.lines}` : ""}${pr.merged ? ` · <span class="ok">${T.merged}</span>` : ""}`);
+  const inner = d.querySelector(".inner");
+  inner.appendChild(el(`<div class="prose"><b>${esc(pr.title || "")}</b>${pr.rationale ? `<p>${esc(pr.rationale)}</p>` : ""}</div>`));
+  if (pr.scope_errors?.length) inner.appendChild(el(`<div class="x">${esc(pr.scope_errors.join("; "))}</div>`));
+  if (pr.apply_error) inner.appendChild(el(`<pre class="log">${esc(pr.apply_error)}</pre>`));
+  const steps = el(`<div class="gate-steps"></div>`);
+  (pr.steps || []).forEach((s) => {
+    const row = el(`<div class="gstep"><span class="${s.ok ? "v" : s.ok === false ? "x" : "muted"}">${s.ok ? "✓" : s.ok === false ? "✕" : "·"}</span> ${esc(s.name)}${s.seconds != null ? ` <span class="muted">${s.seconds} s</span>` : ""}</div>`);
+    if (s.mutation) row.appendChild(el(`<div class="muted small">${s.mutation.map((x) => `${esc(x.design)}: ${x.killed}/${x.total} killed (${x.score == null ? "—" : Math.round(x.score * 100) + "%"})${x.survived?.length ? ` · survived ${esc(x.survived.join(", "))}` : ""}`).join(" · ")}</div>`));
+    if (s.equivalence) row.appendChild(el(`<div class="muted small">${s.equivalence.map((x) => `${esc(x.case)}: ${x.identical ? "identical" : x.ok ? "equivalent @" + x.depth : "<span class='x'>NOT equivalent</span>"}`).join(" · ")}</div>`));
+    if (s.failures?.length) row.appendChild(el(`<pre class="log">${esc(s.failures.join("\n").slice(0, 1500))}</pre>`));
+    if (s.sims?.length) row.appendChild(el(`<pre class="log">${esc(s.sims.map((x) => `${x.case}: ${x.log || "failed"}`).join("\n").slice(0, 1500))}</pre>`));
+    if (s.error) row.appendChild(el(`<pre class="log">${esc(s.error)}</pre>`));
+    steps.appendChild(row);
+  });
+  if (st === "gating" && !(pr.steps || []).length) steps.appendChild(el(`<div class="muted small">${T.gateSteps.map((x) => "· " + esc(x)).join("<br>")}</div>`));
+  inner.appendChild(steps);
+  if (pr.ab?.job) inner.appendChild(el(`<div class="small">${T.abRun}: <a href="/work?job=${encodeURIComponent(pr.ab.job)}" target="_blank">${esc(pr.ab.job)}</a></div>`));
+  if (pr.ab?.error) inner.appendChild(el(`<div class="x small">${esc(pr.ab.error)}</div>`));
+  const links = el(`<div class="links"></div>`);
+  const vd = el(`<button class="ghost small">${T.viewDiff}</button>`);
+  vd.onclick = async () => { const r = await api(`/proposals/${m.proposal}`); let pre = inner.querySelector("pre.diff"); if (pre) { pre.remove(); return; } pre = el(`<pre class="log diff"></pre>`); pre.textContent = r.diff || ""; inner.appendChild(pre); };
+  links.appendChild(vd);
+  inner.appendChild(links);
+  return d;
 }
 
 // the harness's ledger for a turn: tokens, estimated USD, wall time
@@ -294,6 +328,10 @@ function buildMsg(m) {
     li.appendChild(el(`<div class="agent-tools">${m.tools.map((t) => `<span class="tchip ${t.status === "failed" ? "x" : ""}" title="${esc(JSON.stringify(t.args ?? {}).slice(0, 300))}">${esc(t.name || "?")}</span>`).join("")}</div>`));
   } else if (m.usage && m.source === "agh") {
     li.appendChild(usageLine(m.usage));
+  }
+  if (m.kind === "proposal" && m.proposal) {
+    li.appendChild(proposalCard(m));
+    return li;
   }
   if (m.kind === "run" && m.job) {
     const j = jobs[m.job], spec = j?.spec || thread.jobs[m.job]?.spec;

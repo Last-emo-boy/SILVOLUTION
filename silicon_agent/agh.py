@@ -465,6 +465,9 @@ def workspace() -> str:
 MODES = {
     "fast": {"route": "deepseek", "model": "deepseek-flash", "thinking": "off"},
     "deep": {"route": "deepseek", "model": "deepseek-v4-pro", "thinking": "high"},
+    # author: the agent changes the generators in a scratch copy of the package and proposes the diff (gated);
+    # a separate AGH session with the `author` recipe (write/edit/shell confined to the copy by the plugin's hook)
+    "author": {"route": "deepseek", "model": "deepseek-v4-pro", "thinking": "high", "preset": "author", "session": "author"},
 }
 DEFAULT_MODE = os.environ.get("SA_AGH_MODE", "fast")
 

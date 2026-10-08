@@ -252,6 +252,47 @@ export const siliconAgent = {
     })
 
     agnes.registerTool({
+      name: 'sa_propose',
+      description: 'Submit a change to silicon-agent\'s own generators (silicon_agent/*.py) as a unified diff. The job server applies it to a scratch copy and gates it: every preset still emits and elaborates, the bench cases\' behavioral simulations pass, the RTL of unchanged IRs stays formally equivalent to the current generator, the testbench\'s mutation score does not drop; then, if ab_spec is given, a measured A/B run on the device. Nothing is merged: the operator decides from the report. Returns the proposal id; poll with sa_proposal.',
+      parameters: obj({ title: str({ maxLength: 160 }), rationale: str({ maxLength: 4000 }), diff: str({ maxLength: 400000 }), designs: any(), irs: any(), ab_spec: any(), ab_max_iter: int({ minimum: 1, maximum: 8 }), thread: str({ maxLength: 64 }) }, ['title', 'rationale', 'diff', 'designs']),
+      meta: starts,
+      async execute({ title, rationale, diff, designs, irs, ab_spec, ab_max_iter, thread }, tctx) {
+        try { return text(await api('POST', '/proposals', { title, rationale, diff, designs, irs, ab_spec, ab_max_iter, thread }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
+      name: 'sa_check',
+      description: 'Author inner loop: on this conversation\'s working copy (b/), emit one IR of a design, validate it, elaborate the RTL with iverilog and run the behavioral cocotb testbench; returns validate() errors, the RTL head, the elaboration log and the simulation verdict. Use it after every edit, before sa_propose. The toolchain lives on the job server, not in your shell.',
+      parameters: obj({ thread: str({ maxLength: 64 }), design: str(), backend: str(), ir: any() }, ['thread', 'design', 'ir']),
+      meta: { ...readOnly, costHint: { wallMs: 60000 } },
+      async execute({ thread, design, backend, ir }, tctx) {
+        try { return text(await api('POST', '/author/check', { thread, design, backend: backend ?? 'ecp5', ir }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
+      name: 'sa_proposal',
+      description: 'Gate verdict of a proposal: per step (emit/elaborate, behavioral sims, formal equivalence, mutation score) with the failures, and the A/B run id when one was started. With wait_seconds > 0 it blocks (at most 90 s) until the gate is no longer running.',
+      parameters: obj({ id: str({ maxLength: 64 }), wait_seconds: int({ minimum: 0, maximum: 90 }) }, ['id']),
+      meta: readOnly,
+      async execute({ id, wait_seconds }, tctx) {
+        const deadline = Date.now() + 1000 * Math.min(wait_seconds ?? 0, 90)
+        try {
+          for (;;) {
+            const r = await api('GET', `/proposals/${encodeURIComponent(id)}`, undefined, tctx?.signal)
+            const { diff, ...rest } = r
+            if (r.status !== 'gating' || Date.now() >= deadline) {
+              rest.note = r.status === 'gating' ? 'still gating: call again (wait_seconds up to 90)' : `gate finished: ${r.status}. ${r.ab?.job ? `A/B run ${r.ab.job} started; follow it with sa_job.` : ''}`
+              return text(rest)
+            }
+            await new Promise((ok) => setTimeout(ok, 5000))
+          }
+        } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
       name: 'sa_bench',
       description: 'Last nightly regression result of the benchmark suite (which cases converged, in how many rounds, and what regressed).',
       parameters: obj({}),
@@ -273,6 +314,16 @@ export const siliconAgent = {
       'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',
       'Answer in the user\'s language.',
     ].join('\n')
+    // The author method: how to change a generator and get it gated.
+    const AUTHOR_METHOD = [
+      'You are improving silicon-agent\'s own generators. Your working directory holds two copies of the silicon_agent/ package: a/ is the deployed code (never edit it), b/ is yours. Edit b/ (write/edit), test it there with shell (cd b && python3 ..., PYTHONPATH=b, iverilog -g2012), and submit with sa_propose the unified diff `diff -ruN a b` (paths a/silicon_agent/x.py b/silicon_agent/x.py). There is no git here.',
+      '1. Read what is there first: the IR dataclass (fields, validate, digest), the emitter, the design\'s cocotb test under silicon_agent/tb/, its entry in schema.py and prompts.py, and screen.py\'s estimator. A new knob touches all of them: IR field with a default that keeps old IRs identical, emitter branch, validate rule, prompt line (when the critical path looks like X, this is the knob), schema field, estimator adjustment, and the digest must drop the field when it is off so cached results stay valid.',
+      '2. Keep the knob-off RTL byte-identical or formally equivalent to today\'s: the gate checks equivalence on the bench cases\' IRs and fails the proposal otherwise. Latency changes must be reflected in latency_cycles (the formal depth and the netlist testbench depend on it).',
+      '3. Test before proposing with sa_check (thread, design, backend, ir): it emits, validates, elaborates and simulates one IR on your b/ copy with the real toolchain (your shell has no python/iverilog). Check the knob on and off; fix what fails; the gate repeats these on a clean copy. Your shell is for `diff -ruN a b`, `ls`, `cat`, `grep`.',
+      '4. Produce the diff with `diff -ruN a b > proposal.diff` (exit status 1 means "files differ", not an error), then `read` proposal.diff and pass its text to sa_propose verbatim -- never retype a diff by hand (a hunk whose line counts are off is "malformed patch"). sa_propose takes: title, a rationale that names the critical path the knob targets and the expected effect, the diff, designs (the generators touched), irs (the IR(s) with the knob on that the gate should simulate), and ab_spec (a full spec whose initial_ir has the knob on) so the gate ends with a measured run on the device. Then sa_proposal with wait_seconds 90 until it leaves "gating"; report the verdict per step and the A/B numbers (sa_job on the A/B run). A failed gate is information: read the failing step, fix, propose again.',
+      'Never claim a result the gate or the A/B run did not measure. The operator merges; you do not.',
+      'Answer in the user\'s language.',
+    ].join('\n')
     ctx.skills.register({
       name: 'silicon-agent',
       description: 'Turn a natural-language FPGA accelerator request into signed-off Verilog with silicon-agent: interpret, estimate, run on the real device, explain the trajectory.',
@@ -284,15 +335,42 @@ export const siliconAgent = {
     // host tools that would let it edit files or run commands are refused -- every mutation goes through the
     // job server, whose results are what the chat renders.
     const isChatSession = (session) => typeof session?.key === 'string' && session.key.startsWith('sa-thread-')
+    // an author session changes the generators in a scratch copy the job server made (its cwd); it may write there
+    // and nowhere else, and the change leaves through sa_propose
+    const isAuthorSession = (session) => typeof session?.key === 'string' && session.key.startsWith('sa-author-')
     const HOST_TOOLS = new Set(['write', 'edit', 'shell', 'web_fetch', 'subagent_spawn', 'subagent_fork', 'plugin_helper_install', 'skill_helper_install', 'skill_helper_import', 'mcp_manage'])
+    const NEVER = new Set(['web_fetch', 'subagent_spawn', 'subagent_fork', 'plugin_helper_install', 'skill_helper_install', 'skill_helper_import', 'mcp_manage'])
     agnes.registerHook('context', (_payload, hctx) => {
       // a participant returns only its own sections (author shape: id/order/content); the kernel keeps the rest
-      if (!isChatSession(hctx.session)) return {}
-      return { sections: [{ id: 'silicon-agent', order: 50, content: `# silicon-agent\n${METHOD}` }] }
+      if (isChatSession(hctx.session)) return { sections: [{ id: 'silicon-agent', order: 50, content: `# silicon-agent\n${METHOD}` }] }
+      if (isAuthorSession(hctx.session)) return { sections: [{ id: 'silicon-agent-author', order: 50, content: `# silicon-agent author\n${AUTHOR_METHOD}` }] }
+      return {}
     })
+    // the session's workspace is the scratch tree the job server opened the author session in; a relative path is
+    // resolved by the host against that same root, an absolute one must sit under it
+    const insideRoot = (session, p) => {
+      const root = String(session?.workspaceRoot ?? '').replace(/\/$/, '')
+      if (typeof p !== 'string' || !root) return false
+      if (p.split('/').includes('..')) return false
+      return !p.startsWith('/') || p === root || p.startsWith(root + '/')
+    }
     agnes.registerHook('tool_call', (payload, hctx) => {
       if (isChatSession(hctx.session) && HOST_TOOLS.has(payload.name))
         return { allow: false, reason: `${payload.name} is not available in a silicon-agent chat: use the sa_* tools (the design, its files and the EDA run live on the job server)` }
+      if (isAuthorSession(hctx.session)) {
+        if (NEVER.has(payload.name)) return { allow: false, reason: `${payload.name} is not available in an author session` }
+        if (payload.name === 'write' || payload.name === 'edit') {
+          const p = payload.args?.path
+          if (!insideRoot(hctx.session, p)) return { allow: false, reason: `writes are confined to the scratch tree ${hctx.session?.workspaceRoot}; ${p} is outside it` }
+          if (/\/(server|agh|proposals|llm)\.py$/.test(String(p))) return { allow: false, reason: 'the server, the AGH client, the proposal gate and the LLM client are not proposal targets' }
+        }
+        if (payload.name === 'shell') {
+          const cmd = String(payload.args?.command ?? '')
+          if (payload.args?.cwd && !insideRoot(hctx.session, payload.args.cwd)) return { allow: false, reason: 'shell cwd must stay in the scratch tree' }
+          if (/\b(curl|wget|ssh|scp|rsync|git (push|commit|checkout|reset)|rm -rf \/|sudo|docker|pip install|npm )/.test(cmd))
+            return { allow: false, reason: 'author shells run tests in the scratch tree only (python/iverilog/yosys/sby/git diff)' }
+        }
+      }
       return { allow: true }
     })
 

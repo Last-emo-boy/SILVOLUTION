@@ -19,7 +19,7 @@ from .backends._common import CACHE, ROOT, TB_DIR, TOOLS, tool_env, run  # noqa:
 from .designs import DESIGNS, Design
 from .ir import Metrics
 
-CACHE_VERSION = "13"  # bump when report parsing, the vector benches or the sim libraries change (10: time-0 eval of constant cells after flop init)
+CACHE_VERSION = "14"  # bump when report parsing, the vector benches or the sim libraries change (10: time-0 eval of constant cells after flop init)
 
 
 class _BackendView(dict):
@@ -45,7 +45,7 @@ def backend(key: str) -> Backend:
 
 
 # ---------------------------------------------------------------- behavioral simulation
-def simulate(d: Design, arch, work: Path, seed: int = 1) -> tuple[bool, str, dict]:
+def simulate(d: Design, arch, work: Path, seed: int = 1, timeout: int = 1800) -> tuple[bool, str, dict]:
     rtl = work / "rtl" / f"{d.top}.sv"
     sim_dir = work / "sim"
     sim_dir.mkdir(parents=True, exist_ok=True)
@@ -67,10 +67,15 @@ raise SystemExit(1 if failed else 0)
 """
     log = sim_dir / "sim.log"
     with log.open("w") as f:
-        p = subprocess.run([str(TOOLS / "py3bin" / "python3"), "-c", driver], cwd=sim_dir, env=env,
-                           stdout=f, stderr=subprocess.STDOUT, text=True, timeout=1800)
+        try:
+            p = subprocess.run([str(TOOLS / "py3bin" / "python3"), "-c", driver], cwd=sim_dir, env=env,
+                               stdout=f, stderr=subprocess.STDOUT, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # a hung handshake (ready never comes back) is a failed design, not a failed tool
+            f.write(f"\nSIM TIMEOUT after {timeout} s: the testbench did not finish (a stalled stream?)\nCOCOTB_RESULT total=1 failed=1\n")
+            p = None
     text = log.read_text()
-    passed = p.returncode == 0 and "failed=0" in text
+    passed = p is not None and p.returncode == 0 and "failed=0" in text
     tail = "\n".join(line for line in text.splitlines() if re.search(r"(FAIL|ERROR|Error|error:|assert|COCOTB_RESULT|PASS)", line))[-4000:]
     cov = {}
     for line in text.splitlines():
