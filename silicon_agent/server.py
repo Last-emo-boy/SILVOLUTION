@@ -535,7 +535,8 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
                 started.append(jid)
                 _note_agent_run(tid, jid, lang)
     if r.get("stop") == "cancelled":
-        r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（已停止）" if lang == "zh" else "(stopped)")
+        # a cancel from the stop button, or the harness aborting the turn because its client went away (a restart)
+        r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（这一轮被中止）" if lang == "zh" else "(turn cut short)")
     with _lock:
         th.pop("live", None)
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
