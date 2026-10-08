@@ -200,6 +200,8 @@ class AghClient:
         tools: list[dict] = []
         calls: dict[str, dict] = {}
         texts: list[str] = []
+        # the turn as it happened: text segments and tool calls in order (the chat shows the reasoning between calls)
+        steps: list[dict] = []
         state = {"last_assistant": ""}
 
         def on_update(method: str, params: dict) -> None:
@@ -212,8 +214,13 @@ class AghClient:
                 c = upd.get("content") or {}
                 if c.get("type") == "text":
                     texts.append(c.get("text", ""))
+                    if steps and steps[-1]["kind"] == "text":
+                        steps[-1]["text"] += c.get("text", "")
+                    else:
+                        steps.append({"kind": "text", "text": c.get("text", "")})
             elif kind == "tool_call":
                 calls[upd.get("toolCallId")] = {"name": upd.get("title") or upd.get("kind"), "raw": upd.get("rawInput"), "status": upd.get("status")}
+                steps.append({"kind": "tool", "id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind")})
             elif kind == "tool_call_update":
                 c = calls.setdefault(upd.get("toolCallId"), {})
                 c["status"] = upd.get("status", c.get("status"))
@@ -242,7 +249,18 @@ class AghClient:
             self.unlisten(session_id, on_update)
         for cid, c in calls.items():
             tools.append({"id": cid, "name": c.get("name"), "args": c.get("raw"), "result": c.get("result"), "status": c.get("status")})
-        return {"text": "".join(texts).strip() or state["last_assistant"], "tools": tools, "stop": r.get("stopReason")}
+        for st in steps:
+            if st["kind"] == "tool":
+                st["status"] = calls.get(st["id"], {}).get("status")
+        # the final answer is the text after the last tool call; everything before it is working narration
+        final = ""
+        for st in reversed(steps):
+            if st["kind"] == "tool":
+                break
+            if st["kind"] == "text":
+                final = st["text"] + final
+        return {"text": (final.strip() or "".join(texts).strip() or state["last_assistant"]), "full_text": "".join(texts).strip(),
+                "steps": steps, "tools": tools, "stop": r.get("stopReason")}
 
     def cancel(self, session_id: str) -> None:
         self.notify("session/cancel", {"sessionId": session_id})

@@ -519,7 +519,8 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
         th.pop("live", None)
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
                                "job": started[-1] if started else None, "t": time.time(), "source": "agh",
-                               "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40]})
+                               "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40],
+                               "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status")} for st in r.get("steps", [])][:80]})
         if not th["title"] and started:
             th["title"] = _jobs[started[-1]]["spec"].get("task", "")[:120]
         _save_thread(tid)

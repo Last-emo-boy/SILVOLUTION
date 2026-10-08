@@ -152,3 +152,8 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .agent-tools.live { margin-top: 6px; }
 .agent-tools .tchip.run { color: var(--accent); border-color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.agent-steps { margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
+.agent-steps summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; } .agent-steps summary::-webkit-details-marker { display: none; }
+.agent-steps[open] summary .ic { transform: rotate(90deg); } .agent-steps .ic { display: inline-block; transition: transform .15s; font-size: 10px; }
+.agent-steps .inner { border-left: 2px solid var(--border); margin: 6px 0 0 4px; padding-left: 10px; }
+.agent-steps .note { color: var(--text-2); font-size: 12.5px; margin: 4px 0; }
