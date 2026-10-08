@@ -11,7 +11,9 @@ So each design also provides:
 
 Stimulus is driven on the falling edge and outputs are sampled 3/4 period after
 the rising edge, so the same bench works with SDF delays at any clock period.
-Netlist sims start with glbl.GSR asserted for 100 ns, so reset is held longer.
+Netlist sims start with glbl.GSR asserted for 100 ns, so reset is held longer. Stimulus changes only at
+negedge: a drop right after posedge races zero-delay gate-level flops (the accept would be missed in RTL and taken
+in the netlist).
 """
 
 from __future__ import annotations
@@ -140,13 +142,13 @@ module tb;
     while (!$feof(fd)) begin
       code = $fscanf(fd, "%h %h\\n", gap, xv);
       if (code != 2) break;
-      if (gap) begin in_valid = 0; repeat (gap) @(negedge clk); end
+      if (gap) begin @(negedge clk); in_valid = 0; repeat (gap - 1) @(negedge clk); end
       @(negedge clk); in_valid = 1; in_data = xv;
       // hold until the DUT accepts: in_ready is a function of state only, so its value
       // just before a rising edge is what that edge samples
       forever begin #(PERIOD*0.45); rdy = in_ready; @(posedge clk); if (rdy) break; @(negedge clk); end
     end
-    in_valid = 0;
+    @(negedge clk); in_valid = 0;
     repeat (300) @(posedge clk);
     if (n_got != n_exp) begin errors++; $display("COUNT got %0d expected %0d", n_got, n_exp); end
     $display("RESULT %s samples=%0d errors=%0d", errors ? "FAIL" : "PASS", n_got, errors);
@@ -199,11 +201,11 @@ module tb;
     while (!$feof(fd)) begin
       code = $fscanf(fd, "%h %h %h\\n", gap, fs, xv);
       if (code != 3) break;
-      if (gap) begin in_valid = 0; repeat (gap) @(negedge clk); end
+      if (gap) begin @(negedge clk); in_valid = 0; repeat (gap - 1) @(negedge clk); end
       @(negedge clk); in_valid = 1; frame_start = fs[0]; in_data = xv;
       forever begin #(PERIOD*0.45); rdy = in_ready; @(posedge clk); if (rdy) break; @(negedge clk); end
     end
-    in_valid = 0; frame_start = 0;
+    @(negedge clk); in_valid = 0; frame_start = 0;
     repeat (300) @(posedge clk);
     if (n_got != n_exp) begin errors++; $display("COUNT got %0d expected %0d", n_got, n_exp); end
     $display("RESULT %s samples=%0d errors=%0d", errors ? "FAIL" : "PASS", n_got, errors);
@@ -272,11 +274,11 @@ module tb;
     while (!$feof(fd)) begin
       code = $fscanf(fd, "%h %h %h %h\\n", gap, xv, yv, zv);
       if (code != 4) break;
-      if (gap) begin in_valid = 0; repeat (gap) @(negedge clk); end
+      if (gap) begin @(negedge clk); in_valid = 0; repeat (gap - 1) @(negedge clk); end
       @(negedge clk); in_valid = 1; in_x = xv; in_y = yv; in_z = zv;
       forever begin #(PERIOD*0.45); rdy = in_ready; @(posedge clk); if (rdy) break; @(negedge clk); end
     end
-    in_valid = 0;
+    @(negedge clk); in_valid = 0;
     repeat (300) @(posedge clk);
     if (n_got != n_exp) begin errors++; $display("COUNT got %0d expected %0d", n_got, n_exp); end
     $display("RESULT %s samples=%0d errors=%0d", errors ? "FAIL" : "PASS", n_got, errors);
@@ -332,11 +334,11 @@ module tb;
     while (!$feof(fd)) begin
       code = $fscanf(fd, "%h %h %h %h\\n", gap, fs, rv, iv);
       if (code != 4) break;
-      if (gap) begin in_valid = 0; repeat (gap) @(negedge clk); end
+      if (gap) begin @(negedge clk); in_valid = 0; repeat (gap - 1) @(negedge clk); end
       @(negedge clk); in_valid = 1; in_first = fs[0]; in_re = rv; in_im = iv;
       forever begin #(PERIOD*0.45); rdy = in_ready; @(posedge clk); if (rdy) break; @(negedge clk); end
     end
-    in_valid = 0; in_first = 0;
+    @(negedge clk); in_valid = 0; in_first = 0;
     repeat (400 + 3 * {N}) @(posedge clk);
     if (n_got != n_exp) begin errors++; $display("COUNT got %0d expected %0d", n_got, n_exp); end
     $display("RESULT %s samples=%0d errors=%0d", errors ? "FAIL" : "PASS", n_got, errors);
