@@ -25,6 +25,7 @@ services:
       SA_GATEWAY_HMAC_KEY: ${SA_GATEWAY_HMAC_KEY:-}   # = sluice GATEWAY_HMAC_KEY; enables browser SSO via X-Auth-Sig
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/silicon-agent/.env}
       LD_PRELOAD: /lib/x86_64-linux-gnu/libudev.so.1   # FlexNet/udev fix, same as the vivado wrapper
+      SA_XILINX_GLBL: /opt/amd/2025.2/Vivado/data/verilog/src/glbl.v
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:

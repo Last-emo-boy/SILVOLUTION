@@ -90,6 +90,7 @@ class Metrics:
     sim_passed: bool
     sim_log: str = ""
     fits: bool = True  # False when synthesis shows the design exceeds the device
+    sim_stages: dict = field(default_factory=dict)  # netlist simulation ladder: {stage: {"passed", "label", ...}}
 
     def violations(self, c: Constraints) -> list[str]:
         v = []
@@ -97,6 +98,9 @@ class Metrics:
             v.append("simulation failed")
         if not self.fits:
             v.append("does not fit the device (P&R skipped)")
+        for k, st in self.sim_stages.items():
+            if st.get("passed") is False:
+                v.append(f"{st.get('label', k)} simulation failed")
         if self.fmax_mhz < c.fmax_mhz:
             v.append(f"fmax {self.fmax_mhz:.1f} MHz < {c.fmax_mhz} MHz")
         for name, limit in (("lut", c.max_lut), ("dsp", c.max_dsp), ("bram", c.max_bram), ("ff", c.max_ff)):

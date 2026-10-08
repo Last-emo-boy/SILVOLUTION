@@ -26,7 +26,7 @@ ROOT = Path(os.environ.get("SA_ROOT", Path(__file__).resolve().parent.parent))
 TOOLS = Path(os.environ.get("SA_TOOLS", ROOT / "tools" / "oss-cad-suite"))
 TB_DIR = Path(__file__).resolve().parent / "tb"
 CACHE = ROOT / "cache"
-CACHE_VERSION = "2"  # bump when report parsing changes; invalidates cached metrics
+CACHE_VERSION = "3"  # bump when report parsing changes; invalidates cached metrics
 
 BACKENDS = {
     "ecp5": {
@@ -194,6 +194,9 @@ puts $fh "create_clock -period {period:.3f} -name clk \\[get_ports clk\\]"
 close $fh
 read_xdc {out}/clk.xdc
 synth_design -top {top} -mode out_of_context -flatten_hierarchy rebuilt
+write_verilog -force -mode funcsim {out}/post_synth_func.v
+write_verilog -force -mode timesim -sdf_anno true {out}/post_synth_time.v
+write_sdf -force -mode timesim {out}/post_synth.sdf
 set fh [open {out}/synth_metrics.json w]
 puts $fh "{{\\"lut\\": [llength [get_cells -hier -filter {{PRIMITIVE_GROUP == LUT}}]], \\"dsp\\": [llength [get_cells -hier -filter {{PRIMITIVE_SUBGROUP == DSP}}]]}}"
 close $fh
@@ -201,6 +204,9 @@ opt_design
 place_design
 phys_opt_design
 route_design
+write_verilog -force -mode funcsim {out}/post_impl_func.v
+write_verilog -force -mode timesim -sdf_anno true {out}/post_impl_time.v
+write_sdf -force -mode timesim {out}/post_impl.sdf
 report_utilization -file {out}/util.txt
 report_timing_summary -file {out}/timing_summary.txt -no_detailed_paths
 report_timing -max_paths 1 -file {out}/timing_path.txt
@@ -303,11 +309,93 @@ def summarize_critical_path_vivado(text: str) -> list[dict]:
     return [{"total_ns": round(total, 2)}] + entries
 
 
+# ---------------------------------------------------------------- XC7S50: netlist simulation (xsim)
+XSIM_STAGES = [
+    # key, label, netlist, sdf, libs
+    ("post_synth_func", "Post-synthesis functional", "post_synth_func.v", None, ["unisims_ver"]),
+    ("post_synth_time", "Post-synthesis timing", "post_synth_time.v", "post_synth.sdf", ["simprims_ver"]),
+    ("post_impl_func", "Post-implementation functional", "post_impl_func.v", None, ["unisims_ver"]),
+    ("post_impl_time", "Post-implementation timing", "post_impl_time.v", "post_impl.sdf", ["simprims_ver"]),
+]
+XILINX_GLBL = os.environ.get("SA_XILINX_GLBL", "/opt/amd/2025.2/Vivado/data/verilog/src/glbl.v")
+
+
+def _clean_netlist(path: Path) -> None:
+    """Vivado 2025.2 writes the host's multi-line /etc/os-release into the '// Host' comment,
+    which breaks the comment and makes xvlog choke. Collapse it to one line."""
+    lines = path.read_text().split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        if lines[i].startswith("// Host"):
+            out.append("// Host        : (redacted)")
+            i += 1
+            while i < len(lines) and not lines[i].startswith("// Command"):
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    path.write_text("\n".join(out))
+
+
+def netlist_sims(d: Design, arch, work: Path, fmax_target: float, on_stage=None) -> dict:
+    """Stages 2-5 of the simulation ladder. Returns {stage: {"passed", "label", "period_ns", "log"}}.
+    Post-implementation timing runs at the *target* period: that is the real pass/fail."""
+    out = work / "vivado"
+    sim = work / "xsim"
+    sim.mkdir(parents=True, exist_ok=True)
+    stim, exp = d.vectors(arch)
+    (sim / "stim.hex").write_text("\n".join(stim) + "\n")
+    (sim / "exp.hex").write_text("\n".join(exp) + "\n")
+    period = 1000.0 / fmax_target
+    (sim / "tb.sv").write_text(d.tb(arch, period))
+    env = dict(os.environ)
+    env.setdefault("HOME", str(sim))
+    env.pop("LIBRARY_PATH", None)
+    results = {}
+    for key, label, netlist, sdf, libs in XSIM_STAGES:
+        net = out / netlist
+        if not net.exists():
+            results[key] = {"passed": None, "label": label, "period_ns": period, "log": "netlist not produced"}
+            continue
+        _clean_netlist(net)
+        log = sim / f"{key}.log"
+        libflags = [x for l in libs for x in ("-L", l)] + ["-L", "secureip"]
+        timing = ["-maxdelay", "-sdfmax", f"/tb/dut={out / sdf}"] if sdf else []
+        cmds = [
+            ["xvlog", "-sv", str(sim / "tb.sv")],
+            ["xvlog", str(net), XILINX_GLBL],
+            ["xelab", "-debug", "off", "-timescale", "1ns/1ps", *libflags, *timing, "tb", "glbl", "-s", key],
+            ["xsim", key, "-R"],
+        ]
+        text = ""
+        ok = True
+        with log.open("w") as f:
+            for c in cmds:
+                r = subprocess.run([VIVADO_BIN_DIR + c[0]] + c[1:] if VIVADO_BIN_DIR else c, cwd=sim, env=env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=1800)
+                f.write(f"$ {' '.join(c)}\n{r.stdout}\n")
+                text += r.stdout
+                if r.returncode != 0 and c[0] != "xsim":
+                    ok = False
+                    break
+        passed = ok and ("RESULT PASS" in text)
+        tail = "\n".join(l for l in text.splitlines() if re.search(r"RESULT|MISMATCH|COUNT|^ERROR", l))[-1500:]
+        results[key] = {"passed": passed, "label": label, "period_ns": round(period, 3), "log": tail}
+        if on_stage:
+            on_stage(key, results[key])
+        if not ok:
+            break
+    return results
+
+
+VIVADO_BIN_DIR = os.environ.get("SA_VIVADO_BIN_DIR", "")  # e.g. /opt/amd/2025.2/Vivado/bin/ when not on PATH
+
+
 # ---------------------------------------------------------------- top-level evaluate
 SYNTH = {"ecp5": synth_pnr_ecp5, "xc7s50": synth_pnr_xc7s50}
 
 
-def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str = "ecp5") -> Metrics:
+def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str = "ecp5", on_stage=None) -> Metrics:
     rtl_text = d.emit(arch, backend=backend)
     h = hashlib.sha256(f"{backend}\n{rtl_text}".encode()).hexdigest()[:16]
     cache_key = hashlib.sha256(f"{CACHE_VERSION}\n{backend}\n{rtl_text}".encode()).hexdigest()[:16]
@@ -326,7 +414,10 @@ def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str =
         m = Metrics(fmax_mhz=0, lut=0, ff=0, dsp=0, bram=0, critical_path=[], sim_passed=False, sim_log=sim_log)
     else:
         r = SYNTH[backend](work, fmax_target, d.top)
-        m = Metrics(**r, sim_passed=True, sim_log=sim_log)
+        stages = {}
+        if backend == "xc7s50" and r.get("fits") and d.vectors is not None:
+            stages = netlist_sims(d, arch, work, fmax_target, on_stage=on_stage)
+        m = Metrics(**r, sim_passed=True, sim_log=sim_log, sim_stages=stages)
     cached.write_text(json.dumps(asdict(m)))
     (work / "metrics.json").write_text(json.dumps(asdict(m), indent=2))
     return m

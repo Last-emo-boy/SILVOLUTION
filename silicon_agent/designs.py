@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from . import fir
+from . import fir, vectors
 from .emit import drain_latency, emit_matmul, min_k_full_rate
 from .ir import MatmulArch, throughput_macs_per_cycle
 
@@ -25,6 +25,8 @@ class Design:
     throughput_unit: str
     latency: Callable                         # ir -> cycles
     extra_sim_sources: tuple[str, ...] = ()   # files under tb/ to compile alongside the RTL
+    vectors: Callable | None = None           # ir -> (stim_lines, exp_lines) for netlist sims
+    tb: Callable | None = None                # (ir, period_ns) -> SystemVerilog testbench text
 
 
 DESIGNS: dict[str, Design] = {
@@ -39,6 +41,8 @@ DESIGNS: dict[str, Design] = {
         throughput_unit="MAC/cycle",
         latency=lambda a: drain_latency(a) + a.pe_rows,
         extra_sim_sources=("mult18x18d_sim.v",),
+        vectors=vectors.matmul_vectors,
+        tb=lambda a, period: vectors.TB_MATMUL.format(R=a.pe_rows, C=a.pe_cols, W=a.data_width, AW=a.acc_width, period=period),
     ),
     "fir": Design(
         kind="fir",
@@ -51,6 +55,8 @@ DESIGNS: dict[str, Design] = {
         throughput_unit="samples/cycle",
         latency=fir.latency_cycles,
         extra_sim_sources=("mult18x18d_sim.v",),
+        vectors=vectors.fir_vectors,
+        tb=lambda a, period: vectors.TB_FIR.format(DW=a.data_width, AW=a.acc_width, period=period),
     ),
 }
 

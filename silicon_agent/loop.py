@@ -66,6 +66,11 @@ def fmt_history(history: list[dict], c: Constraints, unit: str, locked: dict) ->
             lines.append("critical path (ns, logic+route per stage): " + json.dumps(m.critical_path))
         if not m.sim_passed:
             lines.append("sim log tail: " + m.sim_log[-800:])
+        if m.sim_stages:
+            lines.append("netlist simulations: " + ", ".join(f"{k}={'pass' if v.get('passed') else 'FAIL' if v.get('passed') is False else 'skipped'}" for k, v in m.sim_stages.items()))
+            for k, v in m.sim_stages.items():
+                if v.get("passed") is False:
+                    lines.append(f"  {k} log: {v.get('log', '')[-400:]}")
         lines.append(f"rationale: {h.get('action', 'initial design')}")
     return "\n".join(lines)
 
@@ -177,7 +182,8 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             print(f"[{it}] evaluating {ir_view(ir, locked)}", flush=True)
             emit({"kind": "evaluating", "iteration": it, "ir": ir_view(ir, locked)})
             t0 = time.time()
-            m = evaluate(design, ir, c.fmax_mhz, ROOT / "runs", backend=backend)
+            m = evaluate(design, ir, c.fmax_mhz, ROOT / "runs", backend=backend,
+                         on_stage=lambda key, st: emit({"kind": "stage", "iteration": it, "stage": key, **{k: v for k, v in st.items() if k != "log"}}))
             entry = {
                 "iteration": it,
                 "ir": ir.to_dict(),
