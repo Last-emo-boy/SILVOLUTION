@@ -204,12 +204,24 @@ class AghClient:
         steps: list[dict] = []
         state = {"last_assistant": ""}
 
+        # a (re)loaded session replays earlier turns' updates on this stream, possibly after our prompt went out;
+        # only this prompt's turn counts. The turn starts with the user_message_chunk that echoes our text: nothing
+        # before it belongs to us, and text chunks (which carry no sequence) are attributed to the turn in progress.
+        turn = {"open": False}
+        marker = text[:80]
+
         def on_update(method: str, params: dict) -> None:
             if method != "session/update":
                 return
             upd = params.get("update") or {}
             kind = upd.get("sessionUpdate")
             ev = (params.get("_meta") or {}).get(META) or {}
+            if kind == "user_message_chunk":
+                c = upd.get("content") or {}
+                turn["open"] = c.get("type") == "text" and (c.get("text") or "").startswith(marker)
+                return
+            if not turn["open"]:
+                return
             if kind == "agent_message_chunk":
                 c = upd.get("content") or {}
                 if c.get("type") == "text":
