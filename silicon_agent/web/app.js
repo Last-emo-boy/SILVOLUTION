@@ -81,7 +81,7 @@ async function refreshJobs() {
   for (const j of jobs) {
     const b = j.best?.metrics;
     const status = j.status === "done" && b ? `${fmt(b.fmax_mhz, 0)} MHz · ${b.dsp} DSP · ${j.iterations} iter` : j.status === "running" ? `running · iter ${j.iterations + 1}` : `${j.status} · ${j.iterations} iter`;
-    const li = el(`<li class="${j.id === selected ? "sel" : ""}" data-id="${esc(j.id)}"><span class="dot ${j.status}"></span><div><div class="t">${esc(j.task || j.id)}</div><div class="m">${esc(j.design)} · ${esc(j.backend)} · ${status}</div></div></li>`);
+    const li = el(`<li class="${j.id === selected ? "sel" : ""}" data-id="${esc(j.id)}" title="${esc(j.task || j.id)}"><span class="dot ${j.status}"></span><div><div class="t">${esc(j.task || j.id)}</div><div class="m">${esc(j.backend)} · ${status}</div></div></li>`);
     li.onclick = () => select(j.id);
     ul.appendChild(li);
   }
@@ -184,62 +184,80 @@ const stageChips = (r, backend) => {
   return `<div class="stages">${parts.join("")}</div>`;
 };
 
+function turnSignature(r) {
+  // anything that changes what the turn shows; the open/closed state is deliberately not part of it
+  return JSON.stringify([r.pending, r.user.length, r.userAfter?.length, r.plan?.action, r.plan?.candidates?.length, r.plan?.rescreened, r.ir, r.violations, r.metrics?.fmax_mhz, r.metrics?.sim_stages && Object.keys(r.metrics.sim_stages).length, Object.keys(r.stages).map((k) => k + r.stages[k].passed), r.lesson?.lesson?.id, r.memory?.lessons?.length, r.next?.stop, r.diagnosis]);
+}
+
+function buildTurn(r, prevIr, unit, spec) {
+  const li = el(`<li class="turn ${r.pending ? "live" : ""}" data-n="${r.n}"><div class="num">${r.n}</div><div class="body"></div></li>`);
+  const b = li.querySelector(".body");
+  for (const u of r.user) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)}</div>`));
+  const a = r.plan?.action ?? r.action;
+  if (r.n === 1) b.appendChild(el(`<div class="action">Start from the spec's initial design.</div>`));
+  else if (a) b.appendChild(el(`<div class="action">${r.plan?.fallback ? `<span class="why">fallback candidate — </span>` : ""}${esc(a)}</div>`));
+  if (r.ir) b.appendChild(el(irChips(r.ir, prevIr, spec.locked)));
+  if (r.pending) {
+    b.appendChild(el(`<div class="head"><span class="verdict live">${r.ir ? "simulating · synthesizing · place & route" : "planning"}</span></div>`));
+    if (spec.backend === "xc7s50" && r.ir) b.appendChild(el(stageChips(r, spec.backend)));
+  } else {
+    const m = r.metrics, ok = r.violations.length === 0;
+    b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b> · ${m.lut} LUT · ${m.dsp} DSP · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
+  }
+  // details: grows in place under this turn; the list around it does not move
+  const d = el(`<details class="more" ${openTurns.has(r.n) ? "open" : ""}><summary>details</summary><div class="inner"></div></details>`);
+  d.addEventListener("toggle", () => { if (d.open) openTurns.add(r.n); else openTurns.delete(r.n); li.classList.toggle("open", d.open); });
+  li.classList.toggle("open", d.open);
+  const inner = d.querySelector(".inner"), parts = [];
+  const diag = r.plan?.diagnosis ?? r.diagnosis;
+  if (diag && r.n > 1) { inner.appendChild(el(line("hypothesis", esc(diag)))); parts.push("hypothesis"); }
+  if (r.memory?.lessons?.length) { inner.appendChild(el(line("memory", r.memory.lessons.map((l) => `<div class="memrow"><span class="mid">${esc(l.id)} ${l.score >= 0 ? "+" : ""}${fmt(l.score)}</span>${esc(l.text)}</div>`).join(""), "accent"))); parts.push("memory"); }
+  if (r.plan?.candidates?.length) {
+    const picked = JSON.stringify(r.plan.next_ir);
+    inner.appendChild(el(line("candidates", r.plan.candidates.map((cd) => {
+      const isPick = JSON.stringify(cd.ir) === picked, e = cd.estimate;
+      return `<div class="cand ${isPick ? "picked" : ""}"><span class="rk">${cd.rank ? "#" + cd.rank : "✕"}</span><div>${esc(cd.why)}<br>${irChips(cd.ir, prevIr, spec.locked)}${cd.rejected ? `<div class="rej">${esc(cd.rejected)}</div>` : e ? `<div class="est ${cd.est_violations?.length ? "bad" : ""}">est ~${fmt(e.fmax_mhz, 0)} MHz · ~${e.lut} LUT · ~${e.dsp} DSP${cd.est_violations?.length ? " · " + esc(cd.est_violations.join(", ")) : " · looks feasible"}${isPick ? " · chosen" : ""}</div>` : ""}</div></div>`;
+    }).join("") + (r.plan.rescreened ? `<div class="est">re-planned after screening rejected the first set</div>` : ""))));
+    parts.push(`${r.plan.candidates.length} candidates`);
+  }
+  if (!r.pending) {
+    const m = r.metrics;
+    if (m.critical_path?.length > 1) { inner.appendChild(el(line("critical", `<div class="cp">${fmt(m.critical_path[0].total_ns, 2)} ns: ` + m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl)}</i> ${fmt(s.logic_ns, 2)}+${fmt(s.route_ns, 2)}</span>`).join("") + `</div>`))); parts.push("critical path"); }
+    if (spec.backend === "xc7s50") { inner.appendChild(el(line("simulation", stageChips(r, spec.backend)))); }
+    if (r.lesson) {
+      const L = r.lesson.lesson;
+      const node = el(line("lesson", `<div class="lesson"><div class="ltxt">${esc(L.text)}</div><div class="vote"><span class="${L.outcome}">${L.outcome}</span><button data-v="up" title="confirm">👍</button><button data-v="down" title="contradict">👎</button></div></div>`, "warn"));
+      node.querySelectorAll("button").forEach((btn) => { btn.onclick = async () => { const res = await post(`/memory/${spec.design || "matmul"}/${spec.backend || "ecp5"}/vote`, { id: L.id, vote: btn.dataset.v }); btn.parentElement.querySelector("span").textContent = `${L.outcome} · ${res.score >= 0 ? "+" : ""}${fmt(res.score)}`; refreshMemCount(); }; });
+      inner.appendChild(node); parts.push("lesson");
+    }
+  }
+  if (inner.childElementCount) { d.querySelector("summary").textContent = `details · ${parts.join(" · ")}`; b.appendChild(d); }
+  if (r.next?.stop) b.appendChild(el(`<div class="action"><span class="why">planner stopped — </span>${esc(r.next.action)}</div>`));
+  if (r.userAfter) for (const u of r.userAfter) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)} <span class="muted">(queued for the next plan)</span></div>`));
+  li.dataset.sig = turnSignature(r);
+  return li;
+}
+
 function renderTranscript(rows, unit, spec, c) {
   const ol = $("#transcript");
   const atBottom = ol.scrollHeight - ol.scrollTop - ol.clientHeight < 60;
-  ol.innerHTML = "";
-  let prevIr = null;
+  const existing = new Map([...ol.querySelectorAll("li.turn[data-n]")].map((li) => [li.dataset.n, li]));
+  let prevIr = null, cursor = null;
   for (const r of rows) {
-    const li = el(`<li class="turn ${r.pending ? "live" : ""}"><div class="num">${r.n}</div><div class="body"></div></li>`);
-    const b = li.querySelector(".body");
-    for (const u of r.user) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)}</div>`));
-    // what the planner did
-    const a = r.plan?.action ?? r.action;
-    if (r.n === 1) b.appendChild(el(`<div class="action">Start from the spec's initial design.</div>`));
-    else if (a) b.appendChild(el(`<div class="action">${r.plan?.fallback ? `<span class="why">fallback candidate — </span>` : ""}${esc(a)}</div>`));
-    if (r.ir) b.appendChild(el(irChips(r.ir, prevIr, spec.locked)));
-    // what happened
-    if (r.pending) {
-      b.appendChild(el(`<div class="head"><span class="verdict live">${r.ir ? "simulating · synthesizing · place & route" : "planning"}</span></div>`));
-      if (spec.backend === "xc7s50" && r.ir) b.appendChild(el(stageChips(r, spec.backend)));
-    } else {
-      const m = r.metrics, ok = r.violations.length === 0;
-      b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b> · ${m.lut} LUT · ${m.dsp} DSP · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
+    const key = String(r.n), cur = existing.get(key);
+    if (cur && cur.dataset.sig === turnSignature(r)) { cursor = cur; }
+    else {
+      const li = buildTurn(r, prevIr, unit, spec);
+      if (cur) ol.replaceChild(li, cur); else if (cursor) cursor.after(li); else ol.prepend(li);
+      cursor = li;
     }
-    // details
-    const d = el(`<details class="more" ${openTurns.has(r.n) ? "open" : ""}><summary>details</summary><div class="inner"></div></details>`);
-    d.ontoggle = () => { if (d.open) openTurns.add(r.n); else openTurns.delete(r.n); };
-    const inner = d.querySelector(".inner");
-    let n = 0;
-    const diag = r.plan?.diagnosis ?? r.diagnosis;
-    if (diag && r.n > 1) { inner.appendChild(el(line("hypothesis", esc(diag)))); n++; }
-    if (r.memory?.lessons?.length) { inner.appendChild(el(line("memory", r.memory.lessons.map((l) => `<div class="memrow"><span class="mid">${esc(l.id)} ${l.score >= 0 ? "+" : ""}${fmt(l.score)}</span>${esc(l.text)}</div>`).join(""), "accent"))); n++; }
-    if (r.plan?.candidates?.length) {
-      const picked = JSON.stringify(r.plan.next_ir);
-      inner.appendChild(el(line("candidates", r.plan.candidates.map((cd) => {
-        const isPick = JSON.stringify(cd.ir) === picked, e = cd.estimate;
-        return `<div class="cand ${isPick ? "picked" : ""}"><span class="rk">${cd.rank ? "#" + cd.rank : "✕"}</span><div>${esc(cd.why)}<br>${irChips(cd.ir, prevIr, spec.locked)}${cd.rejected ? `<div class="rej">${esc(cd.rejected)}</div>` : e ? `<div class="est ${cd.est_violations?.length ? "bad" : ""}">est ~${fmt(e.fmax_mhz, 0)} MHz · ~${e.lut} LUT · ~${e.dsp} DSP${cd.est_violations?.length ? " · " + esc(cd.est_violations.join(", ")) : " · looks feasible"}${isPick ? " · chosen" : ""}</div>` : ""}</div></div>`;
-      }).join("") + (r.plan.rescreened ? `<div class="est">re-planned after screening rejected the first set</div>` : ""))));
-      n++;
-    }
-    if (!r.pending) {
-      const m = r.metrics;
-      if (m.critical_path?.length > 1) { inner.appendChild(el(line("critical", `<div class="cp">${fmt(m.critical_path[0].total_ns, 2)} ns: ` + m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl)}</i> ${fmt(s.logic_ns, 2)}+${fmt(s.route_ns, 2)}</span>`).join("") + `</div>`))); n++; }
-      if (spec.backend === "xc7s50") { inner.appendChild(el(line("simulation", stageChips(r, spec.backend)))); n++; }
-      if (r.lesson) {
-        const L = r.lesson.lesson;
-        const node = el(line("lesson", `<div class="lesson"><div class="ltxt">${esc(L.text)}</div><div class="vote"><span class="${L.outcome}">${L.outcome}</span><button data-v="up" title="confirm">👍</button><button data-v="down" title="contradict">👎</button></div></div>`, "warn"));
-        node.querySelectorAll("button").forEach((btn) => { btn.onclick = async () => { const res = await post(`/memory/${spec.design || "matmul"}/${spec.backend || "ecp5"}/vote`, { id: L.id, vote: btn.dataset.v }); btn.parentElement.querySelector("span").textContent = `${L.outcome} · ${res.score >= 0 ? "+" : ""}${fmt(res.score)}`; refreshMemCount(); }; });
-        inner.appendChild(node); n++;
-      }
-    }
-    if (n) { d.querySelector("summary").textContent = `details · ${[diag && r.n > 1 && "hypothesis", r.memory?.lessons?.length && "memory", r.plan?.candidates?.length && `${r.plan.candidates.length} candidates`, !r.pending && r.metrics.critical_path?.length > 1 && "critical path", r.lesson && "lesson"].filter(Boolean).join(" · ")}`; b.appendChild(d); }
-    if (r.next?.stop) b.appendChild(el(`<div class="action"><span class="why">planner stopped — </span>${esc(r.next.action)}</div>`));
-    if (r.userAfter) for (const u of r.userAfter) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)} <span class="muted">(queued for the next plan)</span></div>`));
-    ol.appendChild(li);
+    existing.delete(key);
     if (!r.pending) prevIr = r.ir;
   }
-  if (detail.error) ol.appendChild(el(`<li class="turn"><div class="num">!</div><div class="body"><pre class="code">${esc(detail.error)}</pre></div></li>`));
+  for (const stale of existing.values()) stale.remove();
+  let err = ol.querySelector("li.turn.error");
+  if (detail.error && !err) ol.appendChild(el(`<li class="turn error"><div class="num">!</div><div class="body"><pre class="code">${esc(detail.error)}</pre></div></li>`));
+  if (!detail.error && err) err.remove();
   if (atBottom) ol.scrollTop = ol.scrollHeight;
 }
 
