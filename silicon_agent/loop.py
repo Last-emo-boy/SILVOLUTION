@@ -138,7 +138,9 @@ def _learn(design, backend: str, c: Constraints, run_id: str, prev: dict, cur: d
           "action": taken, "effect": eff}, "reconciled": [{"id": t["id"], "score": memory.score(t)} for t in touched]})
 
 
-def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_event=None) -> dict:
+def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_event=None, control=None) -> dict:
+    """control: optional object with .steer() -> list[str] (user messages since last call) and
+    .should_stop() -> bool, checked between iterations."""
     design = design_for(spec)
     IR = design.ir_cls
     c = Constraints.from_dict(spec["constraints"])
@@ -199,6 +201,13 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
 
         if it == max_iter:
             break
+        if control is not None and control.should_stop():
+            print("     stopped by user.", flush=True)
+            emit({"kind": "plan", "iteration": it + 1, "diagnosis": "", "action": "stopped by user", "next_ir": None, "stop": True})
+            break
+        steer = control.steer() if control is not None else []
+        if steer:
+            emit({"kind": "steer", "iteration": it + 1, "messages": steer})
         best = pick_best(history, c)
         last = history[-1]
         sit = memory.situation(design.kind, last["ir"], last["metrics"], last["violations"])
@@ -210,7 +219,8 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 f"## Task-fixed parameters (never change these)\n{json.dumps({k: v for k, v in locked.items() if k != 'coefs'})}\n\n"
                 f"## History\n{fmt_history(history, c, design.throughput_unit, locked)}\n\n"
                 f"{memory.fmt_lessons(shown_lessons)}\n\n"
-                f"Current best feasible: {json.dumps(ir_view(IR.from_dict(best['ir']), locked)) if best else 'none'}\n"
+                + (("## Instructions from the engineer (override your own judgment where they conflict)\n" + "\n".join(f"- {m}" for m in steer) + "\n\n") if steer else "")
+                + f"Current best feasible: {json.dumps(ir_view(IR.from_dict(best['ir']), locked)) if best else 'none'}\n"
                 f"Propose iteration {it + 1}.")
         try:
             reply = llm.chat_json(system, user)
@@ -225,7 +235,8 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
         print(f"     diagnosis: {diagnosis}\n     action: {action}", flush=True)
         emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": action,
               "next_ir": reply.get("next_ir"), "stop": bool(reply.get("stop"))})
-        if reply.get("stop") and best:
+        if reply.get("stop") and (best or steer):
+            # without a feasible design the planner may only stop when the engineer steered it to
             print("     planner says stop.", flush=True)
             break
         proposed = reply.get("next_ir") or {}

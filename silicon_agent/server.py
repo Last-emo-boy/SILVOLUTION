@@ -8,6 +8,10 @@ API
   GET  /api/jobs/<id>/files/<p>  any artifact under results/<id>/
   GET  /api/specs                example specs shipped in specs/
   GET  /api/health
+  POST /api/jobs/<id>/steer      {"message": "..."}  -> read by the planner before its next proposal
+  POST /api/jobs/<id>/stop
+  GET  /api/memory               lessons per (design, backend), scored
+  POST /api/memory/<d>/<b>/vote  {"id": ..., "vote": "up"|"down"}
   GET  /                         web UI (static, no build step)
 
 Legacy paths without /api/ keep working for the `sa` CLI.
@@ -35,6 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
+from . import memory
 from .designs import DESIGNS
 from .eda import ROOT, BACKENDS
 from .loop import run_loop
@@ -70,6 +75,10 @@ def _load_from_disk() -> None:
             s = json.loads(summ.read_text())
             job["summary"] = {k: v for k, v in s.items() if k != "history"}
             job["status"] = "done" if s.get("best") else "failed"
+        evlog = d / "events.jsonl"
+        if evlog.exists():
+            job["events"] = [json.loads(l) for l in evlog.read_text().splitlines() if l.strip()]
+        elif summ.exists():
             job["events"] = _events_from_history(s.get("history", []))
         else:
             iters = sorted(d.glob("iter_*.json"))
@@ -96,11 +105,26 @@ def _worker():
             job["status"] = "running"
             job["started"] = time.time()
         try:
-            def on_event(ev: dict):
-                with _lock:
-                    job["events"].append({"t": round(time.time() - job["started"], 1), **ev})
+            evlog = (RESULTS / job_id / "events.jsonl")
+            evlog.parent.mkdir(parents=True, exist_ok=True)
 
-            summary = run_loop(job["spec"], max_iter=job["max_iter"], out_dir=RESULTS / job_id, on_event=on_event)
+            def on_event(ev: dict):
+                rec = {"t": round(time.time() - job["started"], 1), **ev}
+                with _lock:
+                    job["events"].append(rec)
+                with evlog.open("a") as f:
+                    f.write(json.dumps(rec) + "\n")
+
+            class Control:
+                def steer(self):
+                    with _lock:
+                        msgs, job["steer"] = job.get("steer", []), []
+                    return msgs
+                def should_stop(self):
+                    with _lock:
+                        return bool(job.get("stop_requested"))
+
+            summary = run_loop(job["spec"], max_iter=job["max_iter"], out_dir=RESULTS / job_id, on_event=on_event, control=Control())
             with _lock:
                 job["summary"] = {k: v for k, v in summary.items() if k != "history"}
                 job["status"] = "done" if summary["best"] else "failed"
@@ -202,6 +226,14 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"name": f.stem, "task": s.get("task", ""), "design": s.get("design", "matmul"),
                             "backend": s.get("backend", "ecp5"), "spec": s})
             return self._json(200, out)
+        if path == "/memory":
+            out = []
+            for f in sorted(memory.MEM_DIR.glob("*.jsonl")):
+                design, backend = f.stem.split("_", 1)
+                ls = memory.load(design, backend)
+                out.append({"design": design, "backend": backend, "count": len(ls),
+                            "lessons": sorted(({**l, "score": memory.score(l)} for l in ls), key=lambda l: -l["score"])})
+            return self._json(200, out)
         if path == "/jobs":
             with _lock:
                 rows = [{"id": j, "status": v["status"], "task": v["spec"].get("task", ""),
@@ -261,9 +293,40 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path.startswith("/api/"):
             path = path[4:]
+        n = int(self.headers.get("Content-Length", "0"))
+        parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "jobs" and parts[2] in ("steer", "stop"):
+            with _lock:
+                job = _jobs.get(parts[1])
+                if not job:
+                    return self._json(404, {"error": "no such job"})
+                if job["status"] not in ("queued", "running"):
+                    return self._json(409, {"error": f"job is {job['status']}"})
+                if parts[2] == "stop":
+                    job["stop_requested"] = True
+                    return self._json(200, {"ok": True})
+                try:
+                    msg = str(json.loads(self.rfile.read(n) or b"{}").get("message", "")).strip()[:2000]
+                except json.JSONDecodeError:
+                    return self._json(400, {"error": "bad json"})
+                if not msg:
+                    return self._json(400, {"error": "empty message"})
+                job.setdefault("steer", []).append(msg)
+                rec = {"t": round(time.time() - job.get("started", time.time()), 1), "kind": "user", "message": msg, "subject": sub}
+                job["events"].append(rec)
+                with (RESULTS / parts[1] / "events.jsonl").open("a") as f:
+                    f.write(json.dumps(rec) + "\n")
+                return self._json(200, {"ok": True, "queued_for_iteration": sum(1 for e in job["events"] if e["kind"] == "result") + 2})
+        if len(parts) == 4 and parts[0] == "memory" and parts[3] == "vote":
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+                delta = 1 if body.get("vote") == "up" else -1
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            l = memory.update(parts[1], parts[2], body.get("id", ""), votes=delta)
+            return self._json(200 if l else 404, {"ok": bool(l), "score": memory.score(l) if l else None})
         if path != "/jobs":
             return self._json(404, {"error": "not found"})
-        n = int(self.headers.get("Content-Length", "0"))
         if n > 1_000_000:
             return self._json(413, {"error": "spec too large"})
         try:
