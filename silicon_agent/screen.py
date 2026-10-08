@@ -111,7 +111,13 @@ def estimate_conv(ir: dict, backend: str) -> dict:
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(pr / k, 4)}
 
 
-ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv}
+def estimate_chain(ir: dict, backend: str) -> dict:
+    ests = [estimate_fir(st, backend) for st in ir["stages"]]
+    return {"fmax_mhz": min(e["fmax_mhz"] for e in ests), "lut": sum(e["lut"] for e in ests) + 40 * (len(ests) - 1),
+            "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
+
+
+ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain}
 
 
 # ---------------------------------------------------------------- calibration from measured runs
@@ -129,6 +135,10 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
     elif design == "fir":
         f += [math.log2(ir["taps"]), math.log2(ir.get("fold", 1)), 1.0 if ir.get("symmetric") else 0.0, ir["acc_width"] / 40,
               1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0)]
+    elif design == "fir_chain":
+        st = ir["stages"]
+        f += [math.log2(sum(s["taps"] for s in st)), math.log2(max(s.get("fold", 1) for s in st)), sum(1.0 for s in st if s.get("symmetric")) / len(st),
+              max(s["acc_width"] for s in st) / 40, sum(1.0 for s in st if s.get("dsp_regs", "none") != "none") / len(st), float(len(st)), max(s.get("pipe_mul", 0) for s in st)]
     else:
         f += [math.log2(ir["k"] * ir.get("par_rows", ir["k"])), math.log2(ir["width"]), 1.0 if ir.get("line_mem") == "bram" else 0.0,
               ir["acc_width"] / 32, ir.get("tree_regs", 0), 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, ir.get("pipe_mul", 0)]

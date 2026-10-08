@@ -53,8 +53,11 @@ def synth_pnr(work: Path, fmax_target: float, top: str) -> dict:
     if synth["dsp"] > DEV.dsp or synth["lut"] > DEV.lut:
         return {**synth, "fmax_mhz": 0.0, "critical_path": [], "fits": False}
     (out / "wrap.sv").write_text(_wrapper(out / "core.json", top))
+    # undriven partial buses (e.g. the low bits of a sliced accumulator) survive synth_gowin as a $buf that
+    # himbaechel cannot place; tie them off and clean before writing the netlist
     (out / "wrap.ys").write_text(
-        f"plugin -i slang\nread_slang --top sa_wrap {out / 'wrap.sv'} {rtl}\nsynth_gowin -top sa_wrap -json {out / 'synth.json'}\n")
+        f"plugin -i slang\nread_slang --top sa_wrap {out / 'wrap.sv'} {rtl}\nsynth_gowin -top sa_wrap -run begin:json\n"
+        f"setundef -undriven -zero\nopt_clean -purge\nwrite_json {out / 'synth.json'}\n")
     p = run(["yosys", "-q", "-s", str(out / "wrap.ys")], out, out / "yosys_wrap.log")
     if p.returncode != 0:
         raise RuntimeError(f"yosys (wrapper) failed, see {out / 'yosys_wrap.log'}")

@@ -55,9 +55,26 @@ def build_system(design: Design, backend: str) -> str:
             .replace("@IR_SCHEMA@", p["ir"]).replace("@DEVICE_FACTS@", device_facts(design.kind, backend)).replace("@IR_JSON@", p["ir_json"]))
 
 
+def merge_locked(ir: dict, locked: dict) -> dict:
+    """Locked task fields override the IR; for composite designs `locked["stages"]` is a list of per-stage dicts
+    merged stage by stage (so the planner's per-stage knobs survive and the task fields do not)."""
+    out = {**ir}
+    for k, v in locked.items():
+        if k == "stages" and isinstance(v, list) and isinstance(out.get("stages"), list):
+            out["stages"] = [{**st, **(v[i] if i < len(v) else {})} for i, st in enumerate(out["stages"])]
+        else:
+            out[k] = v
+    return out
+
+
 def ir_view(ir, locked: dict) -> dict:
-    """IR as shown to the planner: locked fields and bulky task data (coefficients) omitted."""
-    return {k: v for k, v in ir.to_dict().items() if k not in locked and k != "coefs"}
+    """IR as shown to the planner: locked fields and bulky task data (coefficients) omitted.
+    Composite designs keep their "stages" list (the planner edits per-stage knobs) minus coefficients."""
+    d = ir.to_dict()
+    out = {k: v for k, v in d.items() if (k not in locked or k == "stages") and k != "coefs"}
+    if isinstance(out.get("stages"), list):
+        out["stages"] = [{k: v for k, v in st.items() if k != "coefs"} for st in out["stages"]]
+    return out
 
 
 def fmt_history(history: list[dict], c: Constraints, unit: str, locked: dict) -> str:
@@ -66,7 +83,9 @@ def fmt_history(history: list[dict], c: Constraints, unit: str, locked: dict) ->
         m = Metrics(**h["metrics"])
         v = m.violations(c)
         status = "FEASIBLE" if not v else "INFEASIBLE: " + "; ".join(v)
-        shown = {k: val for k, val in h["ir"].items() if k not in locked and k != "coefs"}
+        shown = {k: val for k, val in h["ir"].items() if (k not in locked or k == "stages") and k != "coefs"}
+        if isinstance(shown.get("stages"), list):
+            shown["stages"] = [{k: v for k, v in st.items() if k != "coefs"} for st in shown["stages"]]
         lines.append(f"### iteration {h['iteration']}  ir={json.dumps(shown)}")
         seeds = f" (median of {len(m.fmax_seeds)} P&R seeds: {min(m.fmax_seeds):.1f}-{max(m.fmax_seeds):.1f})" if len(m.fmax_seeds) > 1 else ""
         pw = f" power={m.power_mw}mW" if m.power_mw is not None else ""
@@ -166,7 +185,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
     system = build_system(design, backend)
     emit = on_event or (lambda ev: None)
     locked = dict(spec.get("locked", {}))  # task-level fields the planner may not change
-    init = {**spec.get("initial_ir", {}), **locked}
+    init = merge_locked(spec.get("initial_ir", {}), locked)
     ir = IR.from_dict(init)
     # task data that is part of the design identity but never a planner knob (FIR coefficients)
     if "coefs" in ir.to_dict():
@@ -280,7 +299,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
         # normalize: merge with current IR + locked, drop illegal ones, screen the rest
         norm = []
         for cnd in cands:
-            merged = {**ir.to_dict(), **cnd["ir"], **locked}
+            merged = merge_locked({**ir.to_dict(), **cnd["ir"]}, locked)
             cand_ir = IR.from_dict(merged)
             errs = cand_ir.validate()
             dup = cand_ir.digest(backend) in seen
@@ -316,7 +335,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 if cands2:
                     norm2 = []
                     for cnd in cands2:
-                        cand_ir = IR.from_dict({**ir.to_dict(), **cnd["ir"], **locked})
+                        cand_ir = IR.from_dict(merge_locked({**ir.to_dict(), **cnd["ir"]}, locked))
                         if not cand_ir.validate() and cand_ir.digest(backend) not in seen:
                             norm2.append({"ir": cand_ir.to_dict(), "why": str(cnd.get("why", ""))})
                     ranked2 = screen.screen(design.kind, backend, norm2, c) if norm2 else []

@@ -122,8 +122,38 @@ tree_regs<=1 is the adder tree (LUT4 + carry chain ~1 ns per level plus routing)
 }
 
 
+CHAIN_WHAT = "a two-to-four-stage cascade of fixed-coefficient FIR filters connected by valid/ready FIFOs (a datapath, not one block)"
+
+CHAIN_IR = """IR: {"stages": [<FIR IR>, <FIR IR>, ...], "fifo_depth": 4|8|16|32|64, "round_mode": "truncate"|"round"}
+Each stage is a complete FIR IR (see below); the locked task fields of every stage (taps, data_width, coef_width,
+cutoff) are fixed -- you edit each stage's acc_width, symmetric, fold, pipe_mul, reg_in, dsp_regs (and acc_in_dsp on
+Vivado). Stage i's accumulator is reduced to stage i+1's data_width (top bits, truncate or round) through a FIFO.
+
+Per-stage FIR fields:
+  acc_width  int   >= data_width+coef_width+log2(taps)(+1 if symmetric) .. 64
+  symmetric  bool  share one multiplier per h[k]==h[N-1-k] pair
+  fold       int   taps per multiplier (1 = transposed, 1 sample/cycle; F>1 = time-multiplexed, 1/F samples/cycle)
+  pipe_mul   int 0..3, reg_in bool, dsp_regs str in {"none","out","in_out","in_pipe_out"}
+
+Chain rules: throughput = min over stages (a folded stage throttles everything upstream through the FIFO);
+DSP = sum over stages; Fmax = min over stages, and the critical path names the stage (u_s0.* / u_s1.*). The cheap
+stage (few taps) rarely limits anything, so fold it hard; spend DSPs where taps are many. fifo_depth only matters
+when stages have different fold values (deeper = smoother, costs LUT RAM)."""
+
+CHAIN_IR_JSON = '{"stages":[{"acc_width":..,"symmetric":..,"fold":..,"pipe_mul":..,"reg_in":..,"dsp_regs":".."},{...}],"fifo_depth":..,"round_mode":".."}'
+
+CHAIN_FACTS = {
+    "ecp5": """ECP5 facts, measured on an 8-tap -> 16-tap 12-bit chain: stage0 fold=1 dsp_regs=out + stage1 symmetric fold=2
+dsp_regs=out reg_in -> 101 MHz, 790 LUT, 12 MULT18X18D, critical path inside stage1's folded MAC (u_s1.g_mac[0]);
+16-bit 8-tap -> 32-tap chain with stage1 symmetric fold=4 in_pipe_out -> 118 MHz, 1239 LUT, 7 DSP. Everything in the
+FIR facts below applies per stage.\n""" + FIR_FACTS["ecp5"],
+    "gowin": """Gowin GW1NR-9, measured on the 8-tap -> 16-tap 12-bit chain above: 110.8 MHz, 943 LUT, 7 MULT18X18.""",
+}
+
+
 PROMPTS = {
     "matmul": {"what": MATMUL_WHAT, "ir": MATMUL_IR, "ir_json": MATMUL_IR_JSON, "facts": MATMUL_FACTS},
+    "fir_chain": {"what": CHAIN_WHAT, "ir": CHAIN_IR, "ir_json": CHAIN_IR_JSON, "facts": CHAIN_FACTS},
     "fir": {"what": FIR_WHAT, "ir": FIR_IR, "ir_json": FIR_IR_JSON, "facts": FIR_FACTS},
     "conv2d": {"what": CONV_WHAT, "ir": CONV_IR, "ir_json": CONV_IR_JSON, "facts": CONV_FACTS},
 }

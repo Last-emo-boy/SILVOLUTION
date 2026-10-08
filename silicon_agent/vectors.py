@@ -23,6 +23,7 @@ from pathlib import Path
 TB_DIR = Path(__file__).resolve().parent / "tb"
 sys.path.insert(0, str(TB_DIR))
 
+from test_chain import golden as chain_golden  # noqa: E402
 from test_conv import golden as conv_golden, make_frames  # noqa: E402
 from test_fir import golden as fir_golden  # noqa: E402
 from test_matmul import golden as mm_golden, pack, to_signed  # noqa: E402
@@ -207,3 +208,21 @@ module tb;
   end
 endmodule
 """
+
+
+# ---------------------------------------------------------------- fir chain (same bench shape as fir; top differs)
+def chain_vectors(ir, seed: int = 1, n: int = 120) -> tuple[list[str], list[str]]:
+    stages = [s.to_dict() for s in ir.stages]
+    DW, AW = stages[0]["data_width"], stages[-1]["acc_width"]
+    rng = random.Random(seed)
+    lo, hi = -(1 << (DW - 1)), (1 << (DW - 1)) - 1
+    t0 = len(stages[0]["coefs"])
+    xs = [hi] * t0 + [lo] * t0 + [rng.randint(lo, hi) for _ in range(n)]
+    ys = chain_golden(xs, stages, ir.round_mode)
+    gaps = [0 if i >= len(xs) - n // 2 else rng.choice([0, 0, 1, 3]) for i in range(len(xs))]
+    stim = [f"{g:x} {x & ((1 << DW) - 1):0{max(1, DW // 4)}x}" for g, x in zip(gaps, xs)]
+    exp = [f"{y & ((1 << AW) - 1):0{max(1, (AW + 3) // 4)}x}" for y in ys]
+    return stim, exp
+
+
+TB_CHAIN = TB_FIR.replace("fir_top dut", "fir_chain_top dut").replace("repeat (300) @(posedge clk);", "repeat (600) @(posedge clk);")

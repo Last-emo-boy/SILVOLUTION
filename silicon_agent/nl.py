@@ -34,6 +34,10 @@ Available designs:
   conv2d  streaming single-channel K x K 2-D convolution (image filter / blur / edge kernel) with line buffers.
           locked: k (3/5/7), width (image width in pixels), data_width (8/12/16), coef_width (8/12/16).
           Throughput is par_rows/k pixels per cycle. A pixel rate R MHz means fmax >= R*k/par_rows.
+  fir_chain  a cascade of 2-4 FIR stages with FIFOs between them (e.g. anti-alias then shaping, or decimation
+          chains). locked: {"stages": [{"taps","data_width","coef_width","cutoff"}, ...]} -- one entry per stage.
+          initial_ir: {"stages": [<full FIR IR per stage>], "fifo_depth": 16, "round_mode": "truncate"}.
+          Use it only when the user describes more than one filter in series.
 Available backends (choose from device words; default xc7s50 when timing signoff is implied, else ecp5):
 @BACKENDS@
 
@@ -120,12 +124,13 @@ def interpret(message: str, context: dict | None = None) -> dict:
     cons = {**(base["constraints"] if base else {"fmax_mhz": sch["constraints_default"]["fmax_mhz"]}), **{k: v for k, v in cons_in.items() if k != "objective"}}
     obj = [o for o in (cons_in.get("objective") or (base["constraints"].get("objective") if base else None) or ["maximize_throughput", "minimize_lut"]) if o in OBJECTIVES]
     cons["objective"] = obj or ["maximize_throughput", "minimize_lut"]
-    init = {**(base["initial_ir"] if base else list(sch["presets"].values())[0]), **(spec.get("initial_ir") or {}), **locked}
+    from .loop import merge_locked
+    init = merge_locked({**(base["initial_ir"] if base else list(sch["presets"].values())[0]), **(spec.get("initial_ir") or {})}, locked)
     ir = DESIGNS[design].ir_cls.from_dict(init)
     errs = ir.validate()
     if errs:
         # keep the preset but honor the locked task fields
-        init = {**list(sch["presets"].values())[0], **locked}
+        init = merge_locked(dict(list(sch["presets"].values())[0]), locked)
         ir = DESIGNS[design].ir_cls.from_dict(init)
         errs = ir.validate()
     out_spec = {"task": spec.get("task") or message[:60], "design": design, "backend": backend, "locked": locked,

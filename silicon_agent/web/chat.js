@@ -44,7 +44,7 @@ let T = zh ? L.zh : L.en;
 const t = (k, v) => T[k].replace("{n}", v).replace("{f}", v);
 function setLang(isZh) { zh = isZh; T = zh ? L.zh : L.en; $("#input").placeholder = T.placeholder; $("#chint").textContent = T.hint; $("#stop").textContent = T.stop; }
 const STAGE_KEYS = ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"];
-const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top" };
+const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top", fir_chain: "fir_chain_top" };
 let DEV = { ecp5: "ECP5 LFE5U-45F", xc7s50: "Spartan-7 XC7S50", ice40: "iCE40 UP5K", gowin: "Gowin GW1NR-9" };
 let BSTAGES = { ecp5: ["behavioral", "post_synth_func"], xc7s50: STAGE_KEYS_ALL(), ice40: ["behavioral", "post_synth_func"], gowin: ["behavioral", "post_synth_func"] };
 function STAGE_KEYS_ALL() { return ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"]; }
@@ -207,10 +207,22 @@ function card(key, label, sub, cls = "") {
   d.addEventListener("toggle", () => { if (d.open) open.add(key); else open.delete(key); const li = d.closest("li"); if (li) li.dataset.sig = ""; });
   return d;
 }
-const chips = (ir, prev, locked) => `<div class="chips">` + Object.entries(ir).filter(([k]) => k !== "coefs").map(([k, v]) => {
-  const lock = locked && k in locked, changed = !lock && prev && JSON.stringify(prev[k]) !== JSON.stringify(v);
-  return `<span class="chip ${lock ? "lock" : changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
-}).join("") + `</div>`;
+const chips = (ir, prev, locked) => {
+  // composite designs: one row of chips per stage, prefixed s0./s1.
+  if (Array.isArray(ir.stages)) {
+    const lockedStages = Array.isArray(locked?.stages) ? locked.stages : [];
+    const rows = ir.stages.map((st, i) => `<div class="chips"><span class="chip"><span class="k">s${i}</span></span>` + Object.entries(st).filter(([k]) => k !== "coefs").map(([k, v]) => {
+      const lock = lockedStages[i] && k in lockedStages[i], changed = !lock && prev?.stages?.[i] && JSON.stringify(prev.stages[i][k]) !== JSON.stringify(v);
+      return `<span class="chip ${lock ? "lock" : changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
+    }).join("") + `</div>`);
+    const rest = Object.entries(ir).filter(([k]) => k !== "stages").map(([k, v]) => `<span class="chip ${prev && JSON.stringify(prev[k]) !== JSON.stringify(v) ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`).join("");
+    return rows.join("") + (rest ? `<div class="chips">${rest}</div>` : "");
+  }
+  return `<div class="chips">` + Object.entries(ir).filter(([k]) => k !== "coefs").map(([k, v]) => {
+    const lock = locked && k in locked, changed = !lock && prev && JSON.stringify(prev[k]) !== JSON.stringify(v);
+    return `<span class="chip ${lock ? "lock" : changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
+  }).join("") + `</div>`;
+};
 const consText = (c) => [`≥${c.fmax_mhz} MHz`, c.max_dsp != null ? `≤${c.max_dsp} DSP` : "", c.max_lut != null ? `≤${c.max_lut} LUT` : ""].filter(Boolean).join(" · ");
 
 function specCard(jid, spec, fork) {

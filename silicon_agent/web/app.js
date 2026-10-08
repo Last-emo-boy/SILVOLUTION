@@ -177,6 +177,13 @@ function render() {
 
 // ---------------------------------------------------------------- transcript
 function irChips(ir, prevIr, locked) {
+  if (Array.isArray(ir.stages)) {
+    const ls = Array.isArray(locked?.stages) ? locked.stages : [];
+    return ir.stages.map((st, i) => `<div class="chips"><span class="chip"><span class="k">s${i}</span></span>` + Object.entries(st).filter(([k]) => k !== "coefs" && !(ls[i] && k in ls[i])).map(([k, v]) => {
+      const changed = prevIr?.stages?.[i] && JSON.stringify(prevIr.stages[i][k]) !== JSON.stringify(v);
+      return `<span class="chip ${changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
+    }).join("") + `</div>`).join("") + `<div class="chips">` + Object.entries(ir).filter(([k]) => k !== "stages").map(([k, v]) => `<span class="chip ${prevIr && JSON.stringify(prevIr[k]) !== JSON.stringify(v) ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`).join("") + `</div>`;
+  }
   return `<div class="chips">` + Object.entries(ir).filter(([k]) => !(k in (locked || {})) && k !== "coefs").map(([k, v]) => {
     const changed = prevIr && JSON.stringify(prevIr[k]) !== JSON.stringify(v);
     return `<span class="chip ${changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
@@ -316,6 +323,14 @@ function renderDesign(row, done, spec) {
     for (let i = 0; i < R; i++) { const r = el(`<div class="r"></div>`); for (let j = 0; j < C; j++) r.appendChild(el(`<div class="pe">×+</div>`)); arch.appendChild(r); }
     sec.appendChild(arch);
     sec.appendChild(el(`<div class="archlegend"><span>${ir.pe_rows}×${ir.pe_cols} output-stationary systolic${ir.pe_rows > 12 || ir.pe_cols > 16 ? " (clipped)" : ""} · A → rows, B ↓ columns</span><span>PE: ${dspKind} (${ir.dsp_regs}) + ${ir.acc_in_dsp && xc ? "DSP post-adder" : "fabric carry-chain"} accumulator, ${ir.acc_width} b${ir.pipe_mul ? ` + ${ir.pipe_mul} fabric pipe` : ""}</span><span>${ir.reg_in ? "registered inputs · " : ""}${row.throughput ?? ir.pe_rows * ir.pe_cols} MAC/cycle · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
+  } else if (design === "fir_chain") {
+    for (const [i, st] of (ir.stages || []).entries()) {
+      const U = st.symmetric ? Math.ceil(st.taps / 2) : st.taps, M = Math.ceil(U / st.fold);
+      const r = el(`<div class="r"></div>`); r.appendChild(el(`<div class="tap on" style="width:30px;text-align:center;font:9px var(--mono)">s${i}</div>`));
+      for (let m = 0; m < Math.min(M, 16); m++) r.appendChild(el(`<div class="pe mac">×+${st.fold > 1 ? `/${st.fold}` : ""}</div>`)); arch.appendChild(r);
+    }
+    sec.appendChild(arch);
+    sec.appendChild(el(`<div class="archlegend"><span>${ir.stages.length}-stage FIR cascade: ${ir.stages.map((st) => `${st.taps} taps${st.symmetric ? " sym" : ""} fold ${st.fold}`).join(" → ")}</span><span>FIFO ${ir.fifo_depth} deep between stages · ${ir.round_mode} reduction · ${row.throughput ?? "?"} samples/cycle · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
   } else if (design === "conv2d") {
     const K = ir.k, PR = ir.par_rows;
     const lines = el(`<div class="r"></div>`); for (let l = 0; l < K - 1; l++) lines.appendChild(el(`<div class="tap on" style="width:${Math.min(ir.width, 640) / 8}px" title="line buffer ${l}"></div>`)); arch.appendChild(lines);

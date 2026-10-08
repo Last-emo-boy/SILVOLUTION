@@ -75,6 +75,23 @@ SCHEMAS = {
         "constraints_default": {"fmax_mhz": 100, "max_dsp": 16, "max_lut": 2000},
         "locked_default": {"k": 3, "width": 640, "data_width": 8, "coef_width": 8},
     },
+    "fir_chain": {
+        "title": "cascade of FIR stages with FIFOs between them (composite datapath)",
+        "locked_candidates": ["stages"],
+        "nested": "stages",   # the IR is a list of FIR IRs; the form edits it as JSON
+        "fields": [
+            {"name": "fifo_depth", "type": "choice", "choices": [4, 8, 16, 32, 64], "hint": "inter-stage FIFO depth"},
+            {"name": "round_mode", "type": "choice", "choices": ["truncate", "round"], "hint": "how a stage's accumulator is reduced to the next stage's data width"},
+        ],
+        "presets": {
+            "anti-alias + shaping (8 -> 32 taps)": {"stages": [
+                {"taps": 8, "data_width": 16, "coef_width": 16, "cutoff": 0.4, "acc_width": 36, "symmetric": False, "fold": 1, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"},
+                {"taps": 32, "data_width": 16, "coef_width": 16, "cutoff": 0.2, "acc_width": 40, "symmetric": False, "fold": 1, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"}],
+                "fifo_depth": 16, "round_mode": "truncate"},
+        },
+        "constraints_default": {"fmax_mhz": 100, "max_dsp": 16, "max_lut": 3000},
+        "locked_default": {},
+    },
 }
 
 OBJECTIVES = ["maximize_throughput", "minimize_lut", "minimize_dsp", "maximize_fmax", "minimize_latency", "minimize_power"]
