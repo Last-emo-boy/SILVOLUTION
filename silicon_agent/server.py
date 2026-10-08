@@ -235,8 +235,9 @@ SHARED = os.environ.get("SA_SHARED", "") == "1"  # 1: every login sees every con
 
 
 def _visible(th: dict, sub: str) -> bool:
-    """Conversations belong to the subject that opened them; the token (CLI) identity sees everything."""
-    return SHARED or sub in ("cli", "anonymous") or th.get("subject", "") in ("", sub)
+    """Conversations belong to the SSO subject that opened them. The token identity ("cli") is the operator:
+    it sees everything, and what it starts is visible to every login (there is no per-user CLI token)."""
+    return SHARED or sub in ("cli", "anonymous") or th.get("subject", "") in ("", "cli", sub)
 
 
 def _thread_jobs(tid: str) -> list[str]:

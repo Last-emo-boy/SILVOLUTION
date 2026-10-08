@@ -455,7 +455,10 @@ async function renderPareto(p, done, c, unit) {
     if (c.max_dsp != null) svg.appendChild(svgEl("line", { x1: X(c.max_dsp), y1: pad.t, x2: X(c.max_dsp), y2: H - pad.b, stroke: "var(--border-2)", "stroke-dasharray": "3 3" }));
     const mine = new Set(done.map((r) => JSON.stringify(r.ir)));
     const frontSet = new Set(data.front.map((q) => q.job + ":" + q.iteration));
-    const fr = [...data.front].sort((a, b) => a.dsp - b.dsp);
+    // the 2-D projection (Fmax vs DSP) of the 4-D front: keep only points that are not beaten on both axes,
+    // so the drawn line is the attainable Fmax for each DSP budget
+    const fr2 = data.front.filter((q) => !data.front.some((o) => o !== q && o.dsp <= q.dsp && o.fmax_mhz >= q.fmax_mhz && (o.dsp < q.dsp || o.fmax_mhz > q.fmax_mhz)));
+    const fr = fr2.sort((a, b) => a.dsp - b.dsp || b.fmax_mhz - a.fmax_mhz);
     if (fr.length > 1) svg.appendChild(svgEl("polyline", { points: fr.map((q) => `${X(q.dsp)},${Y(q.fmax_mhz)}`).join(" "), fill: "none", stroke: "var(--good)", "stroke-width": 1, opacity: 0.6 }));
     for (const q of data.points) {
       const isMine = q.job === selected, onFront = frontSet.has(q.job + ":" + q.iteration);
