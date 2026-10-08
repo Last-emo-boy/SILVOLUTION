@@ -40,6 +40,98 @@ class AghError(RuntimeError):
     pass
 
 
+class _Turn:
+    """Collects one turn from the session/update stream: text segments and tool calls in order (the chat shows the
+    reasoning between calls), each tool's final status and parsed result."""
+
+    def __init__(self, on_event=None):
+        self.on_event = on_event
+        self.calls: dict[str, dict] = {}
+        self.texts: list[str] = []
+        self.steps: list[dict] = []
+
+    def on(self, upd: dict, meta: dict) -> None:
+        kind = upd.get("sessionUpdate")
+        if kind == "user_message_chunk":
+            # an attached stream replays the session from its start: every user message opens a new turn and only
+            # the last one (the turn in flight) is what the caller is waiting for
+            self.calls, self.texts, self.steps = {}, [], []
+            if self.on_event:
+                self.on_event("turn_start", upd, meta)
+            return
+        if kind == "agent_message_chunk":
+            c = upd.get("content") or {}
+            if c.get("type") == "text":
+                self.texts.append(c.get("text", ""))
+                if self.steps and self.steps[-1]["kind"] == "text":
+                    self.steps[-1]["text"] += c.get("text", "")
+                else:
+                    self.steps.append({"kind": "text", "text": c.get("text", "")})
+        elif kind == "tool_call":
+            self.calls[upd.get("toolCallId")] = {"name": upd.get("title") or upd.get("kind"), "raw": upd.get("rawInput"), "status": upd.get("status")}
+            self.steps.append({"kind": "tool", "id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind")})
+        elif kind == "tool_call_update":
+            c = self.calls.setdefault(upd.get("toolCallId"), {})
+            c["status"] = upd.get("status", c.get("status"))
+            if upd.get("title") and not c.get("name"):
+                c["name"] = upd["title"]
+            if upd.get("rawOutput") is not None:
+                c["result"] = upd.get("rawOutput")
+            elif upd.get("content"):
+                # ACP carries the result as content blocks; our tools emit one JSON text block
+                txt = "".join(b.get("content", {}).get("text", "") for b in upd["content"] if isinstance(b, dict) and b.get("type") == "content")
+                try:
+                    c["result"] = json.loads(txt) if txt else None
+                except json.JSONDecodeError:
+                    c["result"] = txt
+            if upd.get("rawInput") is not None:
+                c["raw"] = upd.get("rawInput")
+            # the plugin reports a failed HTTP call as a normal {"error": ...} result so the model can read it;
+            # for the trail that is a failed call
+            if isinstance(c.get("result"), dict) and set(c["result"]) == {"error"} and c["status"] == "completed":
+                c["status"] = "failed"
+            # a listener may want to react to a finished tool with its result in hand
+            upd = {**upd, "_result": c.get("result"), "title": c.get("name"), "status": c["status"]}
+        if self.on_event:
+            self.on_event(kind, upd, meta)
+
+    def result(self, stop: str | None) -> dict:
+        tools = [{"id": cid, "name": c.get("name"), "args": c.get("raw"), "result": c.get("result"), "status": c.get("status")} for cid, c in self.calls.items()]
+        for st in self.steps:
+            if st["kind"] == "tool":
+                st["status"] = self.calls.get(st["id"], {}).get("status")
+        # the final answer is the text after the last tool call; everything before it is working narration
+        final = ""
+        for st in reversed(self.steps):
+            if st["kind"] == "tool":
+                break
+            if st["kind"] == "text":
+                final = st["text"] + final
+        full = "".join(self.texts).strip()
+        return {"text": final.strip() or full, "full_text": full, "steps": self.steps, "tools": tools, "stop": stop}
+
+
+def turn_from_projection(p: dict) -> dict:
+    """The last turn of a session, in prompt()'s shape, rebuilt from the harness's UI projection (its tool nodes
+    carry name, status and previews of the arguments and the result; previews are capped at a few KB)."""
+    t = (p.get("turns") or [])[-1]
+    by = {n["id"]: n for n in p.get("nodes") or []}
+    col = _Turn()
+    for nid in t.get("nodeIds") or []:
+        n = by.get(nid) or {}
+        if n.get("kind") == "assistant" and n.get("text"):
+            col.on({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": n["text"]}}, {})
+        elif n.get("kind") == "tool":
+            def parse(s):
+                try:
+                    return json.loads(s) if s else None
+                except json.JSONDecodeError:
+                    return s
+            col.on({"sessionUpdate": "tool_call", "toolCallId": n.get("toolUseId") or nid, "title": n.get("name"), "status": "pending", "rawInput": parse(n.get("argsPreview"))}, {})
+            col.on({"sessionUpdate": "tool_call_update", "toolCallId": n.get("toolUseId") or nid, "title": n.get("name"), "status": n.get("status"), "rawOutput": parse(n.get("resultPreview"))}, {})
+    return col.result("resumed" if t.get("reason") in (None, "completed") else t.get("reason"))
+
+
 class AghClient:
     """One JSON-RPC connection to the AGH daemon. Thread-safe for concurrent requests; notifications
     (session/update) are routed to the session that owns them."""
@@ -196,17 +288,11 @@ class AghClient:
         return r.get("sessionId", session_id)
 
     def prompt(self, session_id: str, text: str, on_event=None, timeout: float = 3600) -> dict:
-        """Run one turn. Returns {"text": assistant text, "tools": [{name, args, result}], "stop": reason}."""
-        tools: list[dict] = []
-        calls: dict[str, dict] = {}
-        texts: list[str] = []
-        # the turn as it happened: text segments and tool calls in order (the chat shows the reasoning between calls)
-        steps: list[dict] = []
-        state = {"last_assistant": ""}
-
+        """Run one turn. Returns {"text": assistant text, "tools": [{name, args, result}], "steps": [...], "stop": reason}."""
         # a (re)loaded session replays earlier turns' updates on this stream, possibly after our prompt went out;
         # only this prompt's turn counts. The turn starts with the user_message_chunk that echoes our text: nothing
         # before it belongs to us, and text chunks (which carry no sequence) are attributed to the turn in progress.
+        col = _Turn(on_event)
         turn = {"open": False}
         marker = text[:80]
 
@@ -214,65 +300,19 @@ class AghClient:
             if method != "session/update":
                 return
             upd = params.get("update") or {}
-            kind = upd.get("sessionUpdate")
-            ev = (params.get("_meta") or {}).get(META) or {}
-            if kind == "user_message_chunk":
+            if upd.get("sessionUpdate") == "user_message_chunk":
                 c = upd.get("content") or {}
                 turn["open"] = c.get("type") == "text" and (c.get("text") or "").startswith(marker)
                 return
-            if not turn["open"]:
-                return
-            if kind == "agent_message_chunk":
-                c = upd.get("content") or {}
-                if c.get("type") == "text":
-                    texts.append(c.get("text", ""))
-                    if steps and steps[-1]["kind"] == "text":
-                        steps[-1]["text"] += c.get("text", "")
-                    else:
-                        steps.append({"kind": "text", "text": c.get("text", "")})
-            elif kind == "tool_call":
-                calls[upd.get("toolCallId")] = {"name": upd.get("title") or upd.get("kind"), "raw": upd.get("rawInput"), "status": upd.get("status")}
-                steps.append({"kind": "tool", "id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind")})
-            elif kind == "tool_call_update":
-                c = calls.setdefault(upd.get("toolCallId"), {})
-                c["status"] = upd.get("status", c.get("status"))
-                if upd.get("title") and not c.get("name"):
-                    c["name"] = upd["title"]
-                if upd.get("rawOutput") is not None:
-                    c["result"] = upd.get("rawOutput")
-                elif upd.get("content"):
-                    # ACP carries the result as content blocks; our tools emit one JSON text block
-                    txt = "".join(b.get("content", {}).get("text", "") for b in upd["content"] if isinstance(b, dict) and b.get("type") == "content")
-                    try:
-                        c["result"] = json.loads(txt) if txt else None
-                    except json.JSONDecodeError:
-                        c["result"] = txt
-                if upd.get("rawInput") is not None:
-                    c["raw"] = upd.get("rawInput")
-                # a listener may want to react to a finished tool with its result in hand
-                upd = {**upd, "_result": c.get("result"), "title": c.get("name")}
-            if on_event:
-                on_event(kind, upd, ev)
+            if turn["open"]:
+                col.on(upd, (params.get("_meta") or {}).get(META) or {})
 
         self.listen(session_id, on_update)
         try:
             r = self.call("session/prompt", {"sessionId": session_id, "prompt": [{"type": "text", "text": text}]}, timeout=timeout)
         finally:
             self.unlisten(session_id, on_update)
-        for cid, c in calls.items():
-            tools.append({"id": cid, "name": c.get("name"), "args": c.get("raw"), "result": c.get("result"), "status": c.get("status")})
-        for st in steps:
-            if st["kind"] == "tool":
-                st["status"] = calls.get(st["id"], {}).get("status")
-        # the final answer is the text after the last tool call; everything before it is working narration
-        final = ""
-        for st in reversed(steps):
-            if st["kind"] == "tool":
-                break
-            if st["kind"] == "text":
-                final = st["text"] + final
-        return {"text": (final.strip() or "".join(texts).strip() or state["last_assistant"]), "full_text": "".join(texts).strip(),
-                "steps": steps, "tools": tools, "stop": r.get("stopReason")}
+        return col.result(r.get("stopReason"))
 
     def project(self, session_id: str) -> dict:
         """The harness's UI projection of a session: opState (a turn in flight?), nodes (messages / tool calls)."""
@@ -307,43 +347,16 @@ class AghClient:
     def wait_idle(self, session_id: str, timeout: float = 3600, on_event=None) -> dict:
         """Follow a turn that another connection (a previous server process) started: attach for its session/update
         stream and return when the harness reports the turn over. Returns the same shape as prompt()."""
-        tools: list[dict] = []
-        calls: dict[str, dict] = {}
-        texts: list[str] = []
-        steps: list[dict] = []
+        col = _Turn(on_event)
         done = threading.Event()
 
         def on_update(method: str, params: dict) -> None:
             if method != "session/update":
                 return
-            upd = params.get("update") or {}
-            kind = upd.get("sessionUpdate")
             meta = (params.get("_meta") or {}).get(META) or {}
-            if kind == "agent_message_chunk":
-                c = upd.get("content") or {}
-                if c.get("type") == "text":
-                    texts.append(c.get("text", ""))
-                    if steps and steps[-1]["kind"] == "text":
-                        steps[-1]["text"] += c.get("text", "")
-                    else:
-                        steps.append({"kind": "text", "text": c.get("text", "")})
-            elif kind == "tool_call":
-                calls[upd.get("toolCallId")] = {"name": upd.get("title") or upd.get("kind"), "raw": upd.get("rawInput"), "status": upd.get("status")}
-                steps.append({"kind": "tool", "id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind")})
-            elif kind == "tool_call_update":
-                c = calls.setdefault(upd.get("toolCallId"), {})
-                c["status"] = upd.get("status", c.get("status"))
-                if upd.get("content"):
-                    txt = "".join(b.get("content", {}).get("text", "") for b in upd["content"] if isinstance(b, dict) and b.get("type") == "content")
-                    try:
-                        c["result"] = json.loads(txt) if txt else None
-                    except json.JSONDecodeError:
-                        c["result"] = txt
-                upd = {**upd, "_result": c.get("result"), "title": c.get("name")}
+            col.on(params.get("update") or {}, meta)
             if meta.get("turnEnd") or meta.get("phase") in ("terminalQuiescence", "parked"):
                 done.set()
-            if on_event:
-                on_event(kind, upd, meta)
 
         self.listen(session_id, on_update)
         try:
@@ -355,18 +368,11 @@ class AghClient:
             done.wait(timeout)
         finally:
             self.unlisten(session_id, on_update)
-        for cid, c in calls.items():
-            tools.append({"id": cid, "name": c.get("name"), "args": c.get("raw"), "result": c.get("result"), "status": c.get("status")})
-        for st in steps:
-            if st["kind"] == "tool":
-                st["status"] = calls.get(st["id"], {}).get("status")
-        final = ""
-        for st in reversed(steps):
-            if st["kind"] == "tool":
-                break
-            if st["kind"] == "text":
-                final = st["text"] + final
-        return {"text": final.strip() or "".join(texts).strip(), "full_text": "".join(texts).strip(), "steps": steps, "tools": tools, "stop": "resumed"}
+        # the stream only carried what happened after the attach; the projection holds the whole turn
+        try:
+            return turn_from_projection(self.project(session_id))
+        except (AghError, KeyError, IndexError):
+            return col.result("resumed")
 
     def cancel(self, session_id: str) -> None:
         self.notify("session/cancel", {"sessionId": session_id})

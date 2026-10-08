@@ -493,7 +493,11 @@ def _run_watcher(tid: str, lang: str):
     seen: set[str] = set()
 
     def on_event(kind, upd, meta):
-        if kind == "tool_call":
+        if kind == "turn_start":
+            trail.clear()
+            with _lock:
+                th["live"] = []
+        elif kind == "tool_call":
             trail.append({"id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind"), "status": upd.get("status", "pending")})
             with _lock:
                 th["live"] = trail[-40:]
