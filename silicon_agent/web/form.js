@@ -168,6 +168,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     $("#act-rerun").onclick = async () => { const d = state.detail; if (!d) return; const r = await post("/jobs", { spec: { ...d.spec, task: (d.spec.task || "") + " (re-run)" }, max_iter: d.max_iter || 8, thread: state.thread || undefined }); await refreshJobs(); select(r.id); };
     $("#act-delete").onclick = async () => { if (!state.selected || !confirm("Delete this run and its artifacts?")) return; await api(`/jobs/${state.selected}`, { method: "DELETE" }); await refreshJobs(); show("empty"); };
     $("#act-compare").onclick = () => openCompare(state.selected);
+    $("#act-package").onclick = () => { if (state.selected) window.open(`/api/jobs/${state.selected}/package`, "_blank"); };
     $("#cmp-back").onclick = () => { if (state.cmpA) select(state.cmpA); else show("empty"); };
   }
 

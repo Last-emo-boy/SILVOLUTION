@@ -6,6 +6,8 @@ API
   GET  /api/jobs                 list (newest first), rebuilt from results/ on start
   GET  /api/jobs/<id>            {"status", "events": [...], "summary"}  (?after=N incremental)
   GET  /api/jobs/<id>/files/<p>  any artifact under results/<id>/
+  GET  /api/jobs/<id>/package    zip: RTL + AXI-Stream wrapper + testbench/vectors + reports + trajectory + README
+  GET  /api/jobs/<id>/axis       the AXI-Stream wrapper alone
   GET  /api/specs                example specs shipped in specs/
   GET  /api/health
   POST /api/jobs/<id>/steer      {"message": "..."}  -> read by the planner before its next proposal
@@ -529,6 +531,33 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[2] == "rtl":
                 # best design's generated RTL, looked up through runs/<hash>/
                 return self._rtl(job)
+            if len(parts) == 3 and parts[2] == "package":
+                from . import deliver
+                try:
+                    data = deliver.package({**job, "id": job_id}, RESULTS / job_id, ROOT / "runs")
+                except ValueError as e:
+                    return self._json(404, {"error": str(e)})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f'attachment; filename="{job["spec"].get("design", "design")}-{job_id}.zip"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            if len(parts) == 3 and parts[2] == "axis":
+                from . import deliver
+                from .designs import design_for
+                best = (job.get("summary") or {}).get("best")
+                if not best:
+                    return self._json(404, {"error": "no feasible design yet"})
+                d = design_for(job["spec"])
+                body = deliver.axis_wrapper(d, d.ir_cls.from_dict(best["ir"])).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
         self._json(404, {"error": "not found"})
 
     def _rtl(self, job: dict) -> None:
