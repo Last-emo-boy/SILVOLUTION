@@ -180,3 +180,4 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .modes { display: inline-flex; gap: 4px; align-items: center; }
 .modes button { font: 10.5px var(--mono); color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 1px 8px; cursor: pointer; }
 .modes button.on { color: var(--accent); border-color: var(--accent); }
+.agent-steps summary .x { color: var(--bad, #e5484d); }

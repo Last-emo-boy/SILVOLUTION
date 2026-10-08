@@ -575,6 +575,7 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
             if jid and jid in _jobs:
                 started.append(jid)
                 _note_agent_run(tid, jid, lang)
+    by_id = {t.get("id"): t for t in r["tools"]}
     if r.get("stop") == "cancelled":
         # a cancel from the stop button, or the harness aborting the turn because its client went away (a restart)
         r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（这一轮被中止）" if lang == "zh" else "(turn cut short)")
@@ -584,7 +585,9 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
                                "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh", **({"resumed": True} if r.get("resumed") else {}),
                                **({"usage": r["usage"]} if r.get("usage") else {}),
                                "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40],
-                               "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status")} for st in r.get("steps", [])][:80]})
+                               "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status"),
+                                          **({"brief": _tool_brief(st.get("name") or "", by_id.get(st.get("id"), {}).get("args"))} if st["kind"] == "tool" else {})}
+                                         for st in r.get("steps", [])][:80]})
         if not th["title"] and started:
             th["title"] = _jobs[started[-1]]["spec"].get("task", "")[:120]
         _save_thread(tid)
