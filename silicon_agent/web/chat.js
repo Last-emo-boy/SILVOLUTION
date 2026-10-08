@@ -418,7 +418,18 @@ function resultCard(jid, j, done, spec) {
     dl.onclick = async () => { const txt = await api(`/jobs/${jid}/rtl`); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain" })); a.download = `${top}.sv`; a.click(); };
     const pkg = el(`<a href="/api/jobs/${esc(jid)}/package">${T.pkg}</a>`);
     const fm = el(`<button title="${T.formalTitle}">${T.formal}</button>`);
-    fm.onclick = async () => { fm.disabled = true; fm.textContent = T.formalRunning; try { const r = await api(`/jobs/${jid}/formal?depth=20`); const eq = r.equivalence?.ok, pr = r.properties?.ok; fm.textContent = `${T.formal}: ${eq === true ? "≡ ✓" : eq === false ? "≡ ✗" : "≡ ?"} · ${pr ? "props ✓" : "props ✗"}`; fm.title = (r.equivalence?.log || "") + "\n" + (r.properties?.log || ""); } catch (e) { fm.textContent = e.message.slice(0, 60); } fm.disabled = false; };
+    fm.onclick = async () => {
+      fm.disabled = true; fm.textContent = T.formalRunning;
+      try {
+        // the server runs the check in the background and answers 202 until it is done
+        let r;
+        for (let i = 0; i < 120; i++) { r = await api(`/jobs/${jid}/formal?depth=20`); if (r.status !== "running") break; await new Promise((ok) => setTimeout(ok, 5000)); }
+        const eq = r.equivalence?.ok, pr = r.properties?.ok;
+        fm.textContent = r.status === "running" ? T.formalRunning : `${T.formal}: ${eq === true ? "≡ ✓" : eq === false ? "≡ ✗" : "≡ ?"} · ${pr ? "props ✓" : "props ✗"}`;
+        fm.title = (r.equivalence?.log || "") + "\n" + (r.properties?.log || "") + (r.error ? "\n" + r.error : "");
+      } catch (e) { fm.textContent = e.message.slice(0, 60); }
+      fm.disabled = false;
+    };
     links.append(view, dl, pkg, fm);
   }
   links.appendChild(el(`<a href="/work?thread=${encodeURIComponent(tid)}#${esc(jid)}" target="_blank">${T.worktable}</a>`));

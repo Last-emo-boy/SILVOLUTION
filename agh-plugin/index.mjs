@@ -64,7 +64,7 @@ export const siliconAgent = {
       const t = await r.text()
       let parsed
       try { parsed = JSON.parse(t) } catch { parsed = { raw: t.slice(0, 4000) } }
-      if (!r.ok) throw new Error(`silicon-agent ${method} ${path}: HTTP ${r.status} ${t.slice(0, 300)}`)
+      if (!r.ok && r.status !== 202) throw new Error(`silicon-agent ${method} ${path}: HTTP ${r.status} ${t.slice(0, 300)}`)
       return parsed
     }
     const fail = (error) => text({ error: String(error?.message ?? error) })
@@ -218,12 +218,10 @@ export const siliconAgent = {
 
     agnes.registerTool({
       name: 'sa_formal',
-      description: 'SymbiYosys bounded model check of a finished run: equivalence of the measured RTL against a fresh emit of its IR, plus stream-protocol properties. Takes seconds to minutes.',
+      description: 'SymbiYosys bounded model check of a finished run: equivalence of the measured RTL against a fresh emit of its IR, plus stream-protocol properties. The server runs it in the background: the first call returns status "running"; call again after ~60 s until the report (equivalence.ok, properties.ok) is present.',
       parameters: obj({ job: str({ maxLength: 64 }), depth: int({ minimum: 4, maximum: 64 }) }, ['job']),
-      meta: { ...readOnly, costHint: { wallMs: 110000 } },
+      meta: { ...readOnly, costHint: { wallMs: 60000 } },
       async execute({ job, depth }, tctx) {
-        // the check runs on the server and is cached in results/<job>/formal/report.json; a first call may hit the
-        // tool timeout on a deep pipeline, in which case the next call returns the finished report
         try { return text(await api('GET', `/jobs/${encodeURIComponent(job)}/formal?depth=${depth ?? 16}`, undefined, tctx?.signal)) } catch (e) { return fail(e) }
       },
     })

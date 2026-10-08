@@ -395,6 +395,52 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
     return {"action": "fork" if parent else "run", "job": job_id}
 
 
+_formal_jobs: dict[str, threading.Thread] = {}
+
+
+def _formal_start(job_id: str, job: dict, k: int, fresh_req: bool) -> dict:
+    """Return the cached report, or start the check in a thread and return {"status": "running"}."""
+    from . import formal
+    from .designs import design_for
+    best = job["summary"]["best"]
+    d = design_for(job["spec"]); ir = d.ir_cls.from_dict(best["ir"]); backend = job["spec"].get("backend", "ecp5")
+    fresh = d.emit(ir, backend=backend)
+    h = hashlib.sha256(f"{backend}\n{fresh}".encode()).hexdigest()[:16]
+    work = RESULTS / job_id / "formal"
+    rep = work / "report.json"
+    with _lock:
+        t = _formal_jobs.get(job_id)
+        if t and t.is_alive():
+            return {"status": "running", "depth": k, "note": "formal check in progress; call again in a minute"}
+        if rep.exists() and not fresh_req:
+            try:
+                prev = json.loads(rep.read_text())
+                if prev.get("rtl_hash") == h and prev.get("depth_requested") == k:
+                    return prev
+            except ValueError:
+                pass
+
+        def run():
+            measured_rtl = ROOT / "runs" / h / "rtl" / f"{d.top}.sv"
+            out = {"status": "done", "depth": k, "depth_requested": k, "rtl_hash": h, "measured_rtl_present": measured_rtl.exists(), "started": time.time()}
+            try:
+                if measured_rtl.exists():
+                    out["equivalence"] = formal.equivalence(d, ir, measured_rtl.read_text(), fresh, work / "equiv", k=k)
+                else:
+                    out["equivalence"] = {"ok": None, "log": "generator output differs from the measured RTL hash; no stored copy to compare against"}
+                out["properties"] = formal.properties(d, ir, fresh, work / "props", k=k)
+            except Exception as e:
+                out["error"] = str(e)[:500]
+            out["finished"] = time.time()
+            work.mkdir(parents=True, exist_ok=True)
+            rep.write_text(json.dumps(out, indent=1))
+
+        t = threading.Thread(target=run, daemon=True)
+        _formal_jobs[job_id] = t
+        t.start()
+    return {"status": "running", "depth": k, "note": "formal check started; call again in a minute"}
+
+
 def _run_note(spec: dict, lang: str) -> str:
     c = spec.get("constraints", {})
     cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
@@ -663,46 +709,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
                 return
             if len(parts) == 3 and parts[2] == "formal":
-                from . import formal
-                from .designs import design_for
+                # the BMC runs in the background (it can take minutes on a deep pipeline); the endpoint returns 202 while
+                # it runs and the finished report, cached per generator revision, afterwards
                 best = (job.get("summary") or {}).get("best")
                 if not best:
                     return self._json(404, {"error": "no feasible design yet"})
-                d = design_for(job["spec"]); ir = d.ir_cls.from_dict(best["ir"]); backend = job["spec"].get("backend", "ecp5")
-                fresh = d.emit(ir, backend=backend)
-                import hashlib
-                h = hashlib.sha256(f"{backend}\n{fresh}".encode()).hexdigest()[:16]
-                measured_rtl = ROOT / "runs" / h / "rtl" / f"{d.top}.sv"
-                work = RESULTS / job_id / "formal"
                 k = int(parse_qs(u.query).get("depth", ["20"])[0])
-                # a finished report for this generator revision is reused; a running check is not started twice
-                rep = work / "report.json"
-                if rep.exists() and "fresh" not in parse_qs(u.query):
-                    try:
-                        prev = json.loads(rep.read_text())
-                        if prev.get("rtl_hash") == h and prev.get("depth_requested") == k:
-                            return self._json(200, prev)
-                    except ValueError:
-                        pass
-                with _lock:
-                    if job.get("formal_running"):
-                        return self._json(202, {"status": "running", "depth": k, "note": "formal check in progress; call again"})
-                    job["formal_running"] = True
-                out = {"depth": k, "depth_requested": k, "rtl_hash": h, "measured_rtl_present": measured_rtl.exists()}
-                if measured_rtl.exists():
-                    out["equivalence"] = formal.equivalence(d, ir, measured_rtl.read_text(), fresh, work / "equiv", k=k)
-                else:
-                    # the hash changed => the generator changed since the run: compare against the stored RTL of the run dir if any
-                    cand = sorted((ROOT / "runs").glob(f"*/rtl/{d.top}.sv"), key=lambda p: p.stat().st_mtime)
-                    out["equivalence"] = {"ok": None, "log": "generator output differs from the measured RTL hash; no stored copy to compare against"}
-                try:
-                    out["properties"] = formal.properties(d, ir, fresh, work / "props", k=k)
-                finally:
-                    with _lock:
-                        job.pop("formal_running", None)
-                (work / "report.json").parent.mkdir(parents=True, exist_ok=True)
-                (work / "report.json").write_text(json.dumps(out, indent=1))
-                return self._json(200, out)
+                fresh_req = "fresh" in parse_qs(u.query)
+                st = _formal_start(job_id, job, k, fresh_req)
+                return self._json(202 if st.get("status") == "running" else 200, st)
             if len(parts) == 3 and parts[2] == "axis":
                 from . import deliver
                 from .designs import design_for
