@@ -43,9 +43,57 @@ def flat_sim_lib(family: str, drop: tuple[str, ...] = ()) -> Path:
             out.append(line)
         if re.match(r"\s*endmodule", line):
             skip = False
+    text = "\n".join(out) + "\n"
+    # Icarus never runs an `always @*` whose inputs are all constants (nothing ever changes), so a cell whose
+    # inputs synthesis tied to GND/VCC keeps X on its `reg` outputs forever (a row-serial conv on Gowin has
+    # an ALU fed only by constants). Evaluating every such block once at time 0 gives always_comb semantics.
+    text = _comb_as_assign(text)
     CACHE.mkdir(exist_ok=True)
-    lib.write_text("\n".join(out) + "\n")
+    lib.write_text(text)
     return lib
+
+
+# yosys's Gowin ALU models its sum/carry with `reg S, C` in an `always @*` whose body is a case on the ALU_MODE
+# parameter. Icarus only evaluates @* on an input *change*, so a cell whose inputs are constant nets (GND/VCC,
+# or logic that settles during time 0) keeps S/C at X forever; the real cell is purely combinational. The
+# equivalent continuous assignments have no such hole.
+_GOWIN_ALU_COMB = """
+wire S = (ALU_MODE == 0) ? (I0 ^ I1) :
+         (ALU_MODE == 1) ? (I0 ^ ~I1) :
+         (ALU_MODE == 2) ? (I3 ? I0 ^ I1 : I0 ^ ~I1) :
+         (ALU_MODE == 3) ? (I0 ^ ~I1) :
+         (ALU_MODE == 4) ? (I0 ^ ~I1) :
+         (ALU_MODE == 5) ? (~I0 ^ I1) :
+         (ALU_MODE == 6) ? I0 :
+         (ALU_MODE == 7) ? ~I0 :
+         (ALU_MODE == 8) ? (I3 ? I0 : ~I0) :
+         (ALU_MODE == 9) ? ((I0 & I1) ^ I3) : 1'bx;
+wire C = (ALU_MODE == 0) ? I0 :
+         (ALU_MODE == 1) ? I0 :
+         (ALU_MODE == 2) ? I0 :
+         (ALU_MODE == 3) ? 1'b1 :
+         (ALU_MODE == 4) ? I0 :
+         (ALU_MODE == 5) ? I1 :
+         (ALU_MODE == 6) ? 1'b0 :
+         (ALU_MODE == 7) ? 1'b1 :
+         (ALU_MODE == 8) ? I0 :
+         (ALU_MODE == 9) ? (I0 & I1) : 1'bx;
+"""
+
+
+def _comb_as_assign(text: str) -> str:
+    """Replace the Gowin ALU's `reg S, C; always @* case (ALU_MODE) ...` with continuous assignments (see above).
+    Other families' cells are written with assigns already; anything unrecognised is left alone."""
+    m = re.search(r"^module ALU \(SUM, COUT, I0, I1, I3, CIN\);.*?^endmodule", text, re.M | re.S)
+    if not m:
+        return text
+    body = m.group(0)
+    # the wires must be declared before `assign SUM = S ^ CIN` uses them: put them where `reg S, C;` was
+    body = body.replace("reg S, C;", _GOWIN_ALU_COMB)
+    body = re.sub(r"^always @\* begin\n\tcase \(ALU_MODE\).*?^\tendcase\nend\n", "", body, flags=re.M | re.S)
+    if "always @*" in body:
+        raise ValueError("gowin ALU model changed shape; update _comb_as_assign")
+    return text[:m.start()] + body + text[m.end():]
 
 
 def iverilog_netlist_sim(d, arch, work: Path, fmax_target: float, netlist: Path, libs: list[Path], on_stage=None) -> dict:
