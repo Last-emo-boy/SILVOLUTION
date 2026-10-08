@@ -157,3 +157,7 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .agent-steps[open] summary .ic { transform: rotate(90deg); } .agent-steps .ic { display: inline-block; transition: transform .15s; font-size: 10px; }
 .agent-steps .inner { border-left: 2px solid var(--border); margin: 6px 0 0 4px; padding-left: 10px; }
 .agent-steps .note { color: var(--text-2); font-size: 12.5px; margin: 4px 0; }
+.threads li.group { display: block; font: 11px var(--mono); color: var(--muted); padding: 12px 10px 3px; cursor: default; text-transform: uppercase; letter-spacing: .04em; }
+.threads li.group:hover { background: none; }
+.threads .m .dev { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; margin-right: 6px; }
+.threads .dot.busy { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }

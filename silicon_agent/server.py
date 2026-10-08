@@ -627,13 +627,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/threads":
             with _lock:
                 rows = [{"id": t["id"], "title": t.get("title") or (t["messages"][0]["text"][:60] if t["messages"] else "untitled"),
-                         "created": t["created"], "job": (_thread_jobs(t["id"]) or [None])[-1], "subject": t.get("subject", "")}
+                         "created": t["created"], "job": (_thread_jobs(t["id"]) or [None])[-1], "subject": t.get("subject", ""),
+                         "busy": bool(t.get("busy")), "n_runs": len(_thread_jobs(t["id"])),
+                         "last": max([m.get("t", 0) for m in t["messages"]] + [t["created"]]),
+                         "agent": (t.get("live") or [{}])[-1].get("name") if t.get("busy") and t.get("live") else None}
                         for t in _threads.values() if _visible(t, sub)]
             for r in rows:
                 j = _jobs.get(r["job"]) if r["job"] else None
                 r["status"] = j["status"] if j else None
                 r["best"] = (j.get("summary") or {}).get("best") if j else None
-            rows.sort(key=lambda r: r["created"], reverse=True)
+                r["design"] = j["spec"].get("design") if j else None
+                r["backend"] = j["spec"].get("backend") if j else None
+            rows.sort(key=lambda r: r["last"], reverse=True)
             return self._json(200, rows)
         if len(parts) == 2 and parts[0] == "threads":
             th = _threads.get(parts[1])
@@ -687,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
                          "created": v["created"], "subject": v.get("subject", ""), "parent": v.get("parent"), "thread": v.get("thread"),
                          "best": (v.get("summary") or {}).get("best"), "iterations": sum(1 for e in v["events"] if e["kind"] == "result")}
                         for j, v in _jobs.items() if want is None or (v.get("thread") or "") == want]
-            rows.sort(key=lambda r: r["created"], reverse=True)
+            rows.sort(key=lambda r: r["last"], reverse=True)
             return self._json(200, rows)
         if len(parts) >= 2 and parts[0] == "jobs":
             job_id = parts[1]
