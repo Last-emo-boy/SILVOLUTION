@@ -66,12 +66,16 @@ FIR_IR = """IR fields and legal ranges (taps, data_width, coef_width and the coe
                          adder chain into the output register. When the critical path starts at part[*] and ends at
                          out_data (the post-accumulator reduction), this is the knob that shortens it; pipe_mul/dsp_regs
                          sit before the accumulator and cannot.
+  pipe_in    bool        fold>1 only: register the multiplier operands after the symmetric pre-adder and the F:1 tap mux
+                         (+1 cycle latency, no throughput change). When the critical path runs x_d -> pre-adder carry
+                         chain -> tap mux -> the DSP input (ends on u_m, before any multiplier register), this is the knob;
+                         reg_in only registers the boundary sample and dsp_regs/pipe_mul start at the multiplier.
 
 Structure summary: multipliers = ceil(U / fold); throughput = 1/fold samples per cycle; the transposed form's adders
 are all local (mult -> add -> register), so its Fmax does not degrade with N; the folded form adds a tap-operand
 mux (U/F : 1) and a coefficient ROM in front of each multiplier, which costs LUTs and routing per fold step."""
 
-FIR_IR_JSON = '{"symmetric":..,"fold":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..,"sum_tree":..}'
+FIR_IR_JSON = '{"symmetric":..,"fold":..,"acc_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..,"sum_tree":..,"pipe_in":..}'
 
 FIR_FACTS = {
     "gatemate": """GateMate facts, measured on a 16-tap 12x12 FIR: the multiplier is a cascade of ~20 CPE_MULT cells (CC_MULT) at

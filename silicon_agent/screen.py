@@ -93,6 +93,9 @@ def estimate_fir(ir: dict, backend: str) -> dict:
             # the M-way output reduction becomes one adder per stage: the output side stops being the limiter
             fmax *= 1.15
             lut += mults * aw * 0.3
+        if fold > 1 and ir.get("pipe_in"):
+            # the pre-adder + F:1 mux no longer feeds the multiplier in the same cycle
+            fmax *= 1.1 if ir.get("symmetric") else 1.05
         fmax *= _scale(backend)
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(1 / fold, 4)}
 

@@ -67,6 +67,7 @@ class FirArch:
     acc_in_dsp: bool = True
     coef_port: bool = False  # true: coefficients live in a register file with a write port (coef_we/coef_addr/coef_data); false: constants
     sum_tree: bool = False  # fold>1: reduce the M partial sums in a registered balanced tree (one stage per level) instead of one combinational chain
+    pipe_in: bool = False  # fold>1: register the multiplier operands after the symmetric pre-adder and the tap mux (one cycle, no throughput change)
     coefs: tuple[int, ...] = field(default_factory=lambda: tuple(lowpass_taps(32)))
 
     @property
@@ -79,7 +80,7 @@ class FirArch:
 
     @property
     def mul_latency(self) -> int:
-        return self.pipe_mul + DSP_REG_MODES[self.dsp_regs]
+        return self.pipe_mul + DSP_REG_MODES[self.dsp_regs] + (1 if (self.fold > 1 and self.pipe_in) else 0)
 
     @property
     def sum_levels(self) -> int:
@@ -141,8 +142,9 @@ class FirArch:
         d.pop("cutoff", None)  # the coefficients already carry it; keeps older cache entries valid
         if _style(backend) != "vivado":
             d.pop("acc_in_dsp", None)
-        if not d.get("sum_tree"):
-            d.pop("sum_tree", None)  # the knob was added later; off = the RTL older entries were measured on
+        for k in ("sum_tree", "pipe_in"):
+            if not d.get(k):
+                d.pop(k, None)  # knobs added later; off = the RTL older entries were measured on
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -448,6 +450,9 @@ def _emit_folded(a: FirArch, backend: str) -> str:
     svpipe = _delay_chain(ML, [("sv_m", "step_v"), ("sl_m", "step_last")])
     coef_ports, coef_store = _coef_snippets(a, U, coef_lit)
     reduction = _sum_tree(a.sum_levels) if a.sum_levels else _SUM_CHAIN
+    # pipe_in: the pre-adder + tap mux output is registered; the step valid chain (ML includes this stage) lines up
+    operand_regs = ("            always_ff @(posedge clk) begin xm <= t[m*F + int'(j)]; hm <= COEFS[m*F + int'(j)]; end" if a.pipe_in else
+                    "            assign xm = t[m*F + int'(j)];\n            assign hm = COEFS[m*F + int'(j)];")
     return f"""module fir_top #(
     parameter int N  = {N},
     parameter int U  = {U},
@@ -545,8 +550,7 @@ def _emit_folded(a: FirArch, backend: str) -> str:
         for (genvar m = 0; m < M; m++) begin : g_mac
             logic signed [XW-1:0] xm;
             logic signed [CW-1:0] hm;
-            assign xm = t[m*F + int'(j)];
-            assign hm = COEFS[m*F + int'(j)];
+{operand_regs}
             fir_mult #(.XW(XW), .CW(CW)) u_m (.clk(clk), .x(xm), .h(hm), .prod(prod[m]));
             assign acc_n[m] = acc[m] + AW'(prod[m]);
             always_ff @(posedge clk) begin
