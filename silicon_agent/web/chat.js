@@ -380,7 +380,7 @@ const chips = (ir, prev, locked) => {
     return `<span class="chip ${lock ? "lock" : changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
   }).join("") + `</div>`;
 };
-const consText = (c) => [`≥${c.fmax_mhz} MHz`, c.max_dsp != null ? `≤${c.max_dsp} DSP` : "", c.max_lut != null ? `≤${c.max_lut} LUT` : ""].filter(Boolean).join(" · ");
+const consText = (c) => [`≥${c.fmax_mhz} MHz`, c.max_dsp != null ? `≤${c.max_dsp} DSP` : "", c.max_lut != null ? `≤${c.max_lut} LUT` : "", c.max_area_um2 != null ? `≤${fmt(c.max_area_um2 / 1000, 0)}k µm²` : ""].filter(Boolean).join(" · ");
 
 function specCard(jid, spec, fork) {
   const c = spec.constraints || {};
@@ -481,7 +481,7 @@ function trajCard(jid, j, rows, done, liveRow, spec) {
       ${r.user.map((u) => `<div class="user">${esc(u.message)}</div>`).join("")}
       <div class="what">${esc(what)}</div>
       ${r.ir ? chips(r.ir, prev, spec.locked) : ""}
-      ${r.pending ? `<div class="nums"><span class="live" style="color:var(--accent)">${esc(phase(r, j))}</span></div>` : `<div class="nums"><span class="${ok ? "v" : "x"}">${ok ? "✓" : "✕"}</span> <b>${fmt(m.fmax_mhz)} MHz</b>${seedSpan(m)} · ${m.lut} LUT · ${m.dsp} DSP · ${r.throughput} ${esc(unit)} · ${r.eda_seconds}${T.secs}${ok ? "" : ` · <span class="x">${esc(r.violations.join(", "))}</span>`}</div>`}
+      ${r.pending ? `<div class="nums"><span class="live" style="color:var(--accent)">${esc(phase(r, j))}</span></div>` : `<div class="nums"><span class="${ok ? "v" : "x"}">${ok ? "✓" : "✕"}</span> <b>${fmt(m.fmax_mhz)} MHz</b>${seedSpan(m)} · ${m.area_um2 != null ? `${m.lut} cells · ${fmt(m.area_um2 / 1000, 1)}k µm²` : `${m.lut} LUT · ${m.dsp} DSP`} · ${r.throughput} ${esc(unit)} · ${r.eda_seconds}${T.secs}${ok ? "" : ` · <span class="x">${esc(r.violations.join(", "))}</span>`}</div>`}
       ${r.ir ? stageChips(r, spec.backend) : ""}
       ${r.n > 1 && !r.slot && (r.plan?.diagnosis ?? r.diagnosis) ? `<div class="why">${esc(r.plan?.diagnosis ?? r.diagnosis)}</div>` : ""}
       ${r.note ? `<div class="why">${esc(r.note)}</div>` : ""}
@@ -504,7 +504,7 @@ function resultCard(jid, j, done, spec) {
   const stg = best?.metrics?.sim_stages || {};
   const signoff = keys.includes("post_impl_time") && stg.post_impl_time?.passed === true;
   let sub;
-  if (best) sub = `<span class="ok">${top}.sv</span> · ${fmt(best.metrics.fmax_mhz)} MHz · ${best.metrics.dsp} DSP · ${best.metrics.lut} LUT · ${best.throughput} ${esc(unit)}${signoff ? ` · ${T.signoff}` : ""}`;
+  if (best) sub = `<span class="ok">${top}.sv</span> · ${fmt(best.metrics.fmax_mhz)} MHz · ${best.metrics.area_um2 != null ? `${fmt(best.metrics.area_um2 / 1000, 1)}k µm² · ${best.metrics.lut} cells` : `${best.metrics.dsp} DSP · ${best.metrics.lut} LUT`} · ${best.throughput} ${esc(unit)}${signoff ? ` · ${T.signoff}` : ""}`;
   else if (j.status === "interrupted") sub = `<span class="bad">${T.stopped}</span>`;
   else if (j.status === "error") sub = `<span class="bad">${T.error}</span>`;
   else sub = `<span class="bad">${T.noResult}</span>${target ? ` · ${T.closest}: ${fmt(target.metrics.fmax_mhz, 0)} MHz · ${target.metrics.dsp} DSP · ${esc(target.violations.join(", "))}` : ""}`;
@@ -513,7 +513,7 @@ function resultCard(jid, j, done, spec) {
   const row = best || target;
   if (row) {
     const m = row.metrics;
-    inner.appendChild(el(`<div class="head"><b>${fmt(m.fmax_mhz)} MHz</b>${m.fmax_seeds && m.fmax_seeds.length > 1 ? `<span title="P&R seeds">${m.fmax_seeds.map((x) => fmt(x, 0)).join(" / ")} MHz · median</span>` : ""}<span>${m.lut} LUT</span><span>${m.dsp} DSP</span><span>${m.ff ?? "–"} FF</span>${m.bram ? `<span>${m.bram} BRAM</span>` : ""}${m.power_mw != null ? `<span>${m.power_mw} mW</span>` : ""}<span>${row.throughput} ${esc(unit)}</span>${row.latency_cycles != null ? `<span>latency ${row.latency_cycles} cyc</span>` : ""}</div>`));
+    inner.appendChild(el(`<div class="head"><b>${fmt(m.fmax_mhz)} MHz</b>${m.fmax_seeds && m.fmax_seeds.length > 1 ? `<span title="P&R seeds">${m.fmax_seeds.map((x) => fmt(x, 0)).join(" / ")} MHz · median</span>` : ""}${m.area_um2 != null ? `<span>${m.lut} cells</span><span>${fmt(m.area_um2 / 1000, 1)}k µm²</span>` : `<span>${m.lut} LUT</span><span>${m.dsp} DSP</span>`}<span>${m.ff ?? "–"} FF</span>${m.bram ? `<span>${m.bram} BRAM</span>` : ""}${m.power_mw != null ? `<span>${m.power_mw} mW</span>` : ""}<span>${row.throughput} ${esc(unit)}</span>${row.latency_cycles != null ? `<span>latency ${row.latency_cycles} cyc</span>` : ""}</div>`));
     inner.appendChild(el(chips({ ...(spec.locked || {}), ...row.ir }, null, spec.locked)));
     // simulation ladder
     const tbl = el(`<table class="simtable"></table>`);

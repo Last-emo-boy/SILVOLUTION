@@ -602,7 +602,7 @@ def _start_proposal(pid: str) -> None:
 
 def _run_note(spec: dict, lang: str) -> str:
     c = spec.get("constraints", {})
-    cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
+    cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "") + (f" · ≤{c['max_area_um2']} µm²" if c.get("max_area_um2") is not None else "")
     return (f"开始运行：{spec.get('task', '')}（{spec.get('design')} on {spec.get('backend')}，{cons}）" if lang == "zh"
             else f"Run started: {spec.get('task', '')} ({spec.get('design')} on {spec.get('backend')}, {cons}).")
 
@@ -1372,7 +1372,7 @@ class Handler(BaseHTTPRequestHandler):
         _queue.put(job_id)
         if thread and not via_agent:
             c = spec.get("constraints", {})
-            cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
+            cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "") + (f" · ≤{c['max_area_um2']} µm²" if c.get("max_area_um2") is not None else "")
             _thread_note_job(thread, job_id, f"Started in the worktable: {spec.get('task', '')} ({spec.get('design', 'matmul')} on {spec.get('backend', 'ecp5')}, {cons}).", False)
         self._json(202, {"id": job_id})
 

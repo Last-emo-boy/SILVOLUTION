@@ -31,6 +31,7 @@ services:
       SA_AGH: ${SA_AGH:-1}                   # 1: chat turns run inside Agnes Harness (the agh service); 0: the built-in nl.py loop
       SA_AGH_HOME: /srv/sa/agh               # the agh service's home: its unix socket lives under data/daemon/
       SA_AGH_PRESET: silicon                 # AGH recipe for chat sessions (the fork's read-only tool set)
+      SA_ASIC_QUEUE: /srv/sa/asic/queue      # the orfs service's request queue (sky130 backend)
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -88,6 +89,32 @@ services:
     cpus: 2
     mem_limit: 3g
     pids_limit: 1024
+    security_opt:
+      - no-new-privileges:true
+  # OpenROAD-flow-scripts: the sky130 ASIC backend. No docker socket anywhere: the job server drops a request
+  # directory under /srv/sa/asic/queue and this runner (deploy/orfs-runner.sh) runs the flow on it.
+  orfs:
+    image: openroad/orfs:latest
+    container_name: silicon-agent-orfs
+    user: "10001:10001"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 10m
+    entrypoint: ["/bin/bash", "/opt/silicon-agent/app/deploy/orfs-runner.sh"]
+    environment:
+      HOME: /srv/sa/home
+      SA_ASIC_QUEUE: /srv/sa/asic/queue
+      SA_ASIC_TIMEOUT: "3600"
+    volumes:
+      - /opt/silicon-agent/app:/opt/silicon-agent/app:ro
+      - /srv/sa:/srv/sa
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=2g,mode=1777
+    networks:
+      default: {}
+    cpus: 6
+    mem_limit: 12g
+    pids_limit: 4096
     security_opt:
       - no-new-privileges:true
 networks:

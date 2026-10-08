@@ -33,6 +33,9 @@ def _scale(backend: str) -> float:
     from .backends import BACKENDS
     if backend not in BACKENDS or backend in ("ecp5", "xc7s50"):
         return 1.0
+    if backend == "sky130":
+        # one measured 16-tap FIR: 205 MHz where ECP5 gives ~220 with the same knobs; adders ripple, no DSP
+        return 0.95
     hi = float(BACKENDS[backend].fmax_range.split("-")[-1].split()[0])
     return hi / 250.0
 
@@ -305,6 +308,11 @@ def calibrated(design: str, backend: str, ir: dict) -> dict:
     neighbour term dominates when the nearest point is close (d < 1 in standardized units). An exact
     feature match (d ~ 0) therefore returns the measured value -- the same design under another spec."""
     e = ESTIMATORS[design](ir, backend)
+    if backend == "sky130":
+        # standard cells: every multiplier the FPGA estimate would put in a DSP becomes ~250 adder cells; the area
+        # follows the cell count (sky130hd cells average ~9 um2 incl. the ~0.46 utilisation measured on a FIR)
+        cells = e["lut"] + 250 * e["dsp"]
+        e = {**e, "lut": cells, "dsp": 0, "area_um2": int(cells * 9)}
     fit = _fit(design, backend)
     f = _features(design, ir, backend)
     out = dict(e)
@@ -375,10 +383,12 @@ def screen(design_kind: str, backend: str, candidates: list[dict], c: Constraint
         miss = (max(0, (c.fmax_mhz - e["fmax_mhz"]) / c.fmax_mhz)
                 + (max(0, (e["dsp"] - c.max_dsp) / c.max_dsp) if c.max_dsp else 0)
                 + (max(0, (e["lut"] - c.max_lut) / c.max_lut) if c.max_lut else 0))
+        if c.max_area_um2 is not None and e.get("area_um2") and e["area_um2"] > c.max_area_um2:
+            viol.append(f"area~{e['area_um2']}>{c.max_area_um2}")
         key = []
         for obj in c.objective:
             key.append({"maximize_throughput": -e["throughput"], "maximize_fmax": -e["fmax_mhz"],
-                        "minimize_lut": e["lut"], "minimize_dsp": e["dsp"]}.get(obj, 0))  # minimize_power/latency: not estimated
+                        "minimize_lut": e["lut"], "minimize_dsp": e["dsp"], "minimize_area": e.get("area_um2", e["lut"])}.get(obj, 0))  # minimize_power/latency: not estimated
         rows.append({**cand, "estimate": e, "est_violations": viol, "_sort": (len(viol) > 0, miss, tuple(key))})
     rows.sort(key=lambda r: r["_sort"])
     for i, r in enumerate(rows):

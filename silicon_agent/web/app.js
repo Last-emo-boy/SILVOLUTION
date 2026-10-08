@@ -274,7 +274,7 @@ function buildTurn(r, prevIr, unit, spec) {
   } else {
     const m = r.metrics, ok = r.violations.length === 0;
     const seeds = m.fmax_seeds && m.fmax_seeds.length > 1 ? ` <span class="muted" title="${m.fmax_seeds.length} P&R seeds">${fmt(Math.min(...m.fmax_seeds), 0)}–${fmt(Math.max(...m.fmax_seeds), 0)}</span>` : "";
-    b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b>${seeds} · ${m.lut} LUT · ${m.dsp} DSP${m.bram ? ` · ${m.bram} BRAM` : ""}${m.power_mw != null ? ` · ${m.power_mw} mW` : ""} · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
+    b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b>${seeds} · ${m.area_um2 != null ? `${m.lut} cells · ${fmt(m.area_um2 / 1000, 1)}k µm²` : `${m.lut} LUT · ${m.dsp} DSP`}${m.bram ? ` · ${m.bram} BRAM` : ""}${m.power_mw != null ? ` · ${m.power_mw} mW` : ""} · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
   }
   // details: grows in place under this turn; the list around it does not move
   const d = el(`<details class="more" ${openTurns.has(r.n) ? "open" : ""}><summary>details</summary><div class="inner"></div></details>`);

@@ -81,6 +81,12 @@ CASES: list[tuple[str, dict, dict]] = [
         "constraints": {"fmax_mhz": 200, "max_dsp": 4, "objective": ["maximize_throughput", "maximize_fmax"]},
         "initial_ir": {"acc_width": 29, "symmetric": True, "fold": 2, "pipe_mul": 0, "reg_in": True, "dsp_regs": "in_pipe_out", "sum_tree": False, "pipe_in": False}},
      {"feasible": True, "max_rounds": 4}),
+    ("fir-sky130-200", {
+        # the ASIC backend: OpenROAD sky130hd, one flow ~2 min; first measured point 205 MHz / 6143 cells / 55.6k um2
+        "task": "16-tap 12-bit FIR, sky130 ASIC, 200 MHz", "design": "fir", "backend": "sky130", "locked": {"taps": 16, "data_width": 12, "coef_width": 12, "cutoff": 0.25},
+        "constraints": {"fmax_mhz": 200, "objective": ["maximize_throughput", "minimize_area"]},
+        "initial_ir": {"acc_width": 29, "symmetric": True, "fold": 2, "pipe_mul": 1, "reg_in": True, "dsp_regs": "none", "sum_tree": True, "pipe_in": True}},
+     {"feasible": True, "max_rounds": 3}),
     ("cordic-ecp5-200", {
         "task": "16-bit sin/cos CORDIC, ECP5, 200 MHz", "design": "cordic", "backend": "ecp5", "locked": {"mode": "rotate", "width": 16},
         "constraints": {"fmax_mhz": 200, "max_lut": 3500, "objective": ["maximize_throughput", "minimize_lut"]},

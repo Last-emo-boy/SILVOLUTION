@@ -47,7 +47,10 @@ Available designs:
           chains). locked: {"stages": [{"taps","data_width","coef_width","cutoff"}, ...]} -- one entry per stage.
           initial_ir: {"stages": [<full FIR IR per stage>], "fifo_depth": 16, "round_mode": "truncate"}.
           Use it only when the user describes more than one filter in series.
-Available backends (choose from device words; default xc7s50 when timing signoff is implied, else ecp5):
+Available backends (choose from device words; default xc7s50 when timing signoff is implied, else ecp5; `sky130`
+is an ASIC standard-cell flow (OpenROAD, SkyWater 130 nm): pick it when the user says ASIC / tapeout / standard cell /
+流片 / sky130, where constraints are fmax_mhz and max_area_um2 (no DSP/LUT budgets) and the natural objective is
+["maximize_throughput", "minimize_area"]):
 @BACKENDS@
 
 Spec shape:
@@ -57,7 +60,7 @@ Spec shape:
   "backend": "ecp5" | "xc7s50",
   "locked": {<task-defining fields>},
   "planner": <string or null>   (only when the user names a planner model to compare, e.g. "deepseek-reasoner"; otherwise null)
-  "constraints": {"fmax_mhz": <number>, "max_dsp": <number or null>, "max_lut": <number or null>, "max_power_mw": <number or null, Vivado devices only>,
+  "constraints": {"fmax_mhz": <number>, "max_dsp": <number or null>, "max_lut": <number or null>, "max_power_mw": <number or null, Vivado devices only>, "max_area_um2": <number or null, sky130 only>,
                   "objective": [<ordered subset of maximize_throughput, minimize_dsp, minimize_lut, maximize_fmax, minimize_latency, minimize_power>]},
   "initial_ir": {<a deliberately naive starting point so the agent has something to improve; matmul: pe_rows/pe_cols sized
                  to the throughput hint, acc_width 32, pipe_mul 0, reg_in false, dsp_regs "none", acc_in_dsp true;

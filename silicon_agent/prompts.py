@@ -270,6 +270,14 @@ The usual limiter is routing between the DSP output and the carry chain; reg_in 
 carry chains whose delay grows with acc_width.""",
     "vivado": """Vivado infers {dsp_kind} and retimes dsp_regs/pipe_mul stages into it; acc_in_dsp chooses between the DSP
 post-adder and a fabric CARRY4 accumulator.""",
+    "asic": """ASIC standard cells (OpenROAD, sky130hd, typical corner 1.8 V 25 C): there are no DSPs or LUTs. Multipliers
+are synthesized into full/half-adder cells (fa_1/ha_1) by yosys+ABC, so `dsp` is always 0 and dsp_regs stages are plain
+flip-flops; a 12x12 multiplier is ~250 cells. `lut` reports combinational standard cells, `ff` sequential cells, and
+`area_um2` the placed standard-cell area (what a tapeout pays for) -- minimize_area is the ASIC objective, minimize_lut
+tracks it. The limiter is almost always the adder carry chain (ripple fa_1 cells, ~0.45 ns each at this corner) between
+registers: acc_width and pipeline knobs (pipe_mul, sum_tree, pipe_in, tree_regs) are the levers; routing is a small part
+of the delay (wire delay is folded into each cell's delay in the critical path). One flow (synthesis, floorplan, place,
+CTS, route, STA) takes 2-10 minutes; the SDC asks for the run's target so the resizer works toward it.""",
 }
 
 
@@ -285,6 +293,9 @@ def device_facts(kind: str, backend: str) -> str:
                 f"({b.lut} LUT6, {b.dsp} DSP48E1, {b.bram} BRAM). Measured Spartan-7 facts:\n" + PROMPTS[kind]["facts"]["xc7s50"])
     if text:
         return text
-    core = GENERIC_FACTS.get(b.emit_style, GENERIC_FACTS["behavioral"]).format(dsp_kind=b.dsp_kind, dsp_width=b.dsp_width, lut_kind=b.lut_kind)
+    style = "asic" if b.vendor == "skywater" else b.emit_style
+    core = GENERIC_FACTS.get(style, GENERIC_FACTS["behavioral"]).format(dsp_kind=b.dsp_kind, dsp_width=b.dsp_width, lut_kind=b.lut_kind)
+    if style == "asic":
+        return f"{b.name} ({b.toolchain}). Realistic Fmax range: {b.fmax_range}. No measured runs of this design on this process yet.\n{core}"
     return (f"{b.name} ({b.toolchain}): {b.lut} {b.lut_kind}, {b.dsp} {b.dsp_kind}, {b.bram} BRAM. Realistic Fmax range: {b.fmax_range}. "
             f"No measured runs of this design on this device yet -- treat the following as structure, not numbers.\n{core}")
