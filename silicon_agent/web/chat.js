@@ -187,13 +187,16 @@ function render() {
   });
   for (let i = thread.messages.length; i < existing.length; i++) existing[i].remove();
   let th = ol.querySelector("li.thinking-row");
-  if (thread.busy && !th) { th = el(`<li class="msg assistant thinking-row"><span class="thinking"><i></i>${T.thinking}</span><div class="agent-tools live"></div></li>`); ol.appendChild(th); }
+  if (thread.busy && !th) { th = el(`<li class="msg assistant thinking-row"><span class="thinking"><i></i>${T.thinking}</span><div class="live-note prose dim" hidden></div><div class="agent-tools live"></div></li>`); ol.appendChild(th); }
   if (!thread.busy && th) th.remove();
   if (thread.busy && th) {
-    // the agent's live tool trail (Agnes Harness tool records as they happen)
+    // the agent's live tool trail (Agnes Harness tool records as they happen) and its working narration
     const live = thread.live || [], box = th.querySelector(".agent-tools");
-    const sig = JSON.stringify(live.map((t) => [t.name, t.status]));
-    if (box.dataset.sig !== sig) { box.dataset.sig = sig; box.innerHTML = live.map((t) => `<span class="tchip ${t.status === "failed" ? "x" : t.status === "completed" ? "" : "run"}">${esc(t.name || "?")}</span>`).join(""); }
+    const sig = JSON.stringify(live.map((t) => [t.name, t.status, t.args]));
+    if (box.dataset.sig !== sig) { box.dataset.sig = sig; box.innerHTML = live.map((t) => `<span class="tchip ${t.status === "failed" ? "x" : t.status === "completed" ? "" : "run"}" title="${esc(t.args || "")}">${esc(t.name || "?")}${t.args ? `<i>${esc(t.args)}</i>` : ""}</span>`).join(""); }
+    const note = (thread.live_note || "").trim(), nb = th.querySelector(".live-note");
+    if (nb.textContent !== note) nb.textContent = note;
+    nb.hidden = !note;
   }
   if (atBottom) sc.scrollTop = sc.scrollHeight;
 }

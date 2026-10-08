@@ -166,3 +166,6 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .usage .model { opacity: .7; }
 .sess-usage { font-size: 11px; white-space: nowrap; }
 @media (max-width: 720px) { .sess-usage { display: none; } }
+.live-note { margin-top: 6px; max-width: 70ch; white-space: pre-wrap; }
+.agent-tools .tchip i { font-style: normal; opacity: .65; margin-left: 6px; }
+.agent-tools .tchip i:empty { display: none; }

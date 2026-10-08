@@ -186,7 +186,8 @@ export const siliconAgent = {
       async execute({ thread, limit }, tctx) {
         try {
           const js = await api('GET', `/jobs${thread ? `?thread=${encodeURIComponent(thread)}` : ''}`, undefined, tctx?.signal)
-          return text(js.slice(0, limit ?? 20).map((j) => ({ id: j.id, status: j.status, design: j.design, backend: j.backend, task: j.task ?? j.spec?.task, iterations: j.iterations, best: j.summary?.best ? { fmax_mhz: j.summary.best.metrics?.fmax_mhz, lut: j.summary.best.metrics?.lut, dsp: j.summary.best.metrics?.dsp } : null })))
+          // the list carries each run's best point directly (not under summary)
+          return text(js.slice(0, limit ?? 20).map((j) => ({ id: j.id, status: j.status, design: j.design, backend: j.backend, task: j.task ?? j.spec?.task, iterations: j.iterations, thread: j.thread ?? null, parent: j.parent ?? null, best: j.best ? { iteration: j.best.iteration, fmax_mhz: j.best.metrics?.fmax_mhz, lut: j.best.metrics?.lut, dsp: j.best.metrics?.dsp } : null })))
         } catch (e) { return fail(e) }
       },
     })

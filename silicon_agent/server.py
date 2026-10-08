@@ -261,12 +261,12 @@ def _resume_turns() -> None:
                 finally:
                     with _lock:
                         th["busy"] = False
-                        th.pop("live", None)
+                        th.pop("live", None); th.pop("live_note", None)
                         _save_thread(tid)
             threading.Thread(target=go, daemon=True).start()
         else:
             th["busy"] = False
-            th.pop("live", None)
+            th.pop("live", None); th.pop("live_note", None)
             th["messages"].append({"role": "assistant", "kind": "text", "text": "（服务器重启，这一轮被打断了）" if nl._lang(th["messages"][0]["text"] if th["messages"] else "") == "zh" else "(the server restarted; this turn was interrupted)", "t": time.time()})
             _save_thread(tid)
 
@@ -485,6 +485,32 @@ def _run_note(spec: dict, lang: str) -> str:
             else f"Run started: {spec.get('task', '')} ({spec.get('design')} on {spec.get('backend')}, {cons}).")
 
 
+def _tool_brief(name: str, args) -> str:
+    """One short line saying what a tool call is about, for the live trail chip."""
+    if not isinstance(args, dict):
+        return ""
+    if name == "sa_run":
+        sp = args.get("spec") or {}
+        c = sp.get("constraints") or {}
+        bits = [sp.get("design", ""), sp.get("backend", "")]
+        if c.get("fmax_mhz"):
+            bits.append(f"≥{c['fmax_mhz']} MHz")
+        if c.get("max_dsp") is not None:
+            bits.append(f"≤{c['max_dsp']} DSP")
+        return " · ".join(b for b in bits if b)
+    if name == "sa_estimate":
+        ir = args.get("ir") or {}
+        knobs = " ".join(f"{k}={v}" for k, v in list(ir.items())[:4] if not isinstance(v, (list, dict)))
+        return f"{args.get('design', '')} · {args.get('backend', '')} · {knobs}"[:80]
+    if name in ("sa_job", "sa_formal", "sa_stop", "sa_steer", "sa_job_file"):
+        return " · ".join(str(v) for k, v in args.items() if k in ("job", "path", "depth") and v)[:80]
+    if name == "sa_interpret":
+        return (args.get("request") or "")[:80]
+    if name == "sa_pareto":
+        return f"{args.get('design', '')} · {args.get('backend', '')}"
+    return ""
+
+
 def _run_watcher(tid: str, lang: str):
     """Event hook for an AGH turn: keeps the live tool trail on the thread and gives a run the agent starts its
     card the moment sa_run returns (not when the whole turn ends)."""
@@ -492,15 +518,28 @@ def _run_watcher(tid: str, lang: str):
     trail: list[dict] = []
     seen: set[str] = set()
 
+    note = {"text": ""}
+
     def on_event(kind, upd, meta):
         if kind == "turn_start":
             trail.clear()
+            note["text"] = ""
             with _lock:
                 th["live"] = []
+                th.pop("live_note", None)
+        elif kind == "agent_message_chunk":
+            # the agent's working narration between tool calls: shown as the status line while it works
+            c = upd.get("content") or {}
+            if c.get("type") == "text":
+                note["text"] = (note["text"] + c.get("text", ""))[-600:]
+                with _lock:
+                    th["live_note"] = note["text"].strip()
         elif kind == "tool_call":
-            trail.append({"id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind"), "status": upd.get("status", "pending")})
+            note["text"] = ""
+            trail.append({"id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind"), "status": upd.get("status", "pending"), "args": _tool_brief(upd.get("title") or "", upd.get("rawInput"))})
             with _lock:
                 th["live"] = trail[-40:]
+                th.pop("live_note", None)
         elif kind == "tool_call_update":
             for t in trail:
                 if t["id"] == upd.get("toolCallId"):
@@ -543,7 +582,7 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
         # a cancel from the stop button, or the harness aborting the turn because its client went away (a restart)
         r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（这一轮被中止）" if lang == "zh" else "(turn cut short)")
     with _lock:
-        th.pop("live", None)
+        th.pop("live", None); th.pop("live_note", None)
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
                                "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh", **({"resumed": True} if r.get("resumed") else {}),
                                **({"usage": r["usage"]} if r.get("usage") else {}),
@@ -600,7 +639,7 @@ def _chat_turn(tid: str, text: str, sub: str) -> None:
     finally:
         with _lock:
             _threads[tid]["busy"] = False
-            _threads[tid].pop("live", None)
+            _threads[tid].pop("live", None); _threads[tid].pop("live_note", None)
             _save_thread(tid)
 
 
