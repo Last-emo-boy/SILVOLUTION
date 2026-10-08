@@ -9,26 +9,26 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand"><span class="logo">▣</span> silicon-agent <span class="host" id="host"></span></div>
-  <div class="topright"><button class="small rail-t" id="t-rail">☰ runs</button><button class="small insp" id="t-insp">◫ inspector</button><span id="mem-count" class="mono muted"></span><span id="who" class="mono muted"></span></div>
-</header>
-
 <div class="shell">
-  <!-- rail -->
-  <aside class="rail">
-    <div class="rail-head"><span class="label">Runs</span><button id="new-run" class="primary small">+ New</button></div>
+  <!-- rail: runs -->
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <span class="brand"><span class="logo">▣</span> silicon-agent</span>
+      <button id="new-run" class="primary small" title="New run">+</button>
+    </div>
     <ul id="runs" class="runs"></ul>
-    <div class="rail-foot"><button id="open-memory" class="ghost small">◎ Design memory</button></div>
+    <div class="rail-foot">
+      <button id="open-memory" class="ghost small">◎ Memory <span id="mem-count" class="muted"></span></button>
+      <span id="who" class="mono muted"></span>
+    </div>
   </aside>
 
-  <!-- main -->
-  <main class="main">
+  <main class="main" id="main">
     <div id="empty" class="empty">Select a run, or start one.</div>
 
-    <!-- new run form -->
+    <!-- new run -->
     <section id="new-form" class="newform" hidden>
-      <div class="runhead"><h1>New run</h1></div>
+      <div class="bar"><h1>New run</h1></div>
       <div class="form">
         <label>Template <select id="tpl"></select></label>
         <label>Spec <textarea id="spec" spellcheck="false" rows="20"></textarea></label>
@@ -42,31 +42,37 @@
       </div>
     </section>
 
-    <!-- run view -->
+    <!-- run -->
     <section id="run" class="run" hidden>
-      <div class="runhead">
-        <div class="titlerow">
-          <div class="titleleft"><h1 id="j-task"></h1><span id="j-pill" class="pill"></span></div>
-          <div class="titleright"><button id="btn-stop" class="ghost small" hidden>■ Stop</button></div>
+      <div class="bar">
+        <div class="bar-l">
+          <button id="t-rail" class="ghost icon small" title="Runs">☰</button>
+          <h1 id="j-task"></h1>
+          <span id="j-pill" class="pill"></span>
         </div>
-        <div class="constrip" id="constrip"></div>
+        <div class="bar-r">
+          <span id="j-best" class="mono muted"></span>
+          <button id="btn-stop" class="ghost small" hidden>■ Stop</button>
+          <button id="t-insp" class="ghost small" title="Details">Details ▸</button>
+        </div>
       </div>
-      <div class="split">
-        <div class="transcript-wrap">
+      <div class="split" id="split">
+        <div class="center">
           <ol id="transcript" class="transcript"></ol>
           <div class="composer" id="composer">
             <div class="sugs" id="sugs"></div>
             <div class="inputbox">
-              <textarea id="steer" rows="1" placeholder="Steer the planner: a hint, a constraint to respect, or a question about the last result…"></textarea>
+              <textarea id="steer" rows="1" placeholder="Steer the planner…"></textarea>
               <button id="send" class="primary icon" title="Send (⌘↵)">↑</button>
             </div>
-            <div class="chint"><span id="chint-l">applies before the next iteration · ⌘↵ to send</span><span id="chint-r"></span></div>
+            <div class="chint"><span id="chint-l">applies before the next plan · ⌘↵</span><span id="chint-r"></span></div>
           </div>
         </div>
-        <aside class="inspector">
-          <nav class="tabs"><button data-tab="design" class="on">Design</button><button data-tab="trajectory">Trajectory</button><button data-tab="rtl">RTL</button><button data-tab="memory">Memory</button></nav>
+        <aside class="inspector" id="inspector">
+          <nav class="tabs"><button data-tab="design" class="on">Design</button><button data-tab="trajectory">Trajectory</button><button data-tab="sim">Simulation</button><button data-tab="rtl">RTL</button><button data-tab="memory">Memory</button><button id="close-insp" class="x" title="Close">×</button></nav>
           <div class="pane" id="pane-design"></div>
           <div class="pane" id="pane-trajectory" hidden></div>
+          <div class="pane" id="pane-sim" hidden></div>
           <div class="pane" id="pane-rtl" hidden><pre id="rtl" class="code"></pre></div>
           <div class="pane" id="pane-memory" hidden></div>
         </aside>
@@ -75,7 +81,7 @@
 
     <!-- memory browser -->
     <section id="memory" class="memview" hidden>
-      <div class="runhead"><h1>Design memory</h1><div class="muted small-text">Lessons distilled from every move the planner made, scored by what happened when later runs followed them. Vote to adjust.</div></div>
+      <div class="bar"><h1>Design memory</h1><span class="muted small-text">lessons distilled from every planner move, scored by what happened when later runs followed them</span></div>
       <div id="memory-list" class="memlist"></div>
     </section>
   </main>

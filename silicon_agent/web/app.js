@@ -1,5 +1,5 @@
 // silicon-agent worktable. Plain ES module, no build step.
-// Layout: runs rail | transcript (one turn per iteration) + composer | inspector tabs.
+// Codex-like: one calm transcript (a turn per iteration), a composer, details behind toggles.
 
 const $ = (s) => document.querySelector(s);
 const api = async (path, opts) => {
@@ -11,16 +11,16 @@ const post = (path, body) => api(path, { method: "POST", headers: { "Content-Typ
 const fmt = (n, d = 1) => (n == null ? "–" : Number(n).toFixed(d));
 const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const el = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; };
+const STAGES = [["behavioral", "behavioral"], ["post_synth_func", "post-synth"], ["post_synth_time", "post-synth timing"], ["post_impl_func", "post-impl"], ["post_impl_time", "post-impl timing"]];
 
 // ---------------------------------------------------------------- state
-let jobs = [], selected = null, detail = null, seen = 0, pollTimer = null, specs = [], memCache = null;
-let view = "empty"; // empty | new | run | memory
+let jobs = [], selected = null, detail = null, seen = 0, pollTimer = null, specs = [];
+let view = "empty";
+const openTurns = new Set(); // iteration numbers whose details are expanded
 
 // ---------------------------------------------------------------- boot
 (async function boot() {
   try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
-  const h = await api("/health");
-  $("#host").textContent = `${h.backends.join(" + ")} · ${h.designs.join(", ")}`;
   specs = await api("/specs");
   const tpl = $("#tpl");
   for (const s of specs) tpl.appendChild(el(`<option value="${esc(s.name)}">${esc(s.design)} · ${esc(s.backend)} · ${esc(s.task)}</option>`));
@@ -33,9 +33,10 @@ let view = "empty"; // empty | new | run | memory
   $("#steer").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendSteer(); });
   $("#steer").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px"; });
   $("#btn-stop").onclick = async () => { if (selected) { await post(`/jobs/${selected}/stop`); $("#btn-stop").disabled = true; } };
-  document.querySelectorAll(".tabs button").forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
-  $("#t-insp").onclick = () => document.querySelector(".main").classList.toggle("show-inspector");
-  $("#t-rail").onclick = () => document.querySelector(".shell").classList.toggle("show-rail");
+  $("#t-insp").onclick = () => toggleInspector();
+  $("#close-insp").onclick = () => toggleInspector(false);
+  $("#t-rail").onclick = () => { const sh = $(".shell"); if (window.innerWidth <= 800) sh.classList.toggle("rail-shown"); else sh.classList.toggle("rail-hidden"); };
+  document.querySelectorAll(".tabs button[data-tab]").forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
   refreshMemCount();
   await refreshJobs();
   setInterval(refreshJobs, 5000);
@@ -50,9 +51,14 @@ function show(v) {
   if (v === "memory") { location.hash = "memory"; renderMemoryView(); }
   if (v === "new") location.hash = "new";
 }
-
+function toggleInspector(force) {
+  const on = force ?? !$("#split").classList.contains("with-insp");
+  $("#split").classList.toggle("with-insp", on);
+  $("#t-insp").textContent = on ? "Details ◂" : "Details ▸";
+  localStorage.setItem("sa.insp", on ? "1" : "0");
+}
 async function refreshMemCount() {
-  try { memCache = await api("/memory"); const n = memCache.reduce((a, g) => a + g.count, 0); $("#mem-count").textContent = `memory: ${n} lessons`; } catch {}
+  try { const m = await api("/memory"); $("#mem-count").textContent = m.reduce((a, g) => a + g.count, 0); } catch {}
 }
 
 // ---------------------------------------------------------------- new run
@@ -64,8 +70,7 @@ async function submit() {
   try {
     const r = await post("/jobs", { spec, max_iter: Number($("#maxiter").value) });
     msg.textContent = `queued ${r.id}`;
-    await refreshJobs();
-    select(r.id);
+    await refreshJobs(); select(r.id);
   } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
 }
 
@@ -75,8 +80,8 @@ async function refreshJobs() {
   const ul = $("#runs"); ul.innerHTML = "";
   for (const j of jobs) {
     const b = j.best?.metrics;
-    const status = j.status === "done" && b ? `PASS · ${fmt(b.fmax_mhz, 0)} MHz · ${j.iterations} iter` : j.status === "running" ? `running · iter ${j.iterations + 1}` : `${j.status} · ${j.iterations} iter`;
-    const li = el(`<li class="${j.id === selected ? "sel" : ""}" data-id="${esc(j.id)}"><span class="dot ${j.status}"></span><div><div class="t">${esc(j.task || j.id)}</div><div class="m">${esc(j.backend)} · ${status}</div></div></li>`);
+    const status = j.status === "done" && b ? `${fmt(b.fmax_mhz, 0)} MHz · ${b.dsp} DSP · ${j.iterations} iter` : j.status === "running" ? `running · iter ${j.iterations + 1}` : `${j.status} · ${j.iterations} iter`;
+    const li = el(`<li class="${j.id === selected ? "sel" : ""}" data-id="${esc(j.id)}"><span class="dot ${j.status}"></span><div><div class="t">${esc(j.task || j.id)}</div><div class="m">${esc(j.design)} · ${esc(j.backend)} · ${status}</div></div></li>`);
     li.onclick = () => select(j.id);
     ul.appendChild(li);
   }
@@ -84,12 +89,13 @@ async function refreshJobs() {
 
 // ---------------------------------------------------------------- run view
 async function select(id) {
-  selected = id; seen = 0; detail = null;
+  selected = id; seen = 0; detail = null; openTurns.clear();
   location.hash = id;
   clearTimeout(pollTimer);
   document.querySelectorAll("#runs li").forEach((li) => li.classList.toggle("sel", li.dataset.id === id));
   $("#empty").hidden = true; $("#new-form").hidden = true; $("#memory").hidden = true; $("#run").hidden = false; view = "run";
   $("#transcript").innerHTML = ""; $("#rtl").textContent = "";
+  toggleInspector(localStorage.getItem("sa.insp") === "1");
   await poll();
 }
 
@@ -108,19 +114,23 @@ async function poll() {
 function turns() {
   const rows = new Map();
   let pendingMem = null, pendingSteer = [];
-  const get = (n) => { if (!rows.has(n)) rows.set(n, { n, pending: true, user: [] }); return rows.get(n); };
+  const get = (n) => { if (!rows.has(n)) rows.set(n, { n, pending: true, user: [], stages: {} }); return rows.get(n); };
   for (const e of detail.events) {
-    if (e.kind === "user") { pendingSteer.push(e); continue; }
-    if (e.kind === "steer") { get(e.iteration).user.push(...pendingSteer.splice(0)); continue; }
-    if (e.kind === "memory") { pendingMem = e; continue; }
-    if (e.kind === "plan") {
-      const prev = rows.get(e.iteration - 1); if (prev) prev.next = e;
-      if (!e.stop) { const r = get(e.iteration); r.plan = e; r.memory = pendingMem; pendingMem = null; }
-      continue;
+    switch (e.kind) {
+      case "user": pendingSteer.push(e); break;
+      case "steer": get(e.iteration).user.push(...pendingSteer.splice(0)); break;
+      case "memory": pendingMem = e; break;
+      case "rescreen": get(e.iteration).rescreen = e; break;
+      case "plan": {
+        const prev = rows.get(e.iteration - 1); if (prev) prev.next = e;
+        if (!e.stop) { const r = get(e.iteration); r.plan = e; if (pendingMem) { r.memory = pendingMem; pendingMem = null; } }
+        break;
+      }
+      case "evaluating": { const r = get(e.iteration); r.ir = e.ir; if (pendingMem) { r.memory = pendingMem; pendingMem = null; } break; }
+      case "stage": { const r = get(e.iteration); r.stages[e.stage] = e; break; }
+      case "result": Object.assign(get(e.iteration), e, { pending: false }); break;
+      case "lesson": get(e.iteration).lesson = e; break;
     }
-    if (e.kind === "evaluating") { const r = get(e.iteration); r.ir = e.ir; if (pendingMem) { r.memory = pendingMem; pendingMem = null; } continue; }
-    if (e.kind === "result") { Object.assign(get(e.iteration), e, { pending: false }); continue; }
-    if (e.kind === "lesson") { get(e.iteration).lesson = e; continue; }
   }
   const out = [...rows.values()].sort((a, b) => a.n - b.n);
   if (pendingSteer.length && out.length) out.at(-1).userAfter = pendingSteer;
@@ -143,33 +153,18 @@ function render() {
 
   $("#j-task").textContent = spec.task || selected;
   const pill = $("#j-pill"); pill.className = `pill ${detail.status}`;
-  pill.textContent = { queued: "queued", running: liveRow ? `running · iteration ${liveRow.n} · ${liveRow.ir ? "sim / synth / P&R" : "planning"}` : "running", done: `PASS · ${done.length} iterations`, failed: `FAIL · ${done.length} iterations`, error: "ERROR", interrupted: "interrupted" }[detail.status] || detail.status;
+  pill.textContent = { queued: "queued", running: liveRow ? `iteration ${liveRow.n}` : "running", done: `PASS · ${done.length} iter`, failed: `FAIL · ${done.length} iter`, error: "error", interrupted: "interrupted" }[detail.status] || detail.status;
+  $("#j-best").textContent = best ? `best: ${fmt(best.metrics.fmax_mhz, 0)} MHz · ${best.metrics.lut} LUT · ${best.metrics.dsp} DSP · ${best.throughput} ${unit}` : `target: ≥${c.fmax_mhz} MHz${c.max_dsp != null ? ` · ≤${c.max_dsp} DSP` : ""}${c.max_lut != null ? ` · ≤${c.max_lut} LUT` : ""}`;
   $("#btn-stop").hidden = !live; $("#btn-stop").disabled = false;
-  renderConstrip(best || done.at(-1), c, unit, !!best);
-  renderTranscript(rows, unit, spec);
+  renderTranscript(rows, unit, spec, c);
   $("#composer").classList.toggle("disabled", !live);
-  $("#chint-r").textContent = `${spec.design || "matmul"} · ${spec.backend || "ecp5"} · ${selected}${detail.subject ? " · by " + detail.subject : ""}`;
+  $("#chint-r").textContent = `${spec.design || "matmul"} · ${spec.backend || "ecp5"} · ${selected}`;
   renderSugs(done.at(-1));
   renderDesign(liveRow?.ir ? liveRow : done.at(-1), done, spec);
   renderTrajectory(done, c, unit);
+  renderSim(liveRow || done.at(-1), spec);
   if (best && !$("#rtl").textContent) api(`/jobs/${selected}/rtl`).then((t) => { $("#rtl").textContent = t; }).catch(() => {});
   renderMemoryTab(rows);
-}
-
-function renderConstrip(row, c, unit, feasible) {
-  const s = $("#constrip"); s.innerHTML = "";
-  if (!row) return;
-  const m = row.metrics;
-  const items = [
-    ["fmax", `${fmt(m.fmax_mhz)} / ≥${c.fmax_mhz} MHz`, m.fmax_mhz >= c.fmax_mhz],
-    ["dsp", c.max_dsp != null ? `${m.dsp} / ≤${c.max_dsp}` : `${m.dsp}`, c.max_dsp == null || m.dsp <= c.max_dsp],
-    ["lut", c.max_lut != null ? `${m.lut} / ≤${c.max_lut}` : `${m.lut}`, c.max_lut == null || m.lut <= c.max_lut],
-    ["sim", m.sim_passed ? "pass" : "FAIL", m.sim_passed],
-    ["throughput", `${row.throughput} ${unit}`, null],
-    ["latency", `${row.latency_cycles} cycles`, null],
-  ];
-  for (const [k, v, ok] of items) s.appendChild(el(`<span class="${ok === null ? "" : ok ? "ok" : "bad"}"><i></i><em>${k}</em><b>${esc(v)}</b></span>`));
-  s.appendChild(el(`<span><em>${feasible ? "best feasible" : "latest attempt"}</em></span>`));
 }
 
 // ---------------------------------------------------------------- transcript
@@ -180,44 +175,71 @@ function irChips(ir, prevIr, locked) {
   }).join("") + `</div>`;
 }
 const line = (lbl, html, cls = "") => `<div class="ln"><span class="lbl ${cls}">${lbl}</span><div class="txt">${html}</div></div>`;
+const stageChips = (r, backend) => {
+  if (backend !== "xc7s50") return "";
+  const st = r.pending ? r.stages : (r.metrics?.sim_stages || {});
+  const behav = r.pending ? (r.ir ? "active" : "todo") : (r.metrics?.sim_passed ? "done" : "fail");
+  const cls = (k) => { const s = st[k]; if (!s) return r.pending ? "todo" : "todo"; return s.passed === true ? "done" : s.passed === false ? "fail" : "todo"; };
+  const parts = STAGES.map(([k, l], i) => `<span class="${k === "behavioral" ? behav : cls(k)}"><i></i>${l}</span>`);
+  return `<div class="stages">${parts.join("")}</div>`;
+};
 
-function renderTranscript(rows, unit, spec) {
+function renderTranscript(rows, unit, spec, c) {
   const ol = $("#transcript");
-  const atBottom = ol.scrollHeight - ol.scrollTop - ol.clientHeight < 40;
+  const atBottom = ol.scrollHeight - ol.scrollTop - ol.clientHeight < 60;
   ol.innerHTML = "";
   let prevIr = null;
   for (const r of rows) {
     const li = el(`<li class="turn ${r.pending ? "live" : ""}"><div class="num">${r.n}</div><div class="body"></div></li>`);
     const b = li.querySelector(".body");
-    for (const u of r.user) b.appendChild(el(line("you", `<div class="usermsg">${esc(u.message)}</div>`, "user")));
-    if (r.memory?.lessons?.length) b.appendChild(el(line("memory", r.memory.lessons.map((l) => `<div class="memrow"><span class="mid">${esc(l.id)} ${l.score >= 0 ? "+" : ""}${fmt(l.score)}</span>${esc(l.text)}</div>`).join(""), "accent")));
-    if (r.n === 1) b.appendChild(el(line("start", "Initial design from the spec.")));
-    else {
-      const d = r.plan?.diagnosis ?? r.diagnosis, a = r.plan?.action ?? r.action;
-      if (d) b.appendChild(el(line("hypothesis", esc(d))));
-      if (a) b.appendChild(el(line("action", esc(a))));
-    }
-    if (r.ir) b.appendChild(el(line("ir", irChips(r.ir, prevIr, spec.locked))));
+    for (const u of r.user) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)}</div>`));
+    // what the planner did
+    const a = r.plan?.action ?? r.action;
+    if (r.n === 1) b.appendChild(el(`<div class="action">Start from the spec's initial design.</div>`));
+    else if (a) b.appendChild(el(`<div class="action">${r.plan?.fallback ? `<span class="why">fallback candidate — </span>` : ""}${esc(a)}</div>`));
+    if (r.ir) b.appendChild(el(irChips(r.ir, prevIr, spec.locked)));
+    // what happened
     if (r.pending) {
-      const k = r.ir ? 1 : 0;
-      b.appendChild(el(line("running", `<div class="progress">${["plan", "sim", "synth", "place & route", "timing"].map((s, i) => `<span class="${i < k ? "done" : i === k ? "active" : "todo"}"><i></i>${s}</span>`).join("")}</div>`, "accent")));
+      b.appendChild(el(`<div class="head"><span class="verdict live">${r.ir ? "simulating · synthesizing · place & route" : "planning"}</span></div>`));
+      if (spec.backend === "xc7s50" && r.ir) b.appendChild(el(stageChips(r, spec.backend)));
     } else {
       const m = r.metrics, ok = r.violations.length === 0;
-      const cp = m.critical_path?.length > 1 ? `<div class="cp">critical ${fmt(m.critical_path[0].total_ns, 2)} ns: ` + m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl)}</i> ${fmt(s.logic_ns, 2)}+${fmt(s.route_ns, 2)}</span>`).join("") + `</div>` : "";
-      b.appendChild(el(line("result", `<div class="res"><div class="row"><span class="${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span>fmax ${fmt(m.fmax_mhz)} MHz · LUT ${m.lut} · FF ${m.ff} · DSP ${m.dsp} · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="bad">${esc(r.violations.join("; "))}</span>`}</div>${cp}</div>`)));
+      b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b> · ${m.lut} LUT · ${m.dsp} DSP · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
+    }
+    // details
+    const d = el(`<details class="more" ${openTurns.has(r.n) ? "open" : ""}><summary>details</summary><div class="inner"></div></details>`);
+    d.ontoggle = () => { if (d.open) openTurns.add(r.n); else openTurns.delete(r.n); };
+    const inner = d.querySelector(".inner");
+    let n = 0;
+    const diag = r.plan?.diagnosis ?? r.diagnosis;
+    if (diag && r.n > 1) { inner.appendChild(el(line("hypothesis", esc(diag)))); n++; }
+    if (r.memory?.lessons?.length) { inner.appendChild(el(line("memory", r.memory.lessons.map((l) => `<div class="memrow"><span class="mid">${esc(l.id)} ${l.score >= 0 ? "+" : ""}${fmt(l.score)}</span>${esc(l.text)}</div>`).join(""), "accent"))); n++; }
+    if (r.plan?.candidates?.length) {
+      const picked = JSON.stringify(r.plan.next_ir);
+      inner.appendChild(el(line("candidates", r.plan.candidates.map((cd) => {
+        const isPick = JSON.stringify(cd.ir) === picked, e = cd.estimate;
+        return `<div class="cand ${isPick ? "picked" : ""}"><span class="rk">${cd.rank ? "#" + cd.rank : "✕"}</span><div>${esc(cd.why)}<br>${irChips(cd.ir, prevIr, spec.locked)}${cd.rejected ? `<div class="rej">${esc(cd.rejected)}</div>` : e ? `<div class="est ${cd.est_violations?.length ? "bad" : ""}">est ~${fmt(e.fmax_mhz, 0)} MHz · ~${e.lut} LUT · ~${e.dsp} DSP${cd.est_violations?.length ? " · " + esc(cd.est_violations.join(", ")) : " · looks feasible"}${isPick ? " · chosen" : ""}</div>` : ""}</div></div>`;
+      }).join("") + (r.plan.rescreened ? `<div class="est">re-planned after screening rejected the first set</div>` : ""))));
+      n++;
+    }
+    if (!r.pending) {
+      const m = r.metrics;
+      if (m.critical_path?.length > 1) { inner.appendChild(el(line("critical", `<div class="cp">${fmt(m.critical_path[0].total_ns, 2)} ns: ` + m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl)}</i> ${fmt(s.logic_ns, 2)}+${fmt(s.route_ns, 2)}</span>`).join("") + `</div>`))); n++; }
+      if (spec.backend === "xc7s50") { inner.appendChild(el(line("simulation", stageChips(r, spec.backend)))); n++; }
       if (r.lesson) {
         const L = r.lesson.lesson;
         const node = el(line("lesson", `<div class="lesson"><div class="ltxt">${esc(L.text)}</div><div class="vote"><span class="${L.outcome}">${L.outcome}</span><button data-v="up" title="confirm">👍</button><button data-v="down" title="contradict">👎</button></div></div>`, "warn"));
         node.querySelectorAll("button").forEach((btn) => { btn.onclick = async () => { const res = await post(`/memory/${spec.design || "matmul"}/${spec.backend || "ecp5"}/vote`, { id: L.id, vote: btn.dataset.v }); btn.parentElement.querySelector("span").textContent = `${L.outcome} · ${res.score >= 0 ? "+" : ""}${fmt(res.score)}`; refreshMemCount(); }; });
-        b.appendChild(node);
+        inner.appendChild(node); n++;
       }
     }
-    if (r.next?.stop) b.appendChild(el(line("planner", `${esc(r.next.diagnosis)}<br><b>${esc(r.next.action)}</b> · stop`)));
-    if (r.userAfter) for (const u of r.userAfter) b.appendChild(el(line("you", `<div class="usermsg">${esc(u.message)} <span class="muted">(queued for the next plan)</span></div>`, "user")));
+    if (n) { d.querySelector("summary").textContent = `details · ${[diag && r.n > 1 && "hypothesis", r.memory?.lessons?.length && "memory", r.plan?.candidates?.length && `${r.plan.candidates.length} candidates`, !r.pending && r.metrics.critical_path?.length > 1 && "critical path", r.lesson && "lesson"].filter(Boolean).join(" · ")}`; b.appendChild(d); }
+    if (r.next?.stop) b.appendChild(el(`<div class="action"><span class="why">planner stopped — </span>${esc(r.next.action)}</div>`));
+    if (r.userAfter) for (const u of r.userAfter) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)} <span class="muted">(queued for the next plan)</span></div>`));
     ol.appendChild(li);
     if (!r.pending) prevIr = r.ir;
   }
-  if (detail.error) ol.appendChild(el(`<li class="turn"><div class="num">!</div><div class="body">${line("error", `<pre class="code">${esc(detail.error)}</pre>`)}</div></li>`));
+  if (detail.error) ol.appendChild(el(`<li class="turn"><div class="num">!</div><div class="body"><pre class="code">${esc(detail.error)}</pre></div></li>`));
   if (atBottom) ol.scrollTop = ol.scrollHeight;
 }
 
@@ -227,6 +249,7 @@ function renderSugs(last) {
   const ir = last.ir || {}, v = last.violations || [], sugs = [];
   if (v.some((x) => x.startsWith("fmax"))) sugs.push("focus on timing: which single knob removes the stage on the critical path?");
   if (v.some((x) => x.startsWith("dsp"))) sugs.push("reduce DSP count first, even at lower throughput");
+  if (v.some((x) => /simulation failed/.test(x))) sugs.push("a netlist sim failed: is this a real functional bug or a timing-sim artifact? explain");
   if (!v.length) sugs.push("explore one more shape before stopping");
   if ("acc_in_dsp" in ir) sugs.push("don't change acc_in_dsp");
   if ("fold" in ir) sugs.push("try the transposed form (fold=1)");
@@ -243,9 +266,9 @@ async function sendSteer() {
   finally { ta.disabled = false; ta.focus(); }
 }
 
-// ---------------------------------------------------------------- inspector: design
+// ---------------------------------------------------------------- inspector
 function switchTab(name) {
-  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  document.querySelectorAll(".tabs button[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll(".pane").forEach((p) => { p.hidden = p.id !== `pane-${name}`; });
 }
 
@@ -253,7 +276,7 @@ function renderDesign(row, done, spec) {
   const p = $("#pane-design"); p.innerHTML = "";
   if (!row?.ir) { p.appendChild(el(`<div class="muted">no design yet</div>`)); return; }
   const design = spec.design || "matmul", locked = spec.locked || {}, xc = spec.backend === "xc7s50";
-  const ir = { ...locked, ...row.ir };  // planner-visible fields plus the task-locked ones
+  const ir = { ...locked, ...row.ir };
   const prev = done.filter((d) => d.n < row.n).at(-1)?.ir;
   const sec = el(`<div class="sec"><h3>Architecture <span class="hint">iteration ${row.n}${row.pending ? " (evaluating)" : ""}</span></h3></div>`);
   const arch = el(`<div class="arch"></div>`);
@@ -270,7 +293,7 @@ function renderDesign(row, done, spec) {
     sec.appendChild(el(`<div class="archlegend"><span>${ir.taps} taps${ir.symmetric ? ", symmetric (" + U + " unique)" : ""} · ${ir.fold === 1 ? "transposed form, 1 sample/cycle" : `folded ×${ir.fold}, direct form, 1/${ir.fold} sample/cycle`}</span><span>${M} multiplier${M > 1 ? "s" : ""} (${ir.dsp_regs}) · ${ir.acc_in_dsp && xc ? "DSP post-adder" : "fabric"} accumulate, ${ir.acc_width} b · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
   }
   p.appendChild(sec);
-  const ks = el(`<div class="sec"><h3>IR <span class="hint">click a knob to suggest a change</span></h3><div class="knobs"></div></div>`);
+  const ks = el(`<div class="sec"><h3>IR <span class="hint">click a knob to draft a steer</span></h3><div class="knobs"></div></div>`);
   const kl = ks.querySelector(".knobs");
   for (const [k, v] of Object.entries(ir)) {
     if (k === "coefs") continue;
@@ -293,7 +316,29 @@ function renderDesign(row, done, spec) {
   }
 }
 
-// ---------------------------------------------------------------- inspector: trajectory
+function renderSim(row, spec) {
+  const p = $("#pane-sim"); p.innerHTML = "";
+  if (!row) { p.appendChild(el(`<div class="muted">no iteration yet</div>`)); return; }
+  const xc = spec.backend === "xc7s50";
+  const st = row.pending ? row.stages : (row.metrics?.sim_stages || {});
+  const period = row.metrics ? (1000 / spec.constraints.fmax_mhz) : null;
+  const sec = el(`<div class="sec"><h3>Simulation ladder <span class="hint">iteration ${row.n}${period ? ` · target period ${fmt(period, 3)} ns` : ""}</span></h3><table class="simtable"></table></div>`);
+  const t = sec.querySelector("table");
+  const rowHtml = (name, purpose, state, log) => `<tr><td class="st ${state === "pass" ? "ok" : state === "fail" ? "bad" : "na"}">${state}</td><td><b>${name}</b><br><span class="muted">${purpose}</span>${log ? `<div class="log">${esc(log)}</div>` : ""}</td></tr>`;
+  const behav = row.pending ? (row.ir ? "running" : "—") : row.metrics?.sim_passed ? "pass" : "fail";
+  t.insertAdjacentHTML("beforeend", rowHtml("1 · Behavioral", "RTL logic vs. Python golden model (cocotb + iverilog)", behav, !row.pending && !row.metrics?.sim_passed ? row.metrics?.sim_log?.slice(-400) : ""));
+  const purposes = { post_synth_func: "synthesized netlist, unisim models, no delays", post_synth_time: "synthesized netlist with estimated SDF delays at target period", post_impl_func: "placed-and-routed netlist, no delays", post_impl_time: "placed-and-routed netlist with real SDF delays at target period — the signoff" };
+  const names = { post_synth_func: "2 · Post-synthesis functional", post_synth_time: "3 · Post-synthesis timing", post_impl_func: "4 · Post-implementation functional", post_impl_time: "5 · Post-implementation timing" };
+  for (const k of Object.keys(names)) {
+    const s = st[k];
+    const state = !xc ? "n/a" : !s ? (row.pending ? "pending" : "—") : s.passed === true ? "pass" : s.passed === false ? "fail" : "skipped";
+    t.insertAdjacentHTML("beforeend", rowHtml(names[k], purposes[k], state, s?.passed === false ? s.log : ""));
+  }
+  if (!xc) sec.appendChild(el(`<div class="muted small-text">Netlist simulation (stages 2–5) runs on the Vivado backend only; the ECP5 flow has no SDF-annotated netlist path yet.</div>`));
+  p.appendChild(sec);
+}
+
+// ---------------------------------------------------------------- trajectory
 const NS = "http://www.w3.org/2000/svg";
 const svgEl = (t, a = {}) => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
 const tip = $("#tip");
@@ -302,14 +347,14 @@ const hideTip = () => { tip.hidden = true; };
 
 function chart(container, rows, key, target, label, color, opts = {}) {
   container.innerHTML = "";
-  const W = container.clientWidth || 360, H = container.clientHeight || 180, L = 40, Rm = 12, T = 12, B = 22;
+  const W = container.clientWidth || 360, H = container.clientHeight || 170, L = 40, Rm = 12, T = 12, B = 22;
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}` }); container.appendChild(svg);
   if (!rows.length) return;
   const vals = rows.map((r) => (opts.get ? opts.get(r) : r.metrics[key]));
   const max = Math.max(target || 0, ...vals) * 1.12 || 1;
   const X = (i) => L + ((i + 0.5) / rows.length) * (W - L - Rm), Y = (v) => H - B - (v / max) * (H - B - T);
   const g = svgEl("g", { class: "grid" });
-  for (let i = 0; i <= 3; i++) { const v = (max * i) / 3, y = Y(v); g.appendChild(svgEl("line", { x1: L, x2: W - Rm, y1: y, y2: y })); const t = svgEl("text", { x: L - 5, y: y + 3, "text-anchor": "end" }); t.textContent = Number.isInteger(max) || max > 10 ? Math.round(v) : v.toFixed(2); svg.appendChild(t); }
+  for (let i = 0; i <= 3; i++) { const v = (max * i) / 3, y = Y(v); g.appendChild(svgEl("line", { x1: L, x2: W - Rm, y1: y, y2: y })); const t = svgEl("text", { x: L - 5, y: y + 3, "text-anchor": "end" }); t.textContent = max > 10 ? Math.round(v) : v.toFixed(2); svg.appendChild(t); }
   svg.appendChild(g);
   if (target != null) { svg.appendChild(svgEl("line", { class: "target", x1: L, x2: W - Rm, y1: Y(target), y2: Y(target) })); const t = svgEl("text", { x: W - Rm, y: Y(target) - 3, "text-anchor": "end" }); t.textContent = `${label} ${opts.limitKind || "≥"} ${target}`; svg.appendChild(t); }
   if (opts.line) svg.appendChild(svgEl("path", { d: rows.map((r, i) => `${i ? "L" : "M"}${X(i)},${Y(vals[i])}`).join(" "), fill: "none", stroke: color, "stroke-width": 2 }));
@@ -358,10 +403,10 @@ function renderMemoryTab(rows) {
 
 async function renderMemoryView() {
   const list = $("#memory-list"); list.innerHTML = `<div class="muted">loading…</div>`;
-  memCache = await api("/memory");
+  const mem = await api("/memory");
   list.innerHTML = "";
-  if (!memCache.length) { list.appendChild(el(`<div class="muted">empty — lessons appear after the first run with two or more iterations</div>`)); return; }
-  for (const g of memCache) {
+  if (!mem.length) { list.appendChild(el(`<div class="muted">empty — lessons appear after the first run with two or more iterations</div>`)); return; }
+  for (const g of mem) {
     const grp = el(`<div class="memgroup"><h3>${esc(g.design)} · ${esc(g.backend)} <span class="muted">${g.count} lessons</span></h3></div>`);
     for (const l of g.lessons) grp.appendChild(lessonCard(l, g.design, g.backend, true));
     list.appendChild(grp);
