@@ -147,7 +147,9 @@ export const siliconAgent = {
             const done = !['queued', 'running'].includes(j.status)
             if (done || Date.now() >= deadline) {
               const out = summarize(j)
-              if (!done) out.note = 'still running: call sa_job again (wait_seconds up to 90) until status is done/failed'
+              out.note = done
+                ? `finished: status ${j.status}; this is the complete trajectory, do not poll again. ${out.best ? 'best feasible design is in `best`.' : 'no feasible design was found (best is null).'}`
+                : 'still running: call sa_job again (wait_seconds up to 90) until status is done/failed'
               return text(out)
             }
             await new Promise((r) => setTimeout(r, Math.min(5000, Math.max(500, deadline - Date.now()))))
@@ -249,19 +251,37 @@ export const siliconAgent = {
     })
 
     // The method: how to drive a hardware request end to end with these tools.
+    const METHOD = [
+      'You are the front of silicon-agent, an autonomous FPGA design loop. Use its tools instead of writing RTL yourself.',
+      '1. Call sa_schema once to know the generators, devices and knobs. Then sa_interpret with the user\'s words to get a complete spec; show its assumptions. Numbers the user states are used exactly as given.',
+      '2. If the request allows several architectures (different generator, device or fold), compare them with sa_estimate before running; the interpreter\'s `alternatives` are good candidates.',
+      '3. Start with sa_run (pass the conversation `thread` when you have one), then follow it with sa_job (wait_seconds 90, repeated until the status is done or failed; a run takes 1-30 minutes). Report what the measurements say: what changed, measured Fmax/LUT/DSP, whether the constraints hold. Never invent numbers: everything comes from the tool results.',
+      '4. When it finishes, explain why it stopped (stop_reason or the budget), the final design, and one caveat if there is one (thin timing margin, low throughput, noisy seeds). Offer the next step: fork with tighter constraints, sa_formal, or the delivery package (the chat shows a download button on the result card; you cannot build or attach files yourself).',
+      '5. While a run is in flight, a user instruction about the design is an sa_steer; a question is answered from sa_job data.',
+      'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',
+      'Answer in the user\'s language.',
+    ].join('\n')
     ctx.skills.register({
       name: 'silicon-agent',
       description: 'Turn a natural-language FPGA accelerator request into signed-off Verilog with silicon-agent: interpret, estimate, run on the real device, explain the trajectory.',
-      body: [
-        'You are the front of silicon-agent, an autonomous FPGA design loop. Use its tools instead of writing RTL yourself.',
-        '1. Call sa_schema once to know the generators, devices and knobs. Then sa_interpret with the user\'s words to get a complete spec; show its assumptions. Numbers the user states are used exactly as given.',
-        '2. If the request allows several architectures (different generator, device or fold), compare them with sa_estimate before running; the interpreter\'s `alternatives` are good candidates.',
-        '3. Start with sa_run (pass the conversation `thread` when you have one), then follow it with sa_job (wait_seconds 90, repeated until the status is done or failed; a run takes 1-30 minutes). Report what the measurements say: what changed, measured Fmax/LUT/DSP, whether the constraints hold. Never invent numbers: everything comes from the tool results.',
-        '4. When it finishes, explain why it stopped (stop_reason or the budget), the final design, and one caveat if there is one (thin timing margin, low throughput, noisy seeds). Offer the next step: fork with tighter constraints, sa_formal, or the delivery package.',
-        'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',
-        '5. While a run is in flight, a user instruction about the design is an sa_steer; a question is answered from sa_job data.',
-        'Answer in the user\'s language.',
-      ].join('\n'),
+      body: METHOD,
+    })
+
+    // Guardrails for silicon-agent chat sessions (the job server opens them with a `sa-thread-` session key):
+    // the method is injected as a prompt section so the agent never has to be told to "use the skill", and the
+    // host tools that would let it edit files or run commands are refused -- every mutation goes through the
+    // job server, whose results are what the chat renders.
+    const isChatSession = (session) => typeof session?.key === 'string' && session.key.startsWith('sa-thread-')
+    const HOST_TOOLS = new Set(['write', 'edit', 'shell', 'web_fetch', 'subagent_spawn', 'subagent_fork', 'plugin_helper_install', 'skill_helper_install', 'skill_helper_import', 'mcp_manage'])
+    agnes.registerHook('context', (_payload, hctx) => {
+      // a participant returns only its own sections (author shape: id/order/content); the kernel keeps the rest
+      if (!isChatSession(hctx.session)) return {}
+      return { sections: [{ id: 'silicon-agent', order: 50, content: `# silicon-agent\n${METHOD}` }] }
+    })
+    agnes.registerHook('tool_call', (payload, hctx) => {
+      if (isChatSession(hctx.session) && HOST_TOOLS.has(payload.name))
+        return { allow: false, reason: `${payload.name} is not available in a silicon-agent chat: use the sa_* tools (the design, its files and the EDA run live on the job server)` }
+      return { allow: true }
     })
 
     agnes.on('session_start', () => {

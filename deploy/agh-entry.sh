@@ -18,6 +18,8 @@ computerUse:
   enabled: false
 approvals:
   mode: off
+# the forked harness ships a `silicon` preset (read-only host tools); standard stays allowed for the CLI
+presets: { default: silicon, allowed: [silicon, standard] }
 EOF
 fi
 # the job-server bearer token for the plugin, readable by the worker process only

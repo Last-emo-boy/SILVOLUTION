@@ -30,6 +30,7 @@ services:
       SA_DISABLE_BACKENDS: ${SA_DISABLE_BACKENDS:-}   # comma-separated keys whose toolchain is not installed on this host (e.g. xc7a35t until Artix-7 device data is added to Vivado)
       SA_AGH: ${SA_AGH:-1}                   # 1: chat turns run inside Agnes Harness (the agh service); 0: the built-in nl.py loop
       SA_AGH_HOME: /srv/sa/agh               # the agh service's home: its unix socket lives under data/daemon/
+      SA_AGH_PRESET: silicon                 # AGH recipe for chat sessions (the fork's read-only tool set)
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:

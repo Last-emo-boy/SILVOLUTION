@@ -463,15 +463,15 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
         except agh.AghError:
             sid = None
     if not sid:
-        sid = c.new_session(agh.workspace(), session_key=f"sa-thread-{tid}")
+        sid = c.new_session(agh.workspace(), preset=os.environ.get("SA_AGH_PRESET") or None, session_key=f"sa-thread-{tid}")
         with _lock:
             th["agh_session"] = sid
             _save_thread(tid)
     first = next((m["text"] for m in th["messages"] if m["role"] == "user"), text)
     lang = nl._lang(first)
-    # the Skill is preloaded only when named; the bracketed line is context for the agent, not part of the user's words
-    prompt = (f"[silicon-agent chat · thread {tid} · use the `silicon-agent` skill · the chat renders the spec, every iteration "
-              f"and the result as cards beside your reply, so answer in a few plain sentences, no headings or tables]\n{text}")
+    # the method itself is injected by the plugin's context hook (sessions keyed sa-thread-*); the bracketed line
+    # only carries the thread id the tools need
+    prompt = f"[silicon-agent chat · thread {tid}]\n{text}"
     started: list[str] = []
     seen: set[str] = set()
 
