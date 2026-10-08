@@ -140,7 +140,9 @@ with 3% margin and showed from the critical path that every IR knob sat upstream
 post-accumulator reduction `part[*] → out_data`). Its first proposal — register the M-way reduction as a
 balanced tree — became the `sum_tree` knob of the FIR generator; measured A/B on the same device: 49.5 →
 55.0 MHz at identical LUT/DSP, +2 cycles latency, formal equivalence and stream properties PASS.
-`fir-ice40-55-4dsp` in the bench guards it.
+`fir-ice40-55-4dsp` in the bench guards it. The same question on an ECP5 4-DSP FIR (151.8 MHz) pointed
+at the input side — pre-adder carry chain → tap mux → DSP input — and became `pipe_in`; with both knobs
+the planner measured 219.0 MHz at 445 LUT (from 515), formal PASS (`fir-ecp5-200-4dsp`).
 
 ## Chat
 

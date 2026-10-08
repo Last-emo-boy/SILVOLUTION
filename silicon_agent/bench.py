@@ -75,6 +75,12 @@ CASES: list[tuple[str, dict, dict]] = [
         "constraints": {"fmax_mhz": 52, "max_dsp": 4, "objective": ["maximize_throughput", "maximize_fmax"]},
         "initial_ir": {"acc_width": 29, "symmetric": True, "fold": 2, "pipe_mul": 2, "reg_in": True, "dsp_regs": "out", "sum_tree": False}},
      {"feasible": True, "max_rounds": 4}),
+    ("fir-ecp5-200-4dsp", {
+        # input-side limiter (pre-adder + tap mux into the DSP): pipe_in + sum_tree take it from 151.8 to 219 MHz measured
+        "task": "16-tap 12-bit symmetric FIR, ECP5, 200 MHz, 4 DSP", "design": "fir", "backend": "ecp5", "locked": {"taps": 16, "data_width": 12, "coef_width": 12, "cutoff": 0.3},
+        "constraints": {"fmax_mhz": 200, "max_dsp": 4, "objective": ["maximize_throughput", "maximize_fmax"]},
+        "initial_ir": {"acc_width": 29, "symmetric": True, "fold": 2, "pipe_mul": 0, "reg_in": True, "dsp_regs": "in_pipe_out", "sum_tree": False, "pipe_in": False}},
+     {"feasible": True, "max_rounds": 4}),
     ("cordic-ecp5-200", {
         "task": "16-bit sin/cos CORDIC, ECP5, 200 MHz", "design": "cordic", "backend": "ecp5", "locked": {"mode": "rotate", "width": 16},
         "constraints": {"fmax_mhz": 200, "max_lut": 3500, "objective": ["maximize_throughput", "minimize_lut"]},
