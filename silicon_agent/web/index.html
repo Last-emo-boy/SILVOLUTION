@@ -28,17 +28,54 @@
 
     <!-- new run -->
     <section id="new-form" class="newform" hidden>
-      <div class="bar"><h1>New run</h1></div>
-      <div class="form">
-        <label>Template <select id="tpl"></select></label>
-        <label>Spec <textarea id="spec" spellcheck="false" rows="20"></textarea></label>
-        <div class="row">
-          <label class="inline">Max iterations <input id="maxiter" type="number" min="1" max="20" value="8"></label>
-          <label class="inline"><input id="nomem" type="checkbox"> ignore design memory (A/B)</label>
-          <span class="grow"></span>
-          <button id="submit" class="primary">Run</button>
+      <div class="bar"><div class="bar-l"><h1>New run</h1><span id="nf-sub" class="mono muted"></span></div><div class="bar-r"><button id="nf-json-toggle" class="ghost small">edit as JSON ▸</button></div></div>
+      <div class="form-wrap">
+        <div class="form" id="nf-form">
+          <div class="fcol">
+            <div class="fsec"><h3>Task</h3>
+              <div class="frow">
+                <label class="f w180">design <select id="nf-design"></select></label>
+                <label class="f w220">backend <select id="nf-backend"></select></label>
+                <label class="f grow">name <input id="nf-task" type="text" placeholder="INT8 matmul · 300 MHz"></label>
+              </div>
+            </div>
+            <div class="fsec"><h3>Constraints <span class="hint">hard — a design is feasible only if all hold</span></h3>
+              <div class="frow" id="nf-cons">
+                <label class="f w110">fmax ≥ MHz <input data-c="fmax_mhz" type="number" min="1"></label>
+                <label class="f w90">DSP ≤ <input data-c="max_dsp" type="number" min="0" placeholder="—"></label>
+                <label class="f w100">LUT ≤ <input data-c="max_lut" type="number" min="0" placeholder="—"></label>
+                <label class="f w90">FF ≤ <input data-c="max_ff" type="number" min="0" placeholder="—"></label>
+                <label class="f w90">BRAM ≤ <input data-c="max_bram" type="number" min="0" placeholder="—"></label>
+              </div>
+            </div>
+            <div class="fsec"><h3>Objective <span class="hint">lexicographic — drag to reorder, click to toggle</span></h3>
+              <ol id="nf-obj" class="objlist"></ol>
+            </div>
+            <div class="fsec"><h3>Locked <span class="hint">task parameters the planner may not change</span></h3>
+              <div class="frow wrap" id="nf-locked"></div>
+            </div>
+          </div>
+          <div class="fcol">
+            <div class="fsec"><h3>Starting design <span class="hint">the planner's first iteration</span></h3>
+              <div class="frow wrap" id="nf-presets"></div>
+              <div class="knobform" id="nf-knobs"></div>
+              <div class="estbox" id="nf-est"><span class="muted">screen estimate</span></div>
+            </div>
+            <div class="fsec"><h3>Run</h3>
+              <div class="frow">
+                <label class="f w110">max iterations <input id="maxiter" type="number" min="1" max="20" value="8"></label>
+                <label class="inline"><input id="usemem" type="checkbox" checked> use design memory</label>
+                <span class="grow"></span>
+                <button id="submit" class="primary">Run</button>
+              </div>
+              <div id="submit-msg" class="msg"></div>
+            </div>
+          </div>
         </div>
-        <div id="submit-msg" class="msg"></div>
+        <div class="form json" id="nf-json" hidden>
+          <label class="f grow">spec (JSON) <textarea id="spec" spellcheck="false" rows="26"></textarea></label>
+          <div class="frow"><button id="nf-json-apply" class="small">apply to form</button><span id="nf-json-msg" class="msg"></span></div>
+        </div>
       </div>
     </section>
 
@@ -53,6 +90,14 @@
         <div class="bar-r">
           <span id="j-best" class="mono muted"></span>
           <button id="btn-stop" class="ghost small" hidden>■ Stop</button>
+          <div class="menu"><button id="btn-more" class="ghost small" title="Actions">⋯</button>
+            <div class="menu-list" id="menu-list" hidden>
+              <button id="act-fork">Fork from best…</button>
+              <button id="act-compare">Compare with…</button>
+              <button id="act-rerun">Re-run same spec</button>
+              <button id="act-delete" class="danger">Delete run</button>
+            </div>
+          </div>
           <button id="t-insp" class="ghost small" title="Details">Details ▸</button>
         </div>
       </div>
@@ -79,6 +124,12 @@
       </div>
     </section>
 
+    <!-- compare -->
+    <section id="compare" class="compare" hidden>
+      <div class="bar"><div class="bar-l"><button id="cmp-back" class="ghost icon small" title="Back">←</button><h1>Compare runs</h1></div><div class="bar-r"><span id="cmp-sub" class="mono muted"></span></div></div>
+      <div class="cmp-body" id="cmp-body"></div>
+    </section>
+
     <!-- memory browser -->
     <section id="memory" class="memview" hidden>
       <div class="bar"><h1>Design memory</h1><span class="muted small-text">lessons distilled from every planner move, scored by what happened when later runs followed them</span></div>
@@ -87,6 +138,18 @@
   </main>
 </div>
 
+<dialog id="fork-dlg">
+  <h2>Fork this run</h2>
+  <div class="frow"><label class="f grow">start from iteration <div class="iters" id="fk-iters"></div></label></div>
+  <div class="frow">
+    <label class="f w110">fmax ≥ MHz <input id="fk-fmax" type="number"></label>
+    <label class="f w90">DSP ≤ <input id="fk-dsp" type="number" placeholder="—"></label>
+    <label class="f w100">LUT ≤ <input id="fk-lut" type="number" placeholder="—"></label>
+    <label class="f w110">max iterations <input id="fk-iter" type="number" min="1" max="20"></label>
+  </div>
+  <div class="frow"><label class="f grow">name <input id="fk-task" type="text"></label></div>
+  <div class="actions"><button id="fk-cancel">Cancel</button><button id="fk-go" class="primary">Fork</button></div>
+</dialog>
 <div class="tooltip" id="tip" hidden></div>
 <script type="module" src="/static/app.js"></script>
 </body>

@@ -16,6 +16,10 @@ ssh "$HOST" 'set -e
   if [ ! -f /opt/silicon-agent/.env ]; then
     echo "missing /opt/silicon-agent/.env on the host: SA_TOKEN=... DEEPSEEK_API_KEY=..." >&2; exit 1
   fi
+  # the server drains on SIGTERM (finishes the in-flight iteration, requeues the job, resumes from
+  # cache on start); stop_grace_period in compose.yml gives it the time. Tell the operator what is running.
+  running=$(curl -sS http://127.0.0.1:8765/api/jobs -H "Authorization: Bearer $(grep ^SA_TOKEN= /opt/silicon-agent/.env | cut -d= -f2-)" 2>/dev/null | python3 -c "import sys,json; print(\",\".join(j[\"id\"] for j in json.load(sys.stdin) if j[\"status\"] in (\"running\",\"queued\")))" 2>/dev/null || true)
+  [ -n "$running" ] && echo "note: $running in flight -- will finish the current iteration, then resume after restart"
   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --force-recreate
   sleep 3
   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml ps

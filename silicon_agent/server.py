@@ -266,6 +266,9 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"name": f.stem, "task": s.get("task", ""), "design": s.get("design", "matmul"),
                             "backend": s.get("backend", "ecp5"), "spec": s})
             return self._json(200, out)
+        if path == "/schema":
+            from .schema import SCHEMAS, OBJECTIVES
+            return self._json(200, {"designs": SCHEMAS, "objectives": OBJECTIVES, "backends": {k: v["name"] for k, v in BACKENDS.items()}})
         if path == "/calibration":
             from . import screen as _screen
             return self._json(200, {f"{d}/{b}": _screen.calibration_report(d, b) for d in DESIGNS for b in BACKENDS})
@@ -362,6 +365,22 @@ class Handler(BaseHTTPRequestHandler):
                 with (RESULTS / parts[1] / "events.jsonl").open("a") as f:
                     f.write(json.dumps(rec) + "\n")
                 return self._json(200, {"ok": True, "queued_for_iteration": sum(1 for e in job["events"] if e["kind"] == "result") + 2})
+        if path == "/estimate":
+            # cheap screening estimate + validation for the form, no EDA
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+                spec = body["spec"]
+                design = spec.get("design", "matmul"); backend = spec.get("backend", "ecp5")
+                from . import screen as _screen
+                from .ir import Constraints as _C
+                ir = DESIGNS[design].ir_cls.from_dict({**spec.get("initial_ir", {}), **spec.get("locked", {})})
+                errs = ir.validate()
+                if errs:
+                    return self._json(200, {"valid": False, "errors": errs})
+                ranked = _screen.screen(design, backend, [{"ir": ir.to_dict(), "why": ""}], _C.from_dict(spec["constraints"]))
+                return self._json(200, {"valid": True, "estimate": ranked[0]["estimate"], "est_violations": ranked[0]["est_violations"]})
+            except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
+                return self._json(400, {"error": f"bad request: {e}"})
         if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "fork":
             with _lock:
                 src = _jobs.get(parts[1])

@@ -30,8 +30,9 @@ Every evaluated design passes through five simulations before its numbers count:
 | 4 | Post-implementation functional | xsim, unisim | the placed-and-routed netlist is logically the same design |
 | 5 | Post-implementation timing | xsim, simprim + SDF | …and works with real routed delays at the target period — the signoff |
 
-Stages 2–5 run on the Vivado backend; a failing stage is a constraint violation
-the planner sees. Verified both ways: a 2×2 matmul passes all five at 250 MHz; an
+Stages 2–5 run on the Vivado backend; the ECP5 backend runs stage 2 against the
+yosys-mapped netlist (nextpnr's routed output has no simulation model or SDF, so
+3–5 are unavailable there). A failing stage is a constraint violation the planner sees. Verified both ways: a 2×2 matmul passes all five at 250 MHz; an
 unpipelined 4×4 asked for 600 MHz passes 2 and 4 and fails 3 and 5.
 
 ## Planner loop
@@ -39,7 +40,10 @@ unpipelined 4×4 asked for 600 MHz passes 2 and 4 and fails 3 and 5.
 Each iteration the planner reads the last result (metrics, summarized critical
 path, simulation ladder), the lessons design memory recalls for that situation,
 and any instructions typed into the console, then proposes **up to three
-candidate IRs**. A closed-form screening model (`screen.py`) estimates each one;
+candidate IRs**. A closed-form screening model (`screen.py`) estimates each one —
+and every EDA result is recorded, so the estimator learns a per-(design, backend,
+metric) multiplicative correction by leave-one-out ridge regression, applied only
+when it beats the raw estimate (`GET /api/calibration` reports the current error);
 only the top candidate is sent through EDA, estimated-feasible runners-up are
 kept as fallbacks and tried without re-planning if the chosen one violates, and
 if nothing looks feasible the planner gets one re-plan with the verdicts. After
@@ -111,6 +115,17 @@ composer that steers the planner before its next proposal. **Details ▸** opens
 inspector: architecture sketch + IR knobs (click to draft a steer) + critical
 path, trajectory charts, the simulation ladder with logs, generated RTL, and
 memory recalled/learned. Lessons take 👍/👎 votes. Events persist per job.
+
+Actions on a run (⋯ menu): **Fork** — start a new run from any iteration's design
+with edited constraints (the new run links back to its parent); **Compare** —
+two runs side by side: feasibility, best metrics, overlaid trajectories, mini
+transcripts (the memory A/B pair is the canonical use); **Re-run**; **Delete**.
+New runs are configured in a form (design, backend, constraints, objective
+order by drag, locked fields, starting design from presets or "best from
+memory", live screening estimate) with a JSON escape hatch.
+
+Deploys are safe: on SIGTERM the server finishes the in-flight iteration,
+requeues the job, and on restart replays it from the EDA and planner caches.
 
 Auth model: sluice injects `X-Auth-Subject` + `X-Auth-Sig` (HMAC-SHA256 over
 `subject\ngroups\nepoch-minute` with the gateway key). The server shares that key

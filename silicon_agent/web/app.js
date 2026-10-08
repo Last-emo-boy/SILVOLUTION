@@ -1,4 +1,5 @@
 // silicon-agent worktable. Plain ES module, no build step.
+import { wire } from "/static/form.js";
 // Codex-like: one calm transcript (a turn per iteration), a composer, details behind toggles.
 
 const $ = (s) => document.querySelector(s);
@@ -16,19 +17,19 @@ const STAGES = [["behavioral", "behavioral"], ["post_synth_func", "post-synth"],
 // ---------------------------------------------------------------- state
 let jobs = [], selected = null, detail = null, seen = 0, pollTimer = null, specs = [];
 let view = "empty";
+const state = { get jobs() { return jobs; }, get detail() { return detail; }, get selected() { return selected; }, cmpA: null, cmpB: null };
+let ext = null;
 const openTurns = new Set(); // iteration numbers whose details are expanded
 
 // ---------------------------------------------------------------- boot
 (async function boot() {
   try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
   specs = await api("/specs");
-  const tpl = $("#tpl");
-  for (const s of specs) tpl.appendChild(el(`<option value="${esc(s.name)}">${esc(s.design)} · ${esc(s.backend)} · ${esc(s.task)}</option>`));
-  tpl.onchange = () => { $("#spec").value = JSON.stringify(specs.find((s) => s.name === tpl.value).spec, null, 2); };
-  tpl.onchange();
+  ext = wire({ $, api, post, esc, el, fmt, specs, state, select, refreshJobs, show });
+  await ext.initForm();
+  ext.initActions();
   $("#new-run").onclick = () => show("new");
   $("#open-memory").onclick = () => show("memory");
-  $("#submit").onclick = submit;
   $("#send").onclick = sendSteer;
   $("#steer").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendSteer(); });
   $("#steer").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px"; });
@@ -41,12 +42,12 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   await refreshJobs();
   setInterval(refreshJobs, 5000);
   const hash = location.hash.slice(1);
-  if (hash === "memory") show("memory"); else if (hash === "new") show("new"); else if (hash) select(hash);
+  if (hash === "memory") show("memory"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); } else if (hash) select(hash);
 })();
 
 function show(v) {
   view = v;
-  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory";
+  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare";
   if (v !== "run") { selected = null; clearTimeout(pollTimer); document.querySelectorAll("#runs li").forEach((li) => li.classList.remove("sel")); }
   if (v === "memory") { location.hash = "memory"; renderMemoryView(); }
   if (v === "new") location.hash = "new";
@@ -59,19 +60,6 @@ function toggleInspector(force) {
 }
 async function refreshMemCount() {
   try { const m = await api("/memory"); $("#mem-count").textContent = m.reduce((a, g) => a + g.count, 0); } catch {}
-}
-
-// ---------------------------------------------------------------- new run
-async function submit() {
-  const msg = $("#submit-msg"); msg.className = "msg"; msg.textContent = "submitting…";
-  let spec;
-  try { spec = JSON.parse($("#spec").value); } catch (e) { msg.className = "msg err"; msg.textContent = `spec is not valid JSON: ${e.message}`; return; }
-  if ($("#nomem").checked) spec.no_memory = true;
-  try {
-    const r = await post("/jobs", { spec, max_iter: Number($("#maxiter").value) });
-    msg.textContent = `queued ${r.id}`;
-    await refreshJobs(); select(r.id);
-  } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
 }
 
 // ---------------------------------------------------------------- rail
@@ -93,7 +81,7 @@ async function select(id) {
   location.hash = id;
   clearTimeout(pollTimer);
   document.querySelectorAll("#runs li").forEach((li) => li.classList.toggle("sel", li.dataset.id === id));
-  $("#empty").hidden = true; $("#new-form").hidden = true; $("#memory").hidden = true; $("#run").hidden = false; view = "run";
+  $("#empty").hidden = true; $("#new-form").hidden = true; $("#memory").hidden = true; $("#compare").hidden = true; $("#run").hidden = false; view = "run";
   $("#transcript").innerHTML = ""; $("#rtl").textContent = "";
   toggleInspector(localStorage.getItem("sa.insp") === "1");
   await poll();
@@ -112,12 +100,13 @@ async function poll() {
 
 // fold the event stream into turns: one per iteration
 function turns() {
-  const rows = new Map();
+  const rows = new Map(), notes = [];
   let pendingMem = null, pendingSteer = [];
   const get = (n) => { if (!rows.has(n)) rows.set(n, { n, pending: true, user: [], stages: {} }); return rows.get(n); };
   for (const e of detail.events) {
     switch (e.kind) {
       case "user": pendingSteer.push(e); break;
+      case "note": notes.push(e); break;
       case "steer": get(e.iteration).user.push(...pendingSteer.splice(0)); break;
       case "memory": pendingMem = e; break;
       case "rescreen": get(e.iteration).rescreen = e; break;
@@ -134,6 +123,7 @@ function turns() {
   }
   const out = [...rows.values()].sort((a, b) => a.n - b.n);
   if (pendingSteer.length && out.length) out.at(-1).userAfter = pendingSteer;
+  if (notes.length && out.length) out[0].notes = notes;
   return out;
 }
 
@@ -156,6 +146,9 @@ function render() {
   pill.textContent = { queued: "queued", running: liveRow ? `iteration ${liveRow.n}` : "running", done: `PASS · ${done.length} iter`, failed: `FAIL · ${done.length} iter`, error: "error", interrupted: "interrupted" }[detail.status] || detail.status;
   $("#j-best").textContent = best ? `best: ${fmt(best.metrics.fmax_mhz, 0)} MHz · ${best.metrics.lut} LUT · ${best.metrics.dsp} DSP · ${best.throughput} ${unit}` : `target: ≥${c.fmax_mhz} MHz${c.max_dsp != null ? ` · ≤${c.max_dsp} DSP` : ""}${c.max_lut != null ? ` · ≤${c.max_lut} LUT` : ""}`;
   $("#btn-stop").hidden = !live; $("#btn-stop").disabled = false;
+  let pl = $(".parent-link");
+  if (detail.parent?.id) { if (!pl) { pl = el(`<div class="parent-link"></div>`); $("#transcript").before(pl); } pl.innerHTML = `forked from <a href="#${esc(detail.parent.id)}">${esc(jobs.find((j) => j.id === detail.parent.id)?.task || detail.parent.id)}</a>${detail.parent.iteration ? ` · iteration ${detail.parent.iteration}` : ""}`; pl.querySelector("a").onclick = (e) => { e.preventDefault(); select(detail.parent.id); }; }
+  else if (pl) pl.remove();
   renderTranscript(rows, unit, spec, c);
   $("#composer").classList.toggle("disabled", !live);
   $("#chint-r").textContent = `${spec.design || "matmul"} · ${spec.backend || "ecp5"} · ${selected}`;
@@ -186,12 +179,13 @@ const stageChips = (r, backend) => {
 
 function turnSignature(r) {
   // anything that changes what the turn shows; the open/closed state is deliberately not part of it
-  return JSON.stringify([r.pending, r.user.length, r.userAfter?.length, r.plan?.action, r.plan?.candidates?.length, r.plan?.rescreened, r.ir, r.violations, r.metrics?.fmax_mhz, r.metrics?.sim_stages && Object.keys(r.metrics.sim_stages).length, Object.keys(r.stages).map((k) => k + r.stages[k].passed), r.lesson?.lesson?.id, r.memory?.lessons?.length, r.next?.stop, r.diagnosis]);
+  return JSON.stringify([r.pending, r.notes?.length, r.user.length, r.userAfter?.length, r.plan?.action, r.plan?.candidates?.length, r.plan?.rescreened, r.ir, r.violations, r.metrics?.fmax_mhz, r.metrics?.sim_stages && Object.keys(r.metrics.sim_stages).length, Object.keys(r.stages).map((k) => k + r.stages[k].passed), r.lesson?.lesson?.id, r.memory?.lessons?.length, r.next?.stop, r.diagnosis]);
 }
 
 function buildTurn(r, prevIr, unit, spec) {
   const li = el(`<li class="turn ${r.pending ? "live" : ""}" data-n="${r.n}"><div class="num">${r.n}</div><div class="body"></div></li>`);
   const b = li.querySelector(".body");
+  for (const nt of r.notes || []) b.appendChild(el(`<div class="action"><span class="why">${esc(nt.message)}</span></div>`));
   for (const u of r.user) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)}</div>`));
   const a = r.plan?.action ?? r.action;
   if (r.n === 1) b.appendChild(el(`<div class="action">Start from the spec's initial design.</div>`));
