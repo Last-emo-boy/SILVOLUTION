@@ -610,6 +610,16 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
         with _lock:
             th["agh_session"] = sid
             _save_thread(tid)
+    # the conversation's agent mode (fast / deep) selects the harness model slot; applied before every turn so a
+    # session created under one mode follows a later switch
+    mode = agh.MODES.get(th.get("mode") or agh.DEFAULT_MODE) or agh.MODES[agh.DEFAULT_MODE]
+    if th.get("agh_mode_applied") != (th.get("mode") or agh.DEFAULT_MODE):
+        try:
+            c.set_model(sid, mode["route"], mode["model"], mode["thinking"])
+            with _lock:
+                th["agh_mode_applied"] = th.get("mode") or agh.DEFAULT_MODE
+        except agh.AghError as e:
+            print(f"agh: setModel failed for {tid}: {e}", flush=True)
     first = next((m["text"] for m in th["messages"] if m["role"] == "user"), text)
     lang = nl._lang(first)
     # the method itself is injected by the plugin's context hook (sessions keyed sa-thread-*); the bracketed line
@@ -707,8 +717,11 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             path = path[4:]
         if path in ("/health", "/healthz"):
+            from . import agh
             return self._json(200, {"ok": True, "backends": list(BACKENDS), "designs": list(DESIGNS),
-                                    "queued": _queue.qsize(), "jobs": len(_jobs), "runtime": "agh" if os.environ.get("SA_AGH") == "1" else "builtin"})
+                                    "queued": _queue.qsize(), "jobs": len(_jobs), "runtime": "agh" if agh.enabled() else "builtin",
+                                    **({"modes": {k: v["model"] + (f" · thinking {v['thinking']}" if v["thinking"] != "off" else "") for k, v in agh.MODES.items()},
+                                        "default_mode": agh.DEFAULT_MODE} if agh.enabled() else {})})
         # static UI (public: sluice gates it before it reaches us)
         if path == "/" or path == "/index.html":
             return self._file(STATIC / "index.html")
@@ -937,6 +950,22 @@ class Handler(BaseHTTPRequestHandler):
                         j["stop_requested"] = True
                         stopped["jobs"].append(jid)
             return self._json(200, stopped)
+        if len(parts) == 3 and parts[0] == "threads" and parts[2] == "mode":
+            # the agent mode of a conversation (fast / deep); takes effect from the next turn
+            from . import agh
+            th = _threads.get(parts[1])
+            if not th or not _visible(th, sub):
+                return self._json(404, {"error": "no such thread"})
+            try:
+                mode = str(json.loads(self.rfile.read(n) or b"{}").get("mode", ""))
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            if mode not in agh.MODES:
+                return self._json(400, {"error": f"mode must be one of {list(agh.MODES)}"})
+            with _lock:
+                th["mode"] = mode
+                _save_thread(parts[1])
+            return self._json(200, {"ok": True, "mode": mode})
         if len(parts) == 3 and parts[0] == "threads" and parts[2] == "title":
             th = _threads.get(parts[1])
             if not th or not _visible(th, sub):

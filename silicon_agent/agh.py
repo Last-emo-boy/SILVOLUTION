@@ -378,9 +378,7 @@ class AghClient:
         self.notify("session/cancel", {"sessionId": session_id})
 
     def set_model(self, session_id: str, route: str, model: str, thinking: str | None = None) -> dict:
-        p: dict = {"sessionId": session_id, "route": route, "model": model}
-        if thinking:
-            p["thinking"] = thinking
+        p: dict = {"sessionId": session_id, "slot": "primary", "route": route, "model": model, "thinking": thinking or "off"}
         return self.call("_agnes/v1/session.setModel", p)
 
     def config(self) -> dict:
@@ -460,6 +458,15 @@ def workspace() -> str:
     root = Path(os.environ.get("SA_AGH_WORKSPACE", Path(os.environ.get("SA_ROOT", Path(__file__).resolve().parent.parent)) / "agh-workspace"))
     root.mkdir(parents=True, exist_ok=True)
     return str(root)
+
+
+# The agent modes a conversation can run in: the harness model slot behind the chat. Keys are what the UI and the
+# thread record use; route/model/thinking are AGH's (DeepSeek through its provider layer).
+MODES = {
+    "fast": {"route": "deepseek", "model": "deepseek-flash", "thinking": "off"},
+    "deep": {"route": "deepseek", "model": "deepseek-v4-pro", "thinking": "high"},
+}
+DEFAULT_MODE = os.environ.get("SA_AGH_MODE", "fast")
 
 
 def configure_provider(api_key: str, model: str = "deepseek-flash", provider: str = "deepseek", base_url: str | None = None) -> dict:
