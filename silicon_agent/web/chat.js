@@ -21,7 +21,7 @@ L.zh = {
   placeholder: "描述你要的硬件，或者对当前结果提要求…", hint: "⏎ 发送 · ⇧⏎ 换行", stop: "■ 停止", thinking: "思考中", newChat: "新对话",
   spec: "理解的规格", progress: "运行中", traj: "轨迹", result: "结果", noResult: "未找到可行设计", iter: "第 {n} 轮", iters: "{n} 轮", feasible: "{n} 轮可行",
   planning: "规划下一轮", sim: "行为级仿真", synth: "综合", pnr: "布局布线", queued: "排队中", stopped: "已停止", error: "出错",
-  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续",
+  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", covTitle: "行为级仿真覆盖的场景（次数）", formal: "形式验证", formalTitle: "SymbiYosys：实测 RTL 与当前生成器输出的有界等价 + 流协议属性", formalRunning: "验证中…", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续",
   stages: ["行为级仿真", "综合后功能", "综合后时序", "实现后功能", "实现后时序"], signoff: "实现后时序仿真通过",
   design: "设计", backend: "器件", constraints: "约束", objective: "目标", locked: "固定参数", start: "起点", closest: "最接近",
   secs: "秒", critical: "关键路径", startFrom: "从起点设计开始。", fork: "基于上一次的最佳设计继续。",
@@ -33,7 +33,7 @@ L.en = {
   placeholder: "Describe the hardware you want, or ask for changes to the current result…", hint: "⏎ send · ⇧⏎ newline", stop: "■ Stop", thinking: "Thinking", newChat: "New chat",
   spec: "Understood spec", progress: "Running", traj: "Trajectory", result: "Result", noResult: "No feasible design", iter: "iteration {n}", iters: "{n} iterations", feasible: "{n} feasible",
   planning: "planning", sim: "behavioral sim", synth: "synthesis", pnr: "place & route", queued: "queued", stopped: "stopped", error: "error",
-  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here",
+  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", covTitle: "scenarios the behavioral testbench exercised (hit counts)", formal: "Formal check", formalTitle: "SymbiYosys: bounded equivalence of the measured RTL vs the current generator + stream properties", formalRunning: "checking…", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here",
   stages: ["behavioral", "post-synth func", "post-synth timing", "post-impl func", "post-impl timing"], signoff: "post-implementation timing sim passed",
   design: "design", backend: "device", constraints: "constraints", objective: "objective", locked: "locked", start: "start", closest: "closest",
   secs: "s", critical: "critical path", startFrom: "Start from the initial design.", fork: "Continue from the previous best design.",
@@ -44,7 +44,7 @@ let T = zh ? L.zh : L.en;
 const t = (k, v) => T[k].replace("{n}", v).replace("{f}", v);
 function setLang(isZh) { zh = isZh; T = zh ? L.zh : L.en; $("#input").placeholder = T.placeholder; $("#chint").textContent = T.hint; $("#stop").textContent = T.stop; }
 const STAGE_KEYS = ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"];
-const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top", fir_chain: "fir_chain_top", cordic: "cordic_top", fft: "fft_top" };
+const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top", fir_chain: "fir_chain_top", cordic: "cordic_top", fft: "fft_top", graph: "graph_top" };
 let DEV = { ecp5: "ECP5 LFE5U-45F", xc7s50: "Spartan-7 XC7S50", ice40: "iCE40 UP5K", gowin: "Gowin GW1NR-9" };
 let BSTAGES = { ecp5: ["behavioral", "post_synth_func"], xc7s50: STAGE_KEYS_ALL(), ice40: ["behavioral", "post_synth_func"], gowin: ["behavioral", "post_synth_func"] };
 function STAGE_KEYS_ALL() { return ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"]; }
@@ -209,6 +209,13 @@ function card(key, label, sub, cls = "") {
 }
 const chips = (ir, prev, locked) => {
   // composite designs: one row of chips per stage, prefixed s0./s1.
+  if (Array.isArray(ir.nodes)) {
+    const lockedN = Array.isArray(locked?.nodes) ? locked.nodes : [];
+    return ir.nodes.map((nd, i) => `<div class="chips"><span class="chip"><span class="k">n${i}</span> ${esc(nd.kind)}</span>` + Object.entries(nd.ir || {}).filter(([k]) => k !== "coefs").map(([k, v]) => {
+      const lock = lockedN[i]?.ir && k in lockedN[i].ir, changed = !lock && prev?.nodes?.[i] && JSON.stringify(prev.nodes[i].ir?.[k]) !== JSON.stringify(v);
+      return `<span class="chip ${lock ? "lock" : changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
+    }).join("") + `</div>`).join("") + `<div class="chips">${Object.entries(ir).filter(([k]) => k !== "nodes").map(([k, v]) => `<span class="chip ${prev && JSON.stringify(prev[k]) !== JSON.stringify(v) ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`).join("")}</div>`;
+  }
   if (Array.isArray(ir.stages)) {
     const lockedStages = Array.isArray(locked?.stages) ? locked.stages : [];
     const rows = ir.stages.map((st, i) => `<div class="chips"><span class="chip"><span class="k">s${i}</span></span>` + Object.entries(st).filter(([k]) => k !== "coefs").map(([k, v]) => {
@@ -356,6 +363,8 @@ function resultCard(jid, j, done, spec) {
       tbl.insertAdjacentHTML("beforeend", `<tr><td class="st ${st === "pass" ? "ok" : st === "fail" ? "bad" : "na"}">${st === "pass" ? T.pass : st === "fail" ? T.fail : st}</td><td>${i + 1} · ${T.stages[i]}<div class="p">${purposes[i]}</div>${log ? `<div class="log">${esc(log.slice(-600))}</div>` : ""}</td></tr>`);
     });
     inner.appendChild(tbl);
+    const covs = Object.values(m.sim_coverage || {})[0];
+    if (covs) inner.appendChild(el(`<div class="chips">${Object.entries(covs).map(([k, v]) => `<span class="chip ${v ? "" : "lock"}" title="${T.covTitle}"><span class="k">${esc(k)}</span> ${v}</span>`).join("")}</div>`));
   }
   const links = el(`<div class="links"></div>`);
   if (best) {
@@ -364,7 +373,9 @@ function resultCard(jid, j, done, spec) {
     view.onclick = async () => { if (rtlShown.has(jid)) rtlShown.delete(jid); else rtlShown.add(jid); render(); };
     dl.onclick = async () => { const txt = await api(`/jobs/${jid}/rtl`); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain" })); a.download = `${top}.sv`; a.click(); };
     const pkg = el(`<a href="/api/jobs/${esc(jid)}/package">${T.pkg}</a>`);
-    links.append(view, dl, pkg);
+    const fm = el(`<button title="${T.formalTitle}">${T.formal}</button>`);
+    fm.onclick = async () => { fm.disabled = true; fm.textContent = T.formalRunning; try { const r = await api(`/jobs/${jid}/formal?depth=20`); const eq = r.equivalence?.ok, pr = r.properties?.ok; fm.textContent = `${T.formal}: ${eq === true ? "≡ ✓" : eq === false ? "≡ ✗" : "≡ ?"} · ${pr ? "props ✓" : "props ✗"}`; fm.title = (r.equivalence?.log || "") + "\n" + (r.properties?.log || ""); } catch (e) { fm.textContent = e.message.slice(0, 60); } fm.disabled = false; };
+    links.append(view, dl, pkg, fm);
   }
   links.appendChild(el(`<a href="/work?thread=${encodeURIComponent(tid)}#${esc(jid)}" target="_blank">${T.worktable}</a>`));
   if (j.parent?.id) links.appendChild(el(`<a href="/work?thread=${encodeURIComponent(tid)}#compare/${esc(j.parent.id)}/${esc(jid)}" target="_blank">${T.compare}</a>`));

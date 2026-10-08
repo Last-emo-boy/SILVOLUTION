@@ -12,6 +12,7 @@ import random
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, ReadOnly, ClockCycles, Timer
+from coverage import Coverage
 
 
 def to_signed(v: int, w: int) -> int:
@@ -41,9 +42,25 @@ async def stream(dut):
     dut.rst.value = 1
     dut.in_valid.value = 0
     dut.in_data.value = 0
+    if arch.get("coef_port"):
+        dut.coef_we.value = 0; dut.coef_addr.value = 0; dut.coef_data.value = 0
     await ClockCycles(dut.clk, 3)
     dut.rst.value = 0
     await RisingEdge(dut.clk)
+    if arch.get("coef_port"):
+        # replace the generated coefficients with a reversed/perturbed set through the write port, then filter with it
+        U = (len(h) + 1) // 2 if arch.get("symmetric") else len(h)
+        new_u = [((c * 3) // 4 + (7 if i % 2 else -5)) for i, c in enumerate(h[:U])]
+        CW = arch["coef_width"]; lo_c, hi_c = -(1 << (CW - 1)), (1 << (CW - 1)) - 1
+        new_u = [max(lo_c, min(hi_c, c)) for c in new_u]
+        for i, c in enumerate(new_u):
+            dut.coef_we.value = 1; dut.coef_addr.value = i; dut.coef_data.value = c & ((1 << CW) - 1)
+            await RisingEdge(dut.clk)
+        dut.coef_we.value = 0
+        await RisingEdge(dut.clk)
+        h = new_u + (new_u[::-1][len(h) % 2:] if arch.get("symmetric") else [])
+        if arch.get("symmetric"):
+            h = [new_u[min(i, len(h) - 1 - i)] for i in range(len(h))]
 
     # extremes first (saturation / sign), then random with gaps, then a gapless burst
     xs = [hi] * len(h) + [lo] * len(h) + [rng.randint(lo, hi) for _ in range(n_samples)]
@@ -59,9 +76,16 @@ async def stream(dut):
 
     cocotb.start_soon(collector())
 
+    cov = Coverage("fir", ["sample:max", "sample:min", "sample:zero", "stim:gap", "stim:back-to-back", "stall:ready-low", "coef:runtime-write"])
+    if arch.get("coef_port"):
+        cov.hit("coef:runtime-write", U)
     burst_from = len(xs) - n_samples // 2
     for i, x in enumerate(xs):
         gap = 0 if i >= burst_from else rng.choice([0, 0, 1, 3])
+        cov.hit("stim:gap" if gap else "stim:back-to-back")
+        if x == hi: cov.hit("sample:max")
+        elif x == lo: cov.hit("sample:min")
+        elif x == 0: cov.hit("sample:zero")
         if gap:
             dut.in_valid.value = 0
             await ClockCycles(dut.clk, gap)
@@ -74,8 +98,10 @@ async def stream(dut):
             await RisingEdge(dut.clk)
             if ready:
                 break
+            cov.hit("stall:ready-low")
         await Timer(1, unit="ns")  # move off the edge before driving the next value
     dut.in_valid.value = 0
+    cov.report()
 
     await ClockCycles(dut.clk, 64 + 4 * arch["fold"])
 

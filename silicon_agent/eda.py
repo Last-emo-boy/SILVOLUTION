@@ -19,7 +19,7 @@ from .backends._common import CACHE, ROOT, TB_DIR, TOOLS, tool_env, run  # noqa:
 from .designs import DESIGNS, Design
 from .ir import Metrics
 
-CACHE_VERSION = "5"  # bump when report parsing changes; invalidates cached metrics (5: median-of-seeds Fmax)
+CACHE_VERSION = "6"  # bump when report parsing changes; invalidates cached metrics (6: coverage bins)
 
 
 class _BackendView(dict):
@@ -45,7 +45,7 @@ def backend(key: str) -> Backend:
 
 
 # ---------------------------------------------------------------- behavioral simulation
-def simulate(d: Design, arch, work: Path, seed: int = 1) -> tuple[bool, str]:
+def simulate(d: Design, arch, work: Path, seed: int = 1) -> tuple[bool, str, dict]:
     rtl = work / "rtl" / f"{d.top}.sv"
     sim_dir = work / "sim"
     sim_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +72,14 @@ raise SystemExit(1 if failed else 0)
     text = log.read_text()
     passed = p.returncode == 0 and "failed=0" in text
     tail = "\n".join(line for line in text.splitlines() if re.search(r"(FAIL|ERROR|Error|error:|assert|COCOTB_RESULT|PASS)", line))[-4000:]
-    return passed, tail
+    cov = {}
+    for line in text.splitlines():
+        if "COVERAGE " in line:
+            try:
+                cov.update(json.loads(line.split("COVERAGE ", 1)[1]))
+            except json.JSONDecodeError:
+                pass
+    return passed, tail, cov
 
 
 # ---------------------------------------------------------------- top-level evaluate
@@ -91,15 +98,15 @@ def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str =
     (work / "rtl" / f"{d.top}.sv").write_text(rtl_text)
     (work / "arch.json").write_text(json.dumps({"design": d.kind, "backend": backend, **arch.to_dict()}, indent=2))
 
-    sim_ok, sim_log = simulate(d, arch, work)
+    sim_ok, sim_log, cov = simulate(d, arch, work)
     if not sim_ok:
-        m = Metrics(fmax_mhz=0, lut=0, ff=0, dsp=0, bram=0, critical_path=[], sim_passed=False, sim_log=sim_log)
+        m = Metrics(fmax_mhz=0, lut=0, ff=0, dsp=0, bram=0, critical_path=[], sim_passed=False, sim_log=sim_log, sim_coverage=cov)
     else:
         r = b.synth_pnr(work, fmax_target, d.top)
         stages = {}
         if r.get("fits") and d.vectors is not None and b.netlist_sims is not None:
             stages = b.netlist_sims(d, arch, work, fmax_target, on_stage=on_stage)
-        m = Metrics(**r, sim_passed=True, sim_log=sim_log, sim_stages=stages)
+        m = Metrics(**r, sim_passed=True, sim_log=sim_log, sim_stages=stages, sim_coverage=cov)
     cached.write_text(json.dumps(asdict(m)))
     (work / "metrics.json").write_text(json.dumps(asdict(m), indent=2))
     return m

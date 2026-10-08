@@ -1,0 +1,85 @@
+{
+ "tag": "nightly-vivado",
+ "t": 1791463639.5122821,
+ "max_iter": 6,
+ "no_memory": false,
+ "cases": [
+  {
+   "name": "matmul-xc7s50-300-32dsp",
+   "job": "20261008-104804-aa3c",
+   "design": "matmul",
+   "backend": "xc7s50",
+   "status": "done",
+   "feasible": true,
+   "first_feasible": 3,
+   "rounds": 3,
+   "planner_calls": 3,
+   "eda_seconds": 417.5,
+   "wall_seconds": 1601.5,
+   "best": {
+    "fmax_mhz": 314.96,
+    "lut": 1994,
+    "dsp": 32,
+    "throughput": 32
+   },
+   "ok": true,
+   "expect": {
+    "feasible": true,
+    "max_rounds": 4
+   },
+   "error": null
+  },
+  {
+   "name": "fir-xc7s50-250-8dsp",
+   "job": "20261008-111445-e6f4",
+   "design": "fir",
+   "backend": "xc7s50",
+   "status": "done",
+   "feasible": true,
+   "first_feasible": 3,
+   "rounds": 6,
+   "planner_calls": 5,
+   "eda_seconds": 316.1,
+   "wall_seconds": 2117.8,
+   "best": {
+    "fmax_mhz": 259.07,
+    "lut": 324,
+    "dsp": 8,
+    "throughput": 0.125
+   },
+   "ok": true,
+   "expect": {
+    "feasible": true,
+    "max_rounds": 8
+   },
+   "error": null
+  },
+  {
+   "name": "conv5-xc7s50-200",
+   "job": "20261008-115003-f5ee",
+   "design": "conv2d",
+   "backend": "xc7s50",
+   "status": "failed",
+   "feasible": false,
+   "first_feasible": null,
+   "rounds": 2,
+   "planner_calls": 2,
+   "eda_seconds": 862.0,
+   "wall_seconds": 3436.4,
+   "best": null,
+   "ok": false,
+   "expect": {
+    "feasible": true,
+    "max_rounds": 4
+   },
+   "error": null
+  }
+ ],
+ "summary": {
+  "n": 3,
+  "ok": 2,
+  "feasible": 2,
+  "mean_first_feasible": 4.33,
+  "eda_seconds": 1595.6
+ }
+}

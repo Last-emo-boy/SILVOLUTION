@@ -64,6 +64,9 @@ def merge_locked(ir: dict, locked: dict) -> dict:
     for k, v in locked.items():
         if k == "stages" and isinstance(v, list) and isinstance(out.get("stages"), list):
             out["stages"] = [{**st, **(v[i] if i < len(v) else {})} for i, st in enumerate(out["stages"])]
+        elif k == "nodes" and isinstance(v, list) and isinstance(out.get("nodes"), list):
+            out["nodes"] = [{"kind": (v[i].get("kind") if i < len(v) else None) or nd.get("kind"), "ir": {**nd.get("ir", {}), **((v[i].get("ir") or {}) if i < len(v) else {})}}
+                            for i, nd in enumerate(out["nodes"])]
         else:
             out[k] = v
     return out
@@ -73,9 +76,11 @@ def ir_view(ir, locked: dict) -> dict:
     """IR as shown to the planner: locked fields and bulky task data (coefficients) omitted.
     Composite designs keep their "stages" list (the planner edits per-stage knobs) minus coefficients."""
     d = ir.to_dict()
-    out = {k: v for k, v in d.items() if (k not in locked or k == "stages") and k != "coefs"}
+    out = {k: v for k, v in d.items() if (k not in locked or k in ("stages", "nodes")) and k != "coefs"}
     if isinstance(out.get("stages"), list):
         out["stages"] = [{k: v for k, v in st.items() if k != "coefs"} for st in out["stages"]]
+    if isinstance(out.get("nodes"), list):
+        out["nodes"] = [{"kind": nd["kind"], "ir": {k: v for k, v in nd["ir"].items() if k != "coefs"}} for nd in out["nodes"]]
     return out
 
 
@@ -85,9 +90,11 @@ def fmt_history(history: list[dict], c: Constraints, unit: str, locked: dict) ->
         m = Metrics(**h["metrics"])
         v = m.violations(c)
         status = "FEASIBLE" if not v else "INFEASIBLE: " + "; ".join(v)
-        shown = {k: val for k, val in h["ir"].items() if (k not in locked or k == "stages") and k != "coefs"}
+        shown = {k: val for k, val in h["ir"].items() if (k not in locked or k in ("stages", "nodes")) and k != "coefs"}
         if isinstance(shown.get("stages"), list):
             shown["stages"] = [{k: v for k, v in st.items() if k != "coefs"} for st in shown["stages"]]
+        if isinstance(shown.get("nodes"), list):
+            shown["nodes"] = [{"kind": nd["kind"], "ir": {k: v for k, v in nd["ir"].items() if k != "coefs"}} for nd in shown["nodes"]]
         lines.append(f"### iteration {h['iteration']}  ir={json.dumps(shown)}")
         seeds = f" (median of {len(m.fmax_seeds)} P&R seeds: {min(m.fmax_seeds):.1f}-{max(m.fmax_seeds):.1f})" if len(m.fmax_seeds) > 1 else ""
         pw = f" power={m.power_mw}mW" if m.power_mw is not None else ""

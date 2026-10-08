@@ -69,6 +69,22 @@ CASES: list[tuple[str, dict, dict]] = [
         "constraints": {"fmax_mhz": 40, "max_dsp": 8, "objective": ["maximize_throughput", "minimize_lut"]},
         "initial_ir": {"pe_rows": 2, "pe_cols": 2, "acc_width": 24, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"}},
      {"feasible": True, "max_rounds": 5}),
+    ("cordic-ecp5-200", {
+        "task": "16-bit sin/cos CORDIC, ECP5, 200 MHz", "design": "cordic", "backend": "ecp5", "locked": {"mode": "rotate", "width": 16},
+        "constraints": {"fmax_mhz": 200, "max_lut": 3500, "objective": ["maximize_throughput", "minimize_lut"]},
+        "initial_ir": {"iterations": 16, "unroll": 4, "fold": 1, "guard_bits": 2, "scale_comp": False}},
+     {"feasible": True, "max_rounds": 4}),
+    ("fft64-gowin-100", {
+        "task": "64-point 12-bit FFT, Gowin, 100 MHz", "design": "fft", "backend": "gowin", "locked": {"n": 64, "data_width": 12},
+        "constraints": {"fmax_mhz": 100, "max_dsp": 20, "objective": ["maximize_throughput", "minimize_lut"]},
+        "initial_ir": {"tw_width": 12, "growth": "scale", "tw_mem": "lut", "delay_mem": "auto", "bram_min": 16, "mul_regs": 0, "bf_regs": 1, "dsp_regs": "none"}},
+     {"feasible": True, "max_rounds": 4}),
+    ("chain-ecp5-120", {
+        "task": "8->32 tap FIR chain, ECP5, 120 MHz, 12 DSP", "design": "fir_chain", "backend": "ecp5",
+        "locked": {"stages": [{"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.4}, {"taps": 32, "data_width": 12, "coef_width": 12, "cutoff": 0.2}]},
+        "constraints": {"fmax_mhz": 120, "max_dsp": 12, "objective": ["maximize_throughput", "minimize_dsp"]},
+        "initial_ir": {"stages": [{"acc_width": 32, "symmetric": False, "fold": 1, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"}, {"acc_width": 32, "symmetric": False, "fold": 1, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"}], "fifo_depth": 16, "round_mode": "truncate"}},
+     {"feasible": True, "max_rounds": 5}),
     # Vivado cases: slow (minutes each); included when --only xc7s50 or no filter
     ("matmul-xc7s50-300-32dsp", {
         "task": "INT8 matmul, Spartan-7, 300 MHz, 32 DSP", "design": "matmul", "backend": "xc7s50", "locked": {"data_width": 8},
@@ -156,7 +172,48 @@ def cmd_run(a) -> int:
     f.write_text(json.dumps(rep, indent=1))
     s = rep["summary"]
     print(f"\n{s['ok']}/{s['n']} within expectation, {s['feasible']} feasible, mean first-feasible round {s['mean_first_feasible']}, EDA {s['eda_seconds']}s -> {f}")
-    return 0 if s["ok"] == s["n"] else 1
+    prev = [r for r in sorted(out.glob(f"{a.tag}-*.json")) if r != f]
+    if prev:
+        alerts = compare(json.loads(prev[-1].read_text()), rep)
+        rep["alerts"] = alerts
+        f.write_text(json.dumps(rep, indent=1))
+        if alerts:
+            print("\nREGRESSION ALERTS vs " + prev[-1].name)
+            for al in alerts:
+                print("  ! " + al)
+        else:
+            print("no regressions vs " + prev[-1].name)
+    return 0 if s["ok"] == s["n"] and not rep.get("alerts") else 1
+
+
+def compare(old: dict, new: dict, fmax_tol: float = 0.06) -> list[str]:
+    """Regressions between two reports: lost feasibility, more rounds to first feasible, Fmax down by more than
+    the P&R seed noise (6%), LUT/DSP up by more than 15% with the same throughput."""
+    alerts = []
+    by = {c["name"]: c for c in old["cases"]}
+    for c in new["cases"]:
+        o = by.get(c["name"])
+        if not o:
+            continue
+        if o["feasible"] and not c["feasible"]:
+            alerts.append(f"{c['name']}: was feasible, now not")
+            continue
+        if not c["feasible"]:
+            continue
+        if o["first_feasible"] and c["first_feasible"] and c["first_feasible"] > o["first_feasible"] + 1:
+            alerts.append(f"{c['name']}: first feasible at round {c['first_feasible']} (was {o['first_feasible']})")
+        ob, nb = o["best"], c["best"]
+        if ob and nb:
+            if nb["throughput"] == ob["throughput"]:
+                if nb["fmax_mhz"] < ob["fmax_mhz"] * (1 - fmax_tol):
+                    alerts.append(f"{c['name']}: best Fmax {nb['fmax_mhz']:.1f} < {ob['fmax_mhz']:.1f} MHz (beyond seed noise)")
+                if nb["lut"] > ob["lut"] * 1.15:
+                    alerts.append(f"{c['name']}: best LUT {nb['lut']} > {ob['lut']} (+15%)")
+                if nb["dsp"] > ob["dsp"]:
+                    alerts.append(f"{c['name']}: best DSP {nb['dsp']} > {ob['dsp']}")
+            elif nb["throughput"] < ob["throughput"]:
+                alerts.append(f"{c['name']}: best throughput {nb['throughput']} < {ob['throughput']}")
+    return alerts
 
 
 def cmd_show(a) -> int:

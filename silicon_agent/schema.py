@@ -35,7 +35,7 @@ SCHEMAS = {
     },
     "fir": {
         "title": "fixed-coefficient FIR filter",
-        "locked_candidates": ["taps", "data_width", "coef_width", "cutoff"],
+        "locked_candidates": ["taps", "data_width", "coef_width", "cutoff", "coef_port"],
         "fields": [
             {"name": "taps", "type": "int", "min": 2, "max": 256, "hint": "filter length (task parameter)"},
             {"name": "data_width", "type": "choice", "choices": [8, 12, 16, 18], "hint": "sample bits"},
@@ -44,6 +44,7 @@ SCHEMAS = {
             {"name": "acc_width", "type": "int", "min": 16, "max": 64, "hint": "accumulator bits; min = dw+cw+log2(taps)(+1 if symmetric)"},
             {"name": "symmetric", "type": "bool", "hint": "share one multiplier per h[k]==h[N-1-k] pair"},
             {"name": "fold", "type": "int", "min": 1, "max": 32, "hint": "taps per multiplier; 1 = transposed, >1 = time-multiplexed (must divide unique taps)"},
+            {"name": "coef_port", "type": "bool", "hint": "coefficients writable at runtime (coef_we/addr/data port; AXI-Lite in the wrapper)"},
             *SHARED,
         ],
         "presets": {
@@ -111,6 +112,21 @@ SCHEMAS = {
         "presets": {"naive": {"n": 256, "data_width": 16, "tw_width": 16, "growth": "scale", "tw_mem": "lut", "delay_mem": "auto", "bram_min": 64, "mul_regs": 0, "bf_regs": 1, "dsp_regs": "none", "bit_reverse": False}},
         "constraints_default": {"fmax_mhz": 100, "max_dsp": 40, "max_lut": 6000},
         "locked_default": {"n": 256, "data_width": 16},
+    },
+    "graph": {
+        "title": "datapath graph: chain of fir / conv2d / cordic / fft nodes with FIFOs",
+        "locked_candidates": ["nodes"],
+        "nested": "nodes",
+        "fields": [
+            {"name": "fifo_depth", "type": "choice", "choices": [4, 8, 16, 32, 64], "hint": "inter-node FIFO depth (must exceed upstream latency + 2)"},
+            {"name": "adapt", "type": "choice", "choices": ["truncate", "round", "saturate"], "hint": "how a node's output word is fitted into the next node's input width"},
+        ],
+        "presets": {"fir -> cordic": {"nodes": [
+            {"kind": "fir", "ir": {"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.4, "acc_width": 28, "symmetric": False, "fold": 1, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"}},
+            {"kind": "cordic", "ir": {"mode": "rotate", "width": 12, "iterations": 12, "unroll": 1, "fold": 1, "guard_bits": 2, "scale_comp": False}}],
+            "fifo_depth": 32, "adapt": "truncate"}},
+        "constraints_default": {"fmax_mhz": 100, "max_dsp": 16, "max_lut": 4000},
+        "locked_default": {},
     },
     "fir_chain": {
         "title": "cascade of FIR stages with FIFOs between them (composite datapath)",

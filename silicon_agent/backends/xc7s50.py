@@ -244,5 +244,5 @@ DEV = register(Backend(
     synth_pnr=synth_pnr, netlist_sims=netlist_sims,
     sim_stages=("behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"),
     seconds_per_iter="1.5-4 min", fmax_range="100-500 MHz", toolchain="AMD Vivado 2025.2",
-    parallel=1, emit_style="vivado", aliases=("xc7s50", "spartan", "spartan-7", "xilinx", "amd", "vivado", "7 series", "artix", "zynq"),
+    parallel=1, emit_style="vivado", aliases=("xc7s50", "spartan", "spartan-7", "xilinx", "amd", "vivado", "7 series", "zynq"),
 ))

@@ -11,6 +11,7 @@ import random
 
 import cocotb
 from cocotb.clock import Clock
+from coverage import Coverage
 from cocotb.triggers import RisingEdge, ClockCycles
 
 
@@ -65,6 +66,8 @@ async def random_tiles(dut):
 
     cocotb.start_soon(collector())
 
+    cov = Coverage("matmul", ["tile:extremes", "tile:random", "tile:first", "tile:back-to-back", "tile:after-gap"])
+
     for t in range(n_tiles):
         K = rng.choice([min_k, min_k + 3, 2 * min_k])
         A = [[rng.randint(lo, hi) for _ in range(K)] for _ in range(R)]
@@ -73,6 +76,8 @@ async def random_tiles(dut):
             A = [[lo] * K for _ in range(R)]
             B = [[lo] * C for _ in range(K)]
         expected.append(golden(A, B))
+        cov.hit("tile:extremes" if t == 0 else "tile:random")
+        cov.hit("tile:back-to-back" if t % 2 == 0 and t > 0 else "tile:after-gap" if t % 2 == 1 else "tile:first")
         for k in range(K):
             dut.in_valid.value = 1
             dut.in_last.value = 1 if k == K - 1 else 0
@@ -86,6 +91,7 @@ async def random_tiles(dut):
             await ClockCycles(dut.clk, rng.randint(1, 5))
 
     await ClockCycles(dut.clk, 4 * (R + C) + 40)
+    cov.report()
 
     assert len(got) == n_tiles * R, f"expected {n_tiles * R} output rows, got {len(got)}"
     for t in range(n_tiles):

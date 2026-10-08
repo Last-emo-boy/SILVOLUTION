@@ -65,6 +65,7 @@ class FirArch:
     reg_in: bool = True
     dsp_regs: str = "none"
     acc_in_dsp: bool = True
+    coef_port: bool = False  # true: coefficients live in a register file with a write port (coef_we/coef_addr/coef_data); false: constants
     coefs: tuple[int, ...] = field(default_factory=lambda: tuple(lowpass_taps(32)))
 
     @property
@@ -91,6 +92,8 @@ class FirArch:
             errs.append("data_width must be one of 8, 12, 16, 18")
         if self.coef_width not in (8, 12, 16, 18):
             errs.append("coef_width must be one of 8, 12, 16, 18")
+        if self.coef_port and self.unique_taps < 2:
+            errs.append("coef_port needs at least 2 unique taps")
         if not 0.01 <= self.cutoff <= 0.49:
             errs.append("cutoff must be in 0.01..0.49 (fraction of the sample rate)")
         if not self.min_acc_width <= self.acc_width <= 64:
@@ -183,6 +186,24 @@ def _ecp5_dsp_body(mode: str) -> str:
 """
 
 
+def _coef_snippets(a: FirArch, U: int, coef_lit: str) -> tuple[str, str]:
+    """(extra ports, storage declaration) for the coefficient set: constants, or a write-port register file."""
+    if not a.coef_port:
+        return "", f"    localparam logic signed [CW-1:0] COEFS [U] = '{{{coef_lit}}};"
+    ports = """,
+    input  wire                   coef_we,      // write one coefficient: COEFS[coef_addr] <= coef_data
+    input  wire [$clog2(U)-1:0]   coef_addr,
+    input  wire signed [CW-1:0]   coef_data"""
+    store = f"""    // runtime-writable coefficients (reset to the generated lowpass); U = {U} unique taps
+    logic signed [CW-1:0] COEFS [U];
+    localparam logic signed [CW-1:0] COEFS_INIT [U] = '{{{coef_lit}}};
+    always_ff @(posedge clk) begin
+        if (rst) for (int i = 0; i < U; i++) COEFS[i] <= COEFS_INIT[i];
+        else if (coef_we) COEFS[coef_addr] <= coef_data;
+    end"""
+    return ports, store
+
+
 def _mult_module(a: FirArch, backend: str) -> str:
     """`fir_mult`: prod = x * h with the configured DSP/fabric register stages.
     h may be a constant parameter (parallel forms) or a runtime input (folded ROM)."""
@@ -268,6 +289,7 @@ def _emit_transposed(a: FirArch, backend: str) -> str:
         inject = "assign pr[st] = prod[(N-1-st) < st ? (N-1-st) : st];"
     else:
         inject = "assign pr[st] = prod[N-1-st];"
+    coef_ports, coef_store = _coef_snippets(a, U, coef_lit)
     return f"""module fir_top #(
     parameter int N  = {N},
     parameter int U  = {U},
@@ -281,11 +303,10 @@ def _emit_transposed(a: FirArch, backend: str) -> str:
     input  wire signed [DW-1:0]   in_data,
     output logic                  in_ready,
     output logic                  out_valid,
-    output logic signed [AW-1:0]  out_data
+    output logic signed [AW-1:0]  out_data{coef_ports}
 );
     localparam int ML = {ML};
-    localparam logic signed [CW-1:0] COEFS [U] = '{{{coef_lit}}};
-
+{coef_store}
     assign in_ready = 1'b1;
 
     // ---- input register (optional) ----
@@ -356,6 +377,7 @@ def _emit_folded(a: FirArch, backend: str) -> str:
     coef_lit = _coef_literal(list(a.coefs[:U]))
     jw = max(1, math.ceil(math.log2(F)))
     svpipe = _delay_chain(ML, [("sv_m", "step_v"), ("sl_m", "step_last")])
+    coef_ports, coef_store = _coef_snippets(a, U, coef_lit)
     return f"""module fir_top #(
     parameter int N  = {N},
     parameter int U  = {U},
@@ -371,12 +393,12 @@ def _emit_folded(a: FirArch, backend: str) -> str:
     input  wire signed [DW-1:0]   in_data,
     output logic                  in_ready,
     output logic                  out_valid,
-    output logic signed [AW-1:0]  out_data
+    output logic signed [AW-1:0]  out_data{coef_ports}
 );
     localparam int ML = {ML};
     localparam int XW = {XW};
     localparam int JW = {jw};
-    localparam logic signed [CW-1:0] COEFS [U] = '{{{coef_lit}}};
+{coef_store}
 
     // ---- handshake: in_ready is a pure function of state (no path from in_valid),
     //      so reg_in=0 has no combinational loop. accept -> (optional input reg) ->

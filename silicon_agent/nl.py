@@ -30,7 +30,9 @@ return your best-guess spec).
 Available designs:
   matmul  output-stationary systolic INT matrix multiply. locked: data_width (4/8/12/16).
   fir     fixed-coefficient FIR filter; a windowed-sinc lowpass is generated from taps + cutoff (fraction of fs, 0.01-0.49).
-          locked: taps, data_width, coef_width, cutoff. Throughput is 1/fold samples per cycle.
+          locked: taps, data_width, coef_width, cutoff, coef_port (true when the user wants to change/load/program the
+          coefficients at runtime, e.g. "configurable", "programmable taps", "load coefficients over AXI").
+          Throughput is 1/fold samples per cycle.
   conv2d  streaming single-channel K x K 2-D convolution (image filter / blur / edge kernel) with line buffers.
           locked: k (3/5/7), width (image width in pixels), data_width (8/12/16), coef_width (8/12/16).
           Throughput is par_rows/k pixels per cycle. A pixel rate R MHz means fmax >= R*k/par_rows.
@@ -38,6 +40,9 @@ Available designs:
           Pipelined 1 sample/cycle or iterative (fold = iterations) for tiny area. Precision ~ iterations bits.
   fft     streaming N-point complex FFT, radix-2 SDF pipeline, 1 sample/cycle. locked: n (power of 2), data_width.
           4 DSPs per stage; natural-order output needs bit_reverse=true (+N latency).
+  graph   a datapath of 2-6 heterogeneous stream nodes in series (any of fir / conv2d / cordic / fft) with FIFOs.
+          locked: {"nodes": [{"kind": ..., "ir": {<that node's task fields>}}, ...]}; initial_ir: {"nodes": [{"kind", "ir": <full IR>}], "fifo_depth": 32, "adapt": "truncate"}.
+          Use it when the user describes a pipeline of different blocks ("filter then FFT", "CORDIC then low-pass").
   fir_chain  a cascade of 2-4 FIR stages with FIFOs between them (e.g. anti-alias then shaping, or decimation
           chains). locked: {"stages": [{"taps","data_width","coef_width","cutoff"}, ...]} -- one entry per stage.
           initial_ir: {"stages": [<full FIR IR per stage>], "fifo_depth": 16, "round_mode": "truncate"}.

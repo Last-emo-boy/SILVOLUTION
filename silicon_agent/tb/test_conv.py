@@ -11,6 +11,7 @@ import random
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, ReadOnly, ClockCycles, Timer
+from coverage import Coverage
 
 
 def to_signed(v: int, w: int) -> int:
@@ -76,9 +77,15 @@ async def stream(dut):
 
     cocotb.start_soon(collector())
 
-    for px in frames:
+    cov = Coverage("conv2d", ["frame:checkerboard", "frame:random", "frame:restart", "stim:gap", "stim:back-to-back", "stall:ready-low", "pixel:max", "pixel:min"])
+    for f, px in enumerate(frames):
+        cov.hit("frame:checkerboard" if f == 0 else "frame:random")
+        if f > 0: cov.hit("frame:restart")
         for i, x in enumerate(px):
             gap = rng.choice([0, 0, 0, 1, 2]) if i % 7 == 0 else 0
+            cov.hit("stim:gap" if gap else "stim:back-to-back")
+            if x == (1 << (DW - 1)) - 1: cov.hit("pixel:max")
+            elif x == -(1 << (DW - 1)): cov.hit("pixel:min")
             if gap:
                 dut.in_valid.value = 0
                 await ClockCycles(dut.clk, gap)
@@ -91,9 +98,11 @@ async def stream(dut):
                 await RisingEdge(dut.clk)
                 if ready:
                     break
+                cov.hit("stall:ready-low")
             await Timer(1, unit="ns")
     dut.in_valid.value = 0
     dut.frame_start.value = 0
+    cov.report()
     await ClockCycles(dut.clk, 64 + 4 * K)
 
     assert len(got) == len(expected), f"expected {len(expected)} outputs, got {len(got)}"

@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from . import chain, conv, cordic, fft, fir, vectors
+from . import chain, conv, cordic, fft, fir, graph, vectors
 from .emit import drain_latency, emit_matmul, min_k_full_rate
 from .ir import MatmulArch, throughput_macs_per_cycle
 
@@ -56,7 +56,7 @@ DESIGNS: dict[str, Design] = {
         latency=fir.latency_cycles,
         extra_sim_sources=("mult18x18d_sim.v",),
         vectors=vectors.fir_vectors,
-        tb=lambda a, period: vectors.TB_FIR.format(DW=a.data_width, AW=a.acc_width, period=period),
+        tb=lambda a, period: vectors.TB_FIR.format(DW=a.data_width, AW=a.acc_width, period=period, COEF_TIE=", .coef_we(1'b0), .coef_addr('0), .coef_data('0)" if a.coef_port else ""),
     ),
     "conv2d": Design(
         kind="conv2d",
@@ -84,7 +84,7 @@ DESIGNS: dict[str, Design] = {
         latency=chain.latency_cycles,
         extra_sim_sources=("mult18x18d_sim.v",),
         vectors=vectors.chain_vectors,
-        tb=lambda a, period: vectors.TB_CHAIN.format(DW=a.data_width, AW=a.acc_width, period=period),
+        tb=lambda a, period: vectors.TB_CHAIN.format(DW=a.data_width, AW=a.acc_width, period=period, COEF_TIE=""),
     ),
     "cordic": Design(
         kind="cordic",
@@ -113,6 +113,20 @@ DESIGNS: dict[str, Design] = {
         extra_sim_sources=("mult18x18d_sim.v",),
         vectors=vectors.fft_vectors,
         tb=lambda a, period: vectors.TB_FFT.format(DW=a.data_width, OW=a.out_width, N=a.n, period=period),
+    ),
+    "graph": Design(
+        kind="graph",
+        ir_cls=graph.GraphArch,
+        top="graph_top",
+        emit=graph.emit_graph,
+        test_module="test_graph",
+        sim_env=lambda a: {"SA_SAMPLES": "160"},
+        throughput=graph.throughput,
+        throughput_unit="samples/cycle",
+        latency=graph.latency_cycles,
+        extra_sim_sources=("mult18x18d_sim.v",),
+        vectors=vectors.graph_vectors,
+        tb=lambda a, period: vectors.TB_GRAPH.format(DW=graph.data_width(a), OW=graph.out_width(a), N=64, period=period),
     ),
 }
 

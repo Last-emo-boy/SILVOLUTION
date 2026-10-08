@@ -179,6 +179,13 @@ function render() {
 
 // ---------------------------------------------------------------- transcript
 function irChips(ir, prevIr, locked) {
+  if (Array.isArray(ir.nodes)) {
+    const ln = Array.isArray(locked?.nodes) ? locked.nodes : [];
+    return ir.nodes.map((nd, i) => `<div class="chips"><span class="chip"><span class="k">n${i}</span> ${esc(nd.kind)}</span>` + Object.entries(nd.ir || {}).filter(([k]) => k !== "coefs" && !(ln[i]?.ir && k in ln[i].ir)).map(([k, v]) => {
+      const changed = prevIr?.nodes?.[i] && JSON.stringify(prevIr.nodes[i].ir?.[k]) !== JSON.stringify(v);
+      return `<span class="chip ${changed ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`;
+    }).join("") + `</div>`).join("") + `<div class="chips">` + Object.entries(ir).filter(([k]) => k !== "nodes").map(([k, v]) => `<span class="chip ${prevIr && JSON.stringify(prevIr[k]) !== JSON.stringify(v) ? "changed" : ""}"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(v))}</span>`).join("") + `</div>`;
+  }
   if (Array.isArray(ir.stages)) {
     const ls = Array.isArray(locked?.stages) ? locked.stages : [];
     return ir.stages.map((st, i) => `<div class="chips"><span class="chip"><span class="k">s${i}</span></span>` + Object.entries(st).filter(([k]) => k !== "coefs" && !(ls[i] && k in ls[i])).map(([k, v]) => {
@@ -327,6 +334,8 @@ function renderDesign(row, done, spec) {
     for (let i = 0; i < R; i++) { const r = el(`<div class="r"></div>`); for (let j = 0; j < C; j++) r.appendChild(el(`<div class="pe">×+</div>`)); arch.appendChild(r); }
     sec.appendChild(arch);
     sec.appendChild(el(`<div class="archlegend"><span>${ir.pe_rows}×${ir.pe_cols} output-stationary systolic${ir.pe_rows > 12 || ir.pe_cols > 16 ? " (clipped)" : ""} · A → rows, B ↓ columns</span><span>PE: ${dspKind} (${ir.dsp_regs}) + ${ir.acc_in_dsp && xc ? "DSP post-adder" : "fabric carry-chain"} accumulator, ${ir.acc_width} b${ir.pipe_mul ? ` + ${ir.pipe_mul} fabric pipe` : ""}</span><span>${ir.reg_in ? "registered inputs · " : ""}${row.throughput ?? ir.pe_rows * ir.pe_cols} MAC/cycle · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
+  } else if (design === "graph") {
+    sec.appendChild(el(`<div class="archlegend"><span>${(ir.nodes || []).map((nd) => nd.kind).join(" → ")}</span><span>FIFO ${ir.fifo_depth} deep · ${ir.adapt} width adaptation · ${row.throughput ?? "?"} samples/cycle · latency ${row.latency_cycles ?? "?"} cycles</span></div>`));
   } else if (design === "fir_chain") {
     for (const [i, st] of (ir.stages || []).entries()) {
       const U = st.symmetric ? Math.ceil(st.taps / 2) : st.taps, M = Math.ceil(U / st.fold);
@@ -390,6 +399,8 @@ function renderSim(row, spec) {
     const state = !keys.includes(k) ? "n/a" : !s ? (row.pending ? "pending" : "—") : s.passed === true ? "pass" : s.passed === false ? "fail" : "skipped";
     t.insertAdjacentHTML("beforeend", rowHtml(names[k], purposes[k], state, s?.passed === false ? s.log : ""));
   }
+  const covs = row.metrics?.sim_coverage && Object.values(row.metrics.sim_coverage)[0];
+  if (covs) sec.appendChild(el(`<div class="sec"><h3>Coverage <span class="hint">behavioral testbench bins</span></h3><div class="chips">${Object.entries(covs).map(([k, v]) => `<span class="chip ${v ? "" : "lock"}"><span class="k">${esc(k)}</span> ${v}</span>`).join("")}</div></div>`));
   if (!keys.includes("post_impl_time")) sec.appendChild(el(`<div class="muted small-text">Timing and post-implementation stages need an SDF-annotated netlist, which the open-source P&R tools do not produce; they run on the Vivado backend.</div>`));
   p.appendChild(sec);
 }

@@ -146,7 +146,14 @@ def estimate_fft(ir: dict, backend: str) -> dict:
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": 1.0}
 
 
+def estimate_graph(ir: dict, backend: str) -> dict:
+    ests = [ESTIMATORS[n["kind"]](n["ir"], backend) for n in ir["nodes"]]
+    return {"fmax_mhz": min(e["fmax_mhz"] for e in ests), "lut": sum(e["lut"] for e in ests) + 40 * (len(ests) - 1),
+            "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
+
+
 ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft}
+ESTIMATORS["graph"] = estimate_graph
 
 
 # ---------------------------------------------------------------- calibration from measured runs
@@ -170,6 +177,10 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
     elif design == "fft":
         f += [math.log2(ir["n"]), ir["data_width"] / 16, 1.0 if ir.get("growth") == "grow" else 0.0, ir.get("mul_regs", 0) + {"none": 0, "out": 1, "in_out": 2, "in_pipe_out": 3}.get(ir.get("dsp_regs", "none"), 0),
               float(ir.get("bf_regs", 1)), 1.0 if ir.get("delay_mem") == "lut" else 0.0, 1.0 if ir.get("bit_reverse") else 0.0]
+    elif design == "graph":
+        nodes = ir["nodes"]
+        f += [float(len(nodes)), sum(1.0 for n in nodes if n["kind"] == "fir"), sum(1.0 for n in nodes if n["kind"] == "fft"), sum(1.0 for n in nodes if n["kind"] == "cordic"),
+              sum(1.0 for n in nodes if n["kind"] == "conv2d"), math.log2(ir.get("fifo_depth", 16)), sum(1.0 for n in nodes if n["ir"].get("dsp_regs", "none") != "none") / len(nodes)]
     elif design == "fir_chain":
         st = ir["stages"]
         f += [math.log2(sum(s["taps"] for s in st)), math.log2(max(s.get("fold", 1) for s in st)), sum(1.0 for s in st if s.get("symmetric")) / len(st),

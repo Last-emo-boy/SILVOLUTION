@@ -59,6 +59,8 @@ FIR_IR = """IR fields and legal ranges (taps, data_width, coef_width and the coe
   reg_in     bool        register the input sample
   dsp_regs   str in {"none","out","in_out","in_pipe_out"}  DSP-internal pipeline registers
   acc_in_dsp bool        xc7s50 only: accumulate inside the DSP48E1 post-adder (true) or in a fabric CARRY4 adder (false)
+  coef_port  bool        task parameter (never change): coefficients in a writable register file instead of constants;
+                         costs U*coef_width FFs + a decoder, and the multipliers can no longer be constant-folded
 
 Structure summary: multipliers = ceil(U / fold); throughput = 1/fold samples per cycle; the transposed form's adders
 are all local (mult -> add -> register), so its Fmax does not degrade with N; the folded form adds a tap-operand
@@ -209,8 +211,27 @@ More mul_regs and in_pipe_out dsp_regs are the first moves; growth=grow widens e
 }
 
 
+GRAPH_WHAT = "a datapath: a chain of 2-6 heterogeneous stream nodes (fir, conv2d, cordic, fft) connected by valid/ready FIFOs"
+
+GRAPH_IR = """IR: {"nodes": [{"kind": "fir"|"conv2d"|"cordic"|"fft", "ir": <that design's IR>}, ...], "fifo_depth": 4..64, "adapt": "truncate"|"round"|"saturate"}
+The node kinds and each node's task-defining fields are fixed; you edit each node's architecture knobs (the same
+knobs those designs expose on their own: fold/symmetric/dsp_regs/... for fir, par_rows/tree_regs/line_mem for conv2d,
+unroll/fold/guard_bits for cordic, mul_regs/bf_regs/growth/delay_mem for fft), plus fifo_depth and adapt.
+Rules: throughput = min over nodes; resources add up; Fmax = min over nodes and the critical path is prefixed with the
+node (u_n0.*, u_n1.*); fifo_depth must exceed the upstream node's latency + 2 (the graph gates the source, nodes have no
+back-pressure input), so a deep pipeline upstream needs a deeper FIFO. Spend resources on the node that limits."""
+
+GRAPH_IR_JSON = '{"nodes":[{"kind":"..","ir":{...}},{"kind":"..","ir":{...}}],"fifo_depth":..,"adapt":".."}'
+
+GRAPH_FACTS = {
+    "ecp5": """ECP5, measured on fir(8 taps, dsp_regs out) -> cordic(12-bit, 12 iterations, unroll 2): 115 MHz, 1377 LUT, 8 DSP; the
+cordic's two chained adders per stage limit. Gowin GW1NR-9 same graph: 124 MHz, 1074 LUT, 3 MULT. Per-node facts below.\n""" + FIR_FACTS["ecp5"],
+}
+
+
 PROMPTS = {
     "matmul": {"what": MATMUL_WHAT, "ir": MATMUL_IR, "ir_json": MATMUL_IR_JSON, "facts": MATMUL_FACTS},
+    "graph": {"what": GRAPH_WHAT, "ir": GRAPH_IR, "ir_json": GRAPH_IR_JSON, "facts": GRAPH_FACTS},
     "cordic": {"what": CORDIC_WHAT, "ir": CORDIC_IR, "ir_json": CORDIC_IR_JSON, "facts": CORDIC_FACTS},
     "fft": {"what": FFT_WHAT, "ir": FFT_IR, "ir_json": FFT_IR_JSON, "facts": FFT_FACTS},
     "fir_chain": {"what": CHAIN_WHAT, "ir": CHAIN_IR, "ir_json": CHAIN_IR_JSON, "facts": CHAIN_FACTS},
@@ -232,10 +253,14 @@ post-adder and a fabric CARRY4 accumulator.""",
 
 def device_facts(kind: str, backend: str) -> str:
     """Measured facts when we have them for this (design, device); otherwise a generic paragraph built from the
-    backend record, with the device numbers the planner needs to reason about budgets."""
+    backend record, with the device numbers the planner needs to reason about budgets. Artix-7 shares the
+    Spartan-7 fabric (LUT6, DSP48E1, -1 speed grade), so its measured facts apply with a capacity caveat."""
     from .backends import BACKENDS
     b = BACKENDS[backend]
     text = PROMPTS[kind]["facts"].get(backend)
+    if not text and backend == "xc7a35t" and PROMPTS[kind]["facts"].get("xc7s50"):
+        text = (f"{b.name}: same LUT6 / DSP48E1 fabric and speed grade as the Spartan-7 below but smaller "
+                f"({b.lut} LUT6, {b.dsp} DSP48E1, {b.bram} BRAM). Measured Spartan-7 facts:\n" + PROMPTS[kind]["facts"]["xc7s50"])
     if text:
         return text
     core = GENERIC_FACTS.get(b.emit_style, GENERIC_FACTS["behavioral"]).format(dsp_kind=b.dsp_kind, dsp_width=b.dsp_width, lut_kind=b.lut_kind)

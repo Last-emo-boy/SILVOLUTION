@@ -8,11 +8,13 @@ API
   GET  /api/jobs/<id>/files/<p>  any artifact under results/<id>/
   GET  /api/jobs/<id>/package    zip: RTL + AXI-Stream wrapper + testbench/vectors + reports + trajectory + README
   GET  /api/jobs/<id>/axis       the AXI-Stream wrapper alone
+  GET  /api/jobs/<id>/formal[?depth=20]  SymbiYosys: bounded equivalence of the measured RTL vs a fresh emit + stream properties
   GET  /api/specs                example specs shipped in specs/
   GET  /api/health
   POST /api/jobs/<id>/steer      {"message": "..."}  -> read by the planner before its next proposal
   POST /api/jobs/<id>/stop
   GET  /api/memory               lessons per (design, backend), scored
+  GET  /api/bench                last nightly regression status + report
   GET  /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]   every measured point, the Pareto front, best under constraints
   POST /api/memory/<d>/<b>/vote  {"id": ..., "vote": "up"|"down"}
   GET  /api/threads              conversations (newest first)
@@ -87,7 +89,10 @@ def _load_from_disk() -> None:
         if not d.is_dir() or not (d / "spec.json").exists():
             continue
         spec = json.loads((d / "spec.json").read_text())
-        state = json.loads((d / "state.json").read_text()) if (d / "state.json").exists() else {}
+        try:
+            state = json.loads((d / "state.json").read_text()) if (d / "state.json").exists() else {}
+        except ValueError:
+            state = {"status": "queued"}   # truncated by a crash mid-write: treat as interrupted and resume
         job = {"spec": spec, "max_iter": state.get("max_iter", 0), "status": "interrupted", "events": [], "created": d.stat().st_mtime,
                "subject": state.get("subject", ""), "parent": state.get("parent"), "thread": state.get("thread")}
         summ = d / "summary.json"
@@ -114,9 +119,10 @@ def _load_from_disk() -> None:
 def _save_state(job_id: str) -> None:
     job = _jobs[job_id]
     (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
-    (RESULTS / job_id / "state.json").write_text(json.dumps({"status": job["status"], "max_iter": job["max_iter"],
-                                                             "subject": job.get("subject", ""), "parent": job.get("parent"),
-                                                             "thread": job.get("thread")}))
+    tmp = RESULTS / job_id / "state.json.tmp"
+    tmp.write_text(json.dumps({"status": job["status"], "max_iter": job["max_iter"], "subject": job.get("subject", ""),
+                               "parent": job.get("parent"), "thread": job.get("thread")}))
+    tmp.replace(RESULTS / job_id / "state.json")   # atomic: a restart never sees a half-written file
 
 
 def _events_from_history(history: list[dict]) -> list[dict]:
@@ -495,6 +501,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {**th, "jobs": {jid: {"status": j["status"], "spec": j["spec"], "summary": j.get("summary"), "error": j.get("error"),
                                                         "n_events": len(j["events"]), "max_iter": j.get("max_iter"), "parent": j.get("parent"),
                                                         "created": j["created"], "task": j["spec"].get("task", "")} for jid, j in jobs_in.items()}})
+        if path == "/bench":
+            bdir = ROOT / "bench"
+            reps = sorted(bdir.glob("*.json")) if bdir.exists() else []
+            last = json.loads(reps[-1].read_text()) if reps else None
+            status = (bdir / "LAST").read_text().strip() if (bdir / "LAST").exists() else ""
+            return self._json(200, {"status": status, "reports": [r.name for r in reps[-10:]], "last": last})
         if path == "/pareto":
             from . import pareto
             q = parse_qs(u.query)
@@ -571,6 +583,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if len(parts) == 3 and parts[2] == "formal":
+                from . import formal
+                from .designs import design_for
+                best = (job.get("summary") or {}).get("best")
+                if not best:
+                    return self._json(404, {"error": "no feasible design yet"})
+                d = design_for(job["spec"]); ir = d.ir_cls.from_dict(best["ir"]); backend = job["spec"].get("backend", "ecp5")
+                fresh = d.emit(ir, backend=backend)
+                import hashlib
+                h = hashlib.sha256(f"{backend}\n{fresh}".encode()).hexdigest()[:16]
+                measured_rtl = ROOT / "runs" / h / "rtl" / f"{d.top}.sv"
+                work = RESULTS / job_id / "formal"
+                k = int(parse_qs(u.query).get("depth", ["20"])[0])
+                out = {"depth": k, "measured_rtl_present": measured_rtl.exists()}
+                if measured_rtl.exists():
+                    out["equivalence"] = formal.equivalence(d, ir, measured_rtl.read_text(), fresh, work / "equiv", k=k)
+                else:
+                    # the hash changed => the generator changed since the run: compare against the stored RTL of the run dir if any
+                    cand = sorted((ROOT / "runs").glob(f"*/rtl/{d.top}.sv"), key=lambda p: p.stat().st_mtime)
+                    out["equivalence"] = {"ok": None, "log": "generator output differs from the measured RTL hash; no stored copy to compare against"}
+                out["properties"] = formal.properties(d, ir, fresh, work / "props", k=k)
+                (work / "report.json").parent.mkdir(parents=True, exist_ok=True)
+                (work / "report.json").write_text(json.dumps(out, indent=1))
+                return self._json(200, out)
             if len(parts) == 3 and parts[2] == "axis":
                 from . import deliver
                 from .designs import design_for

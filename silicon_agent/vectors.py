@@ -26,6 +26,7 @@ sys.path.insert(0, str(TB_DIR))
 from test_chain import golden as chain_golden  # noqa: E402
 from test_cordic import vectors as cordic_vecs  # noqa: E402
 from test_fft import frames_for as fft_frames  # noqa: E402
+from test_graph import graph_golden  # noqa: E402
 from test_conv import golden as conv_golden, make_frames  # noqa: E402
 from test_fir import golden as fir_golden  # noqa: E402
 from test_matmul import golden as mm_golden, pack, to_signed  # noqa: E402
@@ -119,7 +120,7 @@ module tb;
   logic clk = 0, rst = 1, in_valid = 0;
   logic [DW-1:0] in_data = 0;
   wire in_ready, out_valid; wire [AW-1:0] out_data;
-  fir_top dut(.clk, .rst, .in_valid, .in_data, .in_ready, .out_valid, .out_data);
+  fir_top dut(.clk, .rst, .in_valid, .in_data, .in_ready, .out_valid, .out_data{COEF_TIE});
   always #(PERIOD/2) clk = ~clk;
   int fd, n_exp, n_got, errors, code, gap; logic [DW-1:0] xv; logic rdy;
   logic [AW-1:0] expv [0:8191];
@@ -343,3 +344,32 @@ module tb;
   end
 endmodule
 """
+
+
+# ---------------------------------------------------------------- graph
+def graph_vectors(ir, seed: int = 1, n: int = 160) -> tuple[list[str], list[str]]:
+    from silicon_agent.graph import data_width, out_width
+    DW, AW = data_width(ir), out_width(ir)
+    rng = random.Random(seed)
+    unit = 1
+    for i, nd in enumerate(ir.nodes):
+        if nd["kind"] == "fft": unit = max(unit, ir.node_ir(i).n)
+        if nd["kind"] == "conv2d": unit = max(unit, ir.node_ir(i).width)
+    n = max(unit * 2, (n // unit) * unit)
+    lo, hi = -(1 << (DW - 2)), (1 << (DW - 2)) - 1
+    xs = [rng.randint(lo, hi) for _ in range(n)]
+    ys = graph_golden(ir, xs)
+    m = (1 << DW) - 1; h = max(1, (DW + 3) // 4)
+    stim = [f"{(1 if i % 11 == 0 and rng.random() < 0.3 else 0):x} {1 if i == 0 else 0:x} {x & m:0{h}x}" for i, x in enumerate(xs)]
+    stim += [f"0 0 {0:0{h}x}" for _ in range(unit)]
+    exp = [f"{y & ((1 << AW) - 1):0{max(1, (AW + 3) // 4)}x}" for y in ys]
+    return stim, exp
+
+
+TB_GRAPH = TB_FFT.replace("logic [DW-1:0] in_re = 0, in_im = 0;", "logic [DW-1:0] in_data = 0;") \
+    .replace("wire [OW-1:0] out_re, out_im;", "wire [OW-1:0] out_data;") \
+    .replace("fft_top dut(.clk, .rst, .in_valid, .in_first, .in_re, .in_im, .in_ready, .out_valid, .out_re, .out_im);", "graph_top dut(.clk, .rst, .in_valid, .in_frame(in_first), .in_data, .in_ready, .out_valid, .out_data);") \
+    .replace("logic [2*OW-1:0] expv [0:65535];", "logic [OW-1:0] expv [0:65535];") \
+    .replace("if ({{out_re, out_im}} !== expv[n_got])", "if (out_data !== expv[n_got])").replace('n_got, {{out_re, out_im}}, expv[n_got]', 'n_got, out_data, expv[n_got]') \
+    .replace('gap, fs, rv, iv);', 'gap, fs, rv);').replace('"%h %h %h %h', '"%h %h %h').replace("if (code != 4) break;", "if (code != 3) break;") \
+    .replace("in_re = rv; in_im = iv;", "in_data = rv;").replace("logic [DW-1:0] rv, iv;", "logic [DW-1:0] rv;").replace("logic in_first = 0;", "logic in_first = 0;")

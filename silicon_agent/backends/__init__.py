@@ -55,4 +55,4 @@ def register(b: Backend) -> Backend:
 
 
 # import order = display order
-from . import ecp5, xc7s50, ice40, gowin  # noqa: E402,F401
+from . import ecp5, xc7s50, ice40, gowin, gatemate, xc7a35t  # noqa: E402,F401

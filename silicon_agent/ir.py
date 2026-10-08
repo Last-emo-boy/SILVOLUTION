@@ -95,6 +95,7 @@ class Metrics:
     sim_stages: dict = field(default_factory=dict)  # netlist simulation ladder: {stage: {"passed", "label", ...}}
     fmax_seeds: list = field(default_factory=list)  # per-seed Fmax when P&R ran with several seeds; fmax_mhz is their median
     power_mw: float | None = None  # dynamic power estimate where the toolchain reports one (Vivado)
+    sim_coverage: dict = field(default_factory=dict)  # functional-coverage bins hit by the behavioral testbench
 
     def violations(self, c: Constraints) -> list[str]:
         v = []
