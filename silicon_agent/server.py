@@ -220,6 +220,39 @@ def _load_threads() -> None:
     THREADS.mkdir(parents=True, exist_ok=True)
     for f in sorted(THREADS.glob("*.json")):
         _threads[f.stem] = json.loads(f.read_text())
+
+
+def _resume_turns() -> None:
+    """A thread left `busy` by a restart had an agent turn in flight. The AGH session kept running (it is another
+    process); the harness holds the turn's answer in that session, so we ask it to carry on: a short prompt in the
+    same session makes the agent pick up where it was (its tool records are in its own history) and the chat gets a
+    reply instead of a spinner forever. Without AGH the turn is simply marked interrupted."""
+    from . import agh
+    for tid, th in list(_threads.items()):
+        if not th.get("busy"):
+            continue
+        if agh.enabled() and th.get("agh_session"):
+            first = next((m["text"] for m in th["messages"] if m["role"] == "user"), "")
+            lang = nl._lang(first)
+            nudge = ("服务器刚重启过。请根据你之前的工具记录继续刚才的任务：查一下你启动的运行现在的状态（sa_jobs / sa_job），把结果报告出来。"
+                     if lang == "zh" else
+                     "The server was restarted. Continue the task you were on using your own tool records: check the runs you started (sa_jobs / sa_job) and report the result.")
+            def go(tid=tid, nudge=nudge, sub=th.get("subject", "cli")):
+                try:
+                    _agh_turn(tid, nudge, sub)
+                except Exception as e:
+                    _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
+                finally:
+                    with _lock:
+                        _threads[tid]["busy"] = False
+                        _threads[tid].pop("live", None)
+                        _save_thread(tid)
+            threading.Thread(target=go, daemon=True).start()
+        else:
+            th["busy"] = False
+            th.pop("live", None)
+            th["messages"].append({"role": "assistant", "kind": "text", "text": "（服务器重启，这一轮被打断了）" if nl._lang(th["messages"][0]["text"] if th["messages"] else "") == "zh" else "(the server restarted; this turn was interrupted)", "t": time.time()})
+            _save_thread(tid)
         _threads[f.stem]["busy"] = False
         for m in _threads[f.stem]["messages"]:
             m.pop("narrating", None)
@@ -518,7 +551,7 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
     with _lock:
         th.pop("live", None)
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
-                               "job": started[-1] if started else None, "t": time.time(), "source": "agh",
+                               "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh",
                                "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40],
                                "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status")} for st in r.get("steps", [])][:80]})
         if not th["title"] and started:
@@ -1038,6 +1071,7 @@ def main():
     _load_from_disk()
     _load_threads()
     threading.Thread(target=_worker, daemon=True).start()
+    threading.Thread(target=_resume_turns, daemon=True).start()
     srv = ThreadingHTTPServer((host, port), Handler)
     print(f"silicon-agent server on http://{host}:{port}  root={ROOT}  backends={list(BACKENDS)} designs={list(DESIGNS)}  "
           f"jobs={len(_jobs)}  auth={'token' if TOKEN else ''}{'+gateway' if GATEWAY_KEY else ''}{'none' if not TOKEN and not GATEWAY_KEY else ''}", flush=True)
