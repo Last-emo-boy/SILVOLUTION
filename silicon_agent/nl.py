@@ -77,10 +77,13 @@ margin, no rounding): "160 MHz or better" is fmax_mhz 160. Keep "assumptions" to
 choose), each one short. If the user is refining an existing run (context given), return "fork": true and only the fields
 that change in "constraints"/"locked"; keep the rest.
 
-If a different *device* or a meaningfully different *architecture setting* would also serve the request well (e.g. the
-same FIR on ECP5 instead of Spartan-7 for a 30 s iteration; a row-serial conv2d with a third of the multipliers; a
-smaller matmul array that still meets the rate), list up to 2 in "alternatives" as complete follow-up requests the
-user could send verbatim, each with a one-line trade-off. Leave it empty when nothing is worth offering.
+If a different *device*, a different *generator* or a meaningfully different *architecture setting* would also serve the
+request well (e.g. the same FIR on ECP5 instead of Spartan-7 for a 30 s iteration; a row-serial conv2d with a third of
+the multipliers; a smaller matmul array that still meets the rate; a long lowpass FIR as a two-stage fir_chain with a
+decimating first stage; a CORDIC instead of a table for sin/cos; an FFT with cmul=three when the device is multiplier
+bound), list up to 2 in "alternatives" as complete follow-up requests the user could send verbatim, each with a one-line
+trade-off. These are architecture A/B candidates: the chat runs them side by side on request and the worktable compares
+the measured points. Leave it empty when nothing is worth offering.
 
 Respond with JSON:
 {"spec": {...}, "fork": false, "summary": "<one sentence: what you will build and the key assumptions>",
