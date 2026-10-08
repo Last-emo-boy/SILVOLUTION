@@ -148,8 +148,13 @@ def run_agent_case(server: str, token: str, name: str, spec: dict, tag: str) -> 
     msgs = th.get("messages", [])
     runs = [m["job"] for m in msgs if m.get("kind") == "run" and m.get("job")]
     reply = next((m for m in reversed(msgs) if m.get("role") == "assistant" and m.get("kind") == "text"), {})
+    u = reply.get("usage") or {}
+    # the harness ledger for the turn: what the agent itself cost on top of the EDA time
+    ledger = {"model_calls": u.get("calls"), "tokens": (u.get("input") or 0) + (u.get("cache_read") or 0) + (u.get("output") or 0),
+              "usd": round((u.get("usd_micros") or 0) / 1e6, 4), "model": u.get("model")} if u else None
     return (runs[-1] if runs else None), {"thread": tid, "reply": (reply.get("text") or "")[:600], "tools": [t.get("name") for t in reply.get("tools", [])],
-                                           "turn_seconds": round(time.time() - t0, 1)}
+                                           "turn_seconds": round(time.time() - t0, 1), "ledger": ledger,
+                                           "failed_tools": [t.get("name") for t in reply.get("tools", []) if t.get("status") == "failed"]}
 
 
 def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str, reuse: str | None = None,
@@ -203,13 +208,19 @@ def cmd_run(a) -> int:
         r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"), a.planner, a.agent)
         rows.append(r)
         b = r["best"]
+        ag = r.get("agent") or {}
+        lg = ag.get("ledger") or {}
         print(f"   {'OK ' if r['ok'] else 'REG'} feasible={r['feasible']} first@{r['first_feasible']} rounds={r['rounds']} "
               f"{(f'{b['fmax_mhz']:.1f} MHz {b['lut']} LUT {b['dsp']} DSP thr={b['throughput']}' if b else '-')} eda={r['eda_seconds']}s wall={r['wall_seconds']}s job={r['job']}"
+              + (f"  agent: {len(ag.get('tools') or [])} tools, {lg.get('model_calls')} model calls, {lg.get('tokens')} tok, ${lg.get('usd')}" if lg else "")
+              + (f"  FAILED TOOLS {ag['failed_tools']}" if ag.get("failed_tools") else "")
               + (f"  ERROR {str(r['error'])[:160]}" if r["error"] else ""), flush=True)
     rep = {"tag": a.tag, "t": time.time(), "max_iter": a.max_iter, "no_memory": a.no_memory, "planner": a.planner, "agent": a.agent, "cases": rows,
            "summary": {"n": len(rows), "ok": sum(r["ok"] for r in rows), "feasible": sum(r["feasible"] for r in rows),
                        "mean_first_feasible": round(sum(r["first_feasible"] or a.max_iter + 1 for r in rows) / max(len(rows), 1), 2),
-                       "eda_seconds": round(sum(r["eda_seconds"] for r in rows), 1)}}
+                       "eda_seconds": round(sum(r["eda_seconds"] for r in rows), 1),
+                       **({"agent_usd": round(sum((r.get("agent") or {}).get("ledger", {}).get("usd", 0) or 0 for r in rows), 4),
+                           "agent_failed_tools": sum(len((r.get("agent") or {}).get("failed_tools") or []) for r in rows)} if a.agent else {})}}
     out = Path(a.out) if a.out else BENCH_DIR
     out.mkdir(parents=True, exist_ok=True)
     f = out / f"{a.tag}-{time.strftime('%Y%m%d-%H%M%S')}.json"
