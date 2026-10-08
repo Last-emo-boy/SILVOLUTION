@@ -197,7 +197,8 @@ FFT_IR = """IR fields and legal ranges:
   bit_reverse bool                       add an N-sample reorder buffer so the output is in natural order (+N latency, +BRAM)
   cmul        str four|three|lut         complex multiplier per stage: 4 real multipliers (4 DSPs), the 3-multiplier Gauss form
                                          (3 DSPs, two extra pre-adders -> one more adder level on the DSP input path) or
-                                         LUT-only (0 DSPs, ~w*tw LUTs per real multiplier, slow). DSP count = (log2(n)-1) x
+                                         LUT-only (0 DSPs, ~3*w*tw LUT4 per real multiplier, slow). The last two stages multiply by 1/-j
+                                         and need no multiplier, so DSP count = (log2(n)-2) x
                                          {4, 3, 0}; use three/lut when the device's multiplier budget is the binding bound
 
 Structure summary: log2(n) stages, each a butterfly + delay line + one complex multiplier (except the last stage); the
@@ -212,8 +213,9 @@ FFT_FACTS = {
 dsp_regs out: 47.1 MHz, 3695 LUT, 1868 FF, 28 MULT18X18D, 3 DP16KD -- the multiply-add-round of each stage is
 unpipelined (mul_regs 1 only registers the output), so the complex multiplier + rounding adder is the critical path.
 More mul_regs and in_pipe_out dsp_regs are the first moves; growth=grow widens every adder.""",
-    "gowin": """Gowin GW1NR-9 has 20 MULT18X18 in all: a 256-point FFT (7 stages, 6 multiplying) needs 24 with cmul=four and
-does not fit; cmul=three needs 18 and fits, cmul=lut needs none. Delay lines >= 32 deep belong in BRAM (26 BSRAM).""",
+    "gowin": """Gowin GW1NR-9 has 20 MULT18X18 in all: a 256-point FFT (8 stages, 6 multiplying) needs 24 with cmul=four and
+does not fit; cmul=three needs 18 and fits, cmul=lut needs none but ~3x the LUTs. Delay lines >= 32 deep belong in
+BRAM (26 BSRAM). Do not retry a cmul=four shape that was reported as not fitting.""",
 }
 
 

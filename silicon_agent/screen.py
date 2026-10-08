@@ -135,14 +135,14 @@ def estimate_fft(ir: dict, backend: str) -> dict:
     n, dw, tw = ir["n"], ir["data_width"], ir.get("tw_width", 16); S = int(math.log2(n))
     w_avg = dw + (S / 2 if ir.get("growth") == "grow" else 0)
     cmul = ir.get("cmul", "four")
-    dsp = (S - 1) * {"four": 4, "three": 3, "lut": 0}[cmul]
+    dsp = (S - 2) * {"four": 4, "three": 3, "lut": 0}[cmul]   # the last two stages have trivial twiddles
     regs = ir.get("mul_regs", 0) + {"none": 0, "out": 1, "in_out": 2, "in_pipe_out": 3}.get(ir.get("dsp_regs", "none"), 0)
     lut = S * (w_avg * 12 + 40) + (n * 2 * w_avg * 0.5 if ir.get("delay_mem") == "lut" else 0)
     if cmul == "three":
-        lut += (S - 1) * 2 * (w_avg + tw)
+        lut += (S - 2) * 2 * (w_avg + tw)
     elif cmul == "lut":
         # measured: a 12x12 shift-add multiplier costs ~480 LUT4 on ECP5 (3.3 per bit-product); LUT6 fabrics about half
-        lut += (S - 1) * 4 * w_avg * tw * (1.8 if _style(backend) == "vivado" else 3.3)
+        lut += (S - 2) * 4 * w_avg * tw * (1.8 if _style(backend) == "vivado" else 3.3)
     fmax = 45 if regs <= 1 else (90 if regs == 2 else 130)
     if cmul == "three":
         fmax *= 0.85

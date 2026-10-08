@@ -16,7 +16,8 @@ Knobs:
                                           (3 DSPs + 5 adders, one more adder level), or LUT-only (no DSPs at all)
 
 Structure: log2(N) stages, each one radix-2 butterfly with a delay line of N/2^(s+1) samples and (except the last)
-one complex multiplier (3 or 4 real multipliers -> DSPs). Throughput 1 sample/cycle in, 1 out, bit-reversed order
+one complex multiplier (3 or 4 real multipliers -> DSPs); the last two stages need none (twiddles 1 and -j).
+Throughput 1 sample/cycle in, 1 out, bit-reversed order
 (a `bit_reverse` flag reorders at the output with an extra N-sample buffer). Latency ~ N + stage pipeline depth.
 
 Golden model: fixed-point simulation of the exact same datapath (per-stage rounding/scaling), so simulation
@@ -158,6 +159,9 @@ def golden(a: FftArch, frames: list[list[tuple[int, int]]]) -> list[tuple[int, i
                 line[ptr] = (_sat(xr, w_next), _sat(xi, w_next))
                 if k == 0 or s == S - 1:
                     out.append((dr, di))
+                elif half == 2:
+                    # W_4^1 = -j exactly: (re, im) -> (im, -re); no multiplier in hardware either
+                    out.append((di, _sat(-dr, w_next)))
                 else:
                     cr, ci = tw[k]
                     pr = (dr * cr - di * ci + (1 << (TW - 2))) >> (TW - 1)
@@ -183,7 +187,7 @@ SDF_STAGE = r'''// One SDF stage, cycle-exact to this model:
 // The delay line is a HALF-deep circular buffer advanced on every valid sample. Outputs during the first
 // half of the very first block are not meaningful (nothing was written); `primed` masks them.
 module sdf_stage #(parameter int WIN = 16, WOUT = 16, HALF = 128, LOGH = 7, KW = 7, TW = 16,
-                   MREG = 1, BFREG = 1, SCALE = 1, BRAM = 1, LAST = 0, CMUL = 0) (
+                   MREG = 1, BFREG = 1, SCALE = 1, BRAM = 1, LAST = 0, CMUL = 0, TRIV = 0) (
     input  wire clk, input wire rst, input wire in_valid, input wire signed [WIN-1:0] in_re, in_im, input wire in_first,
     output logic out_valid, output logic signed [WOUT-1:0] out_re, out_im, output logic out_first,
     output logic [KW-1:0] tw_k, input wire signed [TW-1:0] cr, ci);
@@ -240,7 +244,9 @@ module sdf_stage #(parameter int WIN = 16, WOUT = 16, HALF = 128, LOGH = 7, KW =
     assign wb_im = second ? df_im : WOUT'(in_im);
     // first half: the value leaving the line is the previous block's a-b; multiply by W (k = 0 -> pass through)
     logic signed [PW-1:0] p_re, p_im;
-    generate if (CMUL == 1) begin : g_three
+    generate if (LAST || TRIV) begin : g_nomul
+        assign p_re = '0; assign p_im = '0;
+    end else if (CMUL == 1) begin : g_three
         // Gauss: k1 = cr*(d_re + d_im), k2 = d_re*(ci - cr), k3 = d_im*(cr + ci); re = k1 - k3, im = k1 + k2
         logic signed [WOUT:0] s_d; logic signed [TW:0] s_c1, s_c2;
         logic signed [PW:0] k1, k2, k3;
@@ -277,8 +283,12 @@ module sdf_stage #(parameter int WIN = 16, WOUT = 16, HALF = 128, LOGH = 7, KW =
     end endgenerate
     logic signed [WOUT-1:0] m_re, m_im;
     always_comb begin
-        m_re = (LAST || k == 0) ? d_re : WOUT'((p_re + (PW'(1) <<< (TW-2))) >>> (TW-1));
-        m_im = (LAST || k == 0) ? d_im : WOUT'((p_im + (PW'(1) <<< (TW-2))) >>> (TW-1));
+        if (LAST || k == 0) begin m_re = d_re; m_im = d_im; end
+        else if (TRIV)       begin m_re = d_im; m_im = -d_re; end   // x (-j): (re, im) -> (im, -re)
+        else begin
+            m_re = WOUT'((p_re + (PW'(1) <<< (TW-2))) >>> (TW-1));
+            m_im = WOUT'((p_im + (PW'(1) <<< (TW-2))) >>> (TW-1));
+        end
     end
     // output of this cycle, then MREG pipeline registers (the multiplier is retimed into them by synthesis)
     logic signed [WOUT-1:0] o_re, o_im; logic o_v, o_f;
@@ -338,7 +348,7 @@ endmodule""")
     logic [{max(1, int(math.log2(half))) - 1}:0] k{s}; logic signed [TW-1:0] cr{s}, ci{s};
     fft_tw{s} u_tw{s} (.k(k{s}), .cr(cr{s}), .ci(ci{s}));
     sdf_stage #(.WIN({win}), .WOUT({wout}), .HALF({half}), .LOGH({int(math.log2(half))}), .KW({max(1, int(math.log2(half)))}), .TW(TW),
-                .MREG({mreg}), .BFREG({a.bf_regs}), .SCALE({1 if a.growth == "scale" else 0}), .BRAM({1 if bram else 0}), .LAST({1 if s == S - 1 else 0}), .CMUL({ {"four": 0, "three": 1, "lut": 2}[a.cmul] }))
+                .MREG({mreg}), .BFREG({a.bf_regs}), .SCALE({1 if a.growth == "scale" else 0}), .BRAM({1 if bram else 0}), .LAST({1 if s == S - 1 else 0}), .CMUL({ {"four": 0, "three": 1, "lut": 2}[a.cmul] }), .TRIV({1 if half == 2 else 0}))
         u_s{s} (.clk(clk), .rst(rst), .in_valid(v{s}), .in_re(r{s}), .in_im(i{s}), .in_first(f{s}),
                 .out_valid(v{s + 1}), .out_re(r{s + 1}), .out_im(i{s + 1}), .out_first(f{s + 1}), .tw_k(k{s}), .cr(cr{s}), .ci(ci{s}));""")
     wires = "\n".join(f"    logic v{s}, f{s}; logic signed [{DW + (s if a.growth == 'grow' else 0) - 1}:0] r{s}, i{s};" for s in range(S + 1))

@@ -295,14 +295,15 @@ def fft_vectors(ir, seed: int = 1, n_frames: int = 3) -> tuple[list[str], list[s
     rng = random.Random(seed)
     frames = fft_frames(ir, rng, n_frames)
     outs = fft_golden(ir, frames)
-    mi, mo = (1 << DW) - 1, (1 << OW) - 1; hi, ho = max(1, (DW + 3) // 4), max(1, (OW + 3) // 4)
+    mi, mo = (1 << DW) - 1, (1 << OW) - 1; hi = max(1, (DW + 3) // 4)
     stim = []
     for fr in frames:
         for i, (re, im) in enumerate(fr):
             stim.append(f"{(1 if i % 9 == 0 and rng.random() < 0.3 else 0):x} {1 if i == 0 else 0:x} {re & mi:0{hi}x} {im & mi:0{hi}x}")
     for i in range(N):   # zero flush frame, same as the golden model
         stim.append(f"0 {1 if i == 0 else 0:x} {0:0{hi}x} {0:0{hi}x}")
-    exp = [f"{re & mo:0{ho}x}{im & mo:0{ho}x}" for re, im in outs]
+    # one packed {re, im} word: two separate hex fields would only line up when OW is a multiple of 4
+    exp = [f"{((re & mo) << OW) | (im & mo):0{(2 * OW + 3) // 4}x}" for re, im in outs]
     return stim, exp
 
 

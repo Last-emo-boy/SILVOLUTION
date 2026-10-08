@@ -19,7 +19,7 @@ from .backends._common import CACHE, ROOT, TB_DIR, TOOLS, tool_env, run  # noqa:
 from .designs import DESIGNS, Design
 from .ir import Metrics
 
-CACHE_VERSION = "7"  # bump when report parsing changes; invalidates cached metrics (7: race-free vector benches)
+CACHE_VERSION = "8"  # bump when report parsing or the vector benches change (8: packed FFT expected words)
 
 
 class _BackendView(dict):
