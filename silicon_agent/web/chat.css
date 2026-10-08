@@ -20,6 +20,7 @@ button:disabled { opacity: .45; cursor: default; }
 
 /* ---------- fixed shell: nothing here scrolls except #scroll ---------- */
 .shell { height: 100vh; height: 100dvh; display: grid; grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.scrim { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9; }
 .shell.rail-hidden { grid-template-columns: minmax(0, 1fr); } .shell.rail-hidden .rail { display: none; }
 .rail { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .rail-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 8px; }
@@ -129,8 +130,13 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 
 @media (max-width: 800px) {
   .shell { grid-template-columns: minmax(0, 1fr); } .rail { display: none; }
-  .shell.rail-shown .rail { display: flex; position: fixed; inset: 0 25% 0 0; z-index: 10; }
+  .shell.rail-shown .rail { display: flex; position: fixed; inset: 0 25% 0 0; z-index: 10; box-shadow: 8px 0 32px rgba(0,0,0,.5); }
+  .shell.rail-shown .scrim { display: block; }
   .col { padding: 0 14px; } .hello { padding-top: 10vh; } .hello h1 { font-size: 22px; }
+  .msg.user .bubble { max-width: 88%; }
+  .card > summary .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .composer .col { padding: 0 10px; }
+  .inputbox textarea { font-size: 16px; }  /* iOS zooms into inputs below 16px */
 }
 
 /* alternative requests the interpreter offered */

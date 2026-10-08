@@ -67,6 +67,7 @@ const rtlShown = new Set();
   $("#input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
   $("#input").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px"; });
   $("#t-rail").onclick = () => { const sh = $(".shell"); if (window.innerWidth <= 800) sh.classList.toggle("rail-shown"); else sh.classList.toggle("rail-hidden"); };
+  $("#scrim").onclick = () => $(".shell").classList.remove("rail-shown");
   $("#stop").onclick = async () => {
     // stops the agent's turn (and the job it is running); without a turn in flight, just the live job
     $("#stop").disabled = true;
@@ -112,6 +113,8 @@ function openThread(id) {
   location.hash = id || "";
   $("#msgs").innerHTML = ""; $("#hello").hidden = !!id; $("#title").textContent = ""; $("#stop").hidden = true; $("#wt-link").hidden = !id;
   document.querySelectorAll("#threads li").forEach((li) => li.classList.toggle("sel", li.dataset.id === id));
+  // on a phone the rail is a drawer: picking a conversation closes it
+  $(".shell").classList.remove("rail-shown");
   $(".shell").classList.remove("rail-shown");
   if (id) poll();
   $("#input").focus();
