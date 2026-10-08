@@ -675,14 +675,31 @@ class Handler(BaseHTTPRequestHandler):
                 measured_rtl = ROOT / "runs" / h / "rtl" / f"{d.top}.sv"
                 work = RESULTS / job_id / "formal"
                 k = int(parse_qs(u.query).get("depth", ["20"])[0])
-                out = {"depth": k, "measured_rtl_present": measured_rtl.exists()}
+                # a finished report for this generator revision is reused; a running check is not started twice
+                rep = work / "report.json"
+                if rep.exists() and "fresh" not in parse_qs(u.query):
+                    try:
+                        prev = json.loads(rep.read_text())
+                        if prev.get("rtl_hash") == h and prev.get("depth_requested") == k:
+                            return self._json(200, prev)
+                    except ValueError:
+                        pass
+                with _lock:
+                    if job.get("formal_running"):
+                        return self._json(202, {"status": "running", "depth": k, "note": "formal check in progress; call again"})
+                    job["formal_running"] = True
+                out = {"depth": k, "depth_requested": k, "rtl_hash": h, "measured_rtl_present": measured_rtl.exists()}
                 if measured_rtl.exists():
                     out["equivalence"] = formal.equivalence(d, ir, measured_rtl.read_text(), fresh, work / "equiv", k=k)
                 else:
                     # the hash changed => the generator changed since the run: compare against the stored RTL of the run dir if any
                     cand = sorted((ROOT / "runs").glob(f"*/rtl/{d.top}.sv"), key=lambda p: p.stat().st_mtime)
                     out["equivalence"] = {"ok": None, "log": "generator output differs from the measured RTL hash; no stored copy to compare against"}
-                out["properties"] = formal.properties(d, ir, fresh, work / "props", k=k)
+                try:
+                    out["properties"] = formal.properties(d, ir, fresh, work / "props", k=k)
+                finally:
+                    with _lock:
+                        job.pop("formal_running", None)
                 (work / "report.json").parent.mkdir(parents=True, exist_ok=True)
                 (work / "report.json").write_text(json.dumps(out, indent=1))
                 return self._json(200, out)

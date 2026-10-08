@@ -135,16 +135,22 @@ export const siliconAgent = {
 
     agnes.registerTool({
       name: 'sa_job',
-      description: 'Status and trajectory of a run: every iteration\'s IR, measured Fmax/LUT/DSP/BRAM, simulation ladder, violations, critical path, the planner\'s diagnosis and action, and the best feasible design. With wait_seconds > 0 it blocks until the run finishes or the wait elapses.',
-      parameters: obj({ job: str({ maxLength: 64 }), wait_seconds: int({ minimum: 0, maximum: 1800 }) }, ['job']),
+      description: 'Status and trajectory of a run: every iteration\'s IR, measured Fmax/LUT/DSP/BRAM, simulation ladder, violations, critical path, the planner\'s diagnosis and action, and the best feasible design. With wait_seconds > 0 it blocks until the run finishes or the wait elapses (at most 90 s per call: a run that is still going is returned with status "running" -- call again).',
+      parameters: obj({ job: str({ maxLength: 64 }), wait_seconds: int({ minimum: 0, maximum: 90 }) }, ['job']),
       meta: readOnly,
       async execute({ job, wait_seconds }, tctx) {
-        const deadline = Date.now() + 1000 * (wait_seconds ?? 0)
+        // the harness cuts a tool off at tools.timeout_ms (120 s by default), so one call never waits longer than 90 s
+        const deadline = Date.now() + 1000 * Math.min(wait_seconds ?? 0, 90)
         try {
           for (;;) {
             const j = await api('GET', `/jobs/${encodeURIComponent(job)}`, undefined, tctx?.signal)
-            if (!['queued', 'running'].includes(j.status) || Date.now() >= deadline) return text(summarize(j))
-            await new Promise((r) => setTimeout(r, 5000))
+            const done = !['queued', 'running'].includes(j.status)
+            if (done || Date.now() >= deadline) {
+              const out = summarize(j)
+              if (!done) out.note = 'still running: call sa_job again (wait_seconds up to 90) until status is done/failed'
+              return text(out)
+            }
+            await new Promise((r) => setTimeout(r, Math.min(5000, Math.max(500, deadline - Date.now()))))
           }
         } catch (e) { return fail(e) }
       },
@@ -214,9 +220,11 @@ export const siliconAgent = {
       name: 'sa_formal',
       description: 'SymbiYosys bounded model check of a finished run: equivalence of the measured RTL against a fresh emit of its IR, plus stream-protocol properties. Takes seconds to minutes.',
       parameters: obj({ job: str({ maxLength: 64 }), depth: int({ minimum: 4, maximum: 64 }) }, ['job']),
-      meta: { ...readOnly, costHint: { wallMs: 120000 } },
+      meta: { ...readOnly, costHint: { wallMs: 110000 } },
       async execute({ job, depth }, tctx) {
-        try { return text(await api('GET', `/jobs/${encodeURIComponent(job)}/formal?depth=${depth ?? 20}`, undefined, tctx?.signal)) } catch (e) { return fail(e) }
+        // the check runs on the server and is cached in results/<job>/formal/report.json; a first call may hit the
+        // tool timeout on a deep pipeline, in which case the next call returns the finished report
+        try { return text(await api('GET', `/jobs/${encodeURIComponent(job)}/formal?depth=${depth ?? 16}`, undefined, tctx?.signal)) } catch (e) { return fail(e) }
       },
     })
 
@@ -238,7 +246,7 @@ export const siliconAgent = {
         'You are the front of silicon-agent, an autonomous FPGA design loop. Use its tools instead of writing RTL yourself.',
         '1. Call sa_schema once to know the generators, devices and knobs. Then sa_interpret with the user\'s words to get a complete spec; show its assumptions. Numbers the user states are used exactly as given.',
         '2. If the request allows several architectures (different generator, device or fold), compare them with sa_estimate before running; the interpreter\'s `alternatives` are good candidates.',
-        '3. Start with sa_run (pass the conversation `thread` when you have one), then sa_job with wait_seconds up to 600 to follow it. Report each iteration in one line: what changed, measured Fmax/LUT/DSP, whether the constraints hold. Never invent numbers: everything comes from the tool results.',
+        '3. Start with sa_run (pass the conversation `thread` when you have one), then follow it with sa_job (wait_seconds 90, repeated until the status is done or failed; a run takes 1-30 minutes). Report what the measurements say: what changed, measured Fmax/LUT/DSP, whether the constraints hold. Never invent numbers: everything comes from the tool results.',
         '4. When it finishes, explain why it stopped (stop_reason or the budget), the final design, and one caveat if there is one (thin timing margin, low throughput, noisy seeds). Offer the next step: fork with tighter constraints, sa_formal, or the delivery package.',
         'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',
         '5. While a run is in flight, a user instruction about the design is an sa_steer; a question is answered from sa_job data.',
