@@ -38,16 +38,19 @@ export const siliconAgent = {
   apply(ctx, config) {
     const agnes = ctx.extension()
     const cfg = { server: 'http://127.0.0.1:8765', tokenEnv: 'SA_TOKEN', tokenFile: '', ...(config ?? {}) }
-    const server = cfg.server.replace(/\/$/, '')
+    // SA_SERVER in the worker's environment wins over the packaged default (inside compose the job
+    // server is another container)
+    const server = (process.env.SA_SERVER || cfg.server).replace(/\/$/, '')
     // The worker process does not inherit the operator's shell, so the bearer token is read from a file
     // (the deployment's own secret, 0600) and only falls back to the environment variable.
     let tokenCache = ''
     const token = async () => {
       if (tokenCache) return tokenCache
-      if (cfg.tokenFile) {
+      const file = process.env.SA_TOKEN_FILE || cfg.tokenFile
+      if (file) {
         try {
           const { readFile } = await import('node:fs/promises')
-          tokenCache = (await readFile(cfg.tokenFile, 'utf8')).trim()
+          tokenCache = (await readFile(file, 'utf8')).trim()
         } catch {}
       }
       return tokenCache || process.env[cfg.tokenEnv] || ''

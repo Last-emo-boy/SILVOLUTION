@@ -275,7 +275,14 @@ def ensure_daemon(timeout: float = 60) -> str:
     if path:
         return path
     if not AGH_ENTRY:
-        raise AghError("AGH daemon is not running and SA_AGH_ENTRY is unset")
+        # in the compose deployment the daemon is its own container; wait for it instead of spawning
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            path = daemon_running()
+            if path:
+                return path
+            time.sleep(1)
+        raise AghError(f"AGH daemon is not reachable at {owner_file()} (and SA_AGH_ENTRY is unset)")
     subprocess.run(["node", AGH_ENTRY, "daemon", "start"], env=_env(), capture_output=True, text=True, timeout=timeout, check=False)
     t0 = time.time()
     while time.time() - t0 < timeout:

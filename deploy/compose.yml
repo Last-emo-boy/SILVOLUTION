@@ -28,6 +28,8 @@ services:
       LD_PRELOAD: /lib/x86_64-linux-gnu/libudev.so.1   # FlexNet/udev fix, same as the vivado wrapper
       SA_XILINX_GLBL: /opt/amd/2025.2/Vivado/data/verilog/src/glbl.v
       SA_DISABLE_BACKENDS: ${SA_DISABLE_BACKENDS:-}   # comma-separated keys whose toolchain is not installed on this host (e.g. xc7a35t until Artix-7 device data is added to Vivado)
+      SA_AGH: ${SA_AGH:-1}                   # 1: chat turns run inside Agnes Harness (the agh service); 0: the built-in nl.py loop
+      SA_AGH_HOME: /srv/sa/agh               # the agh service's home: its unix socket lives under data/daemon/
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -53,6 +55,40 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+  # Agnes Harness: the agent runtime (model loop on DeepSeek, tool records, sessions). Shares /srv/sa so the
+  # job server reaches its unix socket at /srv/sa/agh/data/daemon/agnesd.sock; its tools call the job server
+  # over the compose network. Built from source on the host (/opt/agnes-harness, see deploy/agh-build.sh).
+  agh:
+    image: node:24-bookworm-slim
+    container_name: silicon-agent-agh
+    user: "10001:10001"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 2m
+    entrypoint: ["/bin/bash", "/opt/silicon-agent/app/deploy/agh-entry.sh"]
+    environment:
+      HOME: /srv/sa/home
+      AGH_HOME: /srv/sa/agh
+      AGNES_PROFILE: local-dev
+      AGH_DIST: /opt/agnes-harness/packages/cli/dist/local
+      SA_TOKEN: ${SA_TOKEN:?set SA_TOKEN in /opt/silicon-agent/.env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/silicon-agent/.env}
+      SA_AGH_MODEL: ${SA_AGH_MODEL:-deepseek-flash}
+      SA_SERVER: http://server:8765          # the plugin's tools reach the job server over the compose network
+      SA_TOKEN_FILE: /srv/sa/agh/sa-token
+    volumes:
+      - /opt/silicon-agent/app:/opt/silicon-agent/app:ro
+      - /opt/agnes-harness:/opt/agnes-harness:ro
+      - /srv/sa:/srv/sa
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g,mode=1777
+    networks:
+      default: {}
+    cpus: 2
+    mem_limit: 3g
+    pids_limit: 1024
+    security_opt:
+      - no-new-privileges:true
 networks:
   vivado-private:
     external: true
