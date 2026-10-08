@@ -38,6 +38,8 @@ button:disabled { opacity: .45; cursor: default; }
 .main { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .topbar { height: 44px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; }
 .title { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btnlink { font: 500 12px var(--font); color: var(--text-2); text-decoration: none; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; } .btnlink:hover { background: var(--surface-2); color: var(--text); }
+.prose .tag { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--border-2); border-radius: 4px; padding: 0 5px; vertical-align: 1px; }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .col { width: 100%; max-width: 760px; margin: 0 auto; padding: 0 24px; }
 

@@ -84,7 +84,7 @@ def _load_from_disk() -> None:
         spec = json.loads((d / "spec.json").read_text())
         state = json.loads((d / "state.json").read_text()) if (d / "state.json").exists() else {}
         job = {"spec": spec, "max_iter": state.get("max_iter", 0), "status": "interrupted", "events": [], "created": d.stat().st_mtime,
-               "subject": state.get("subject", ""), "parent": state.get("parent")}
+               "subject": state.get("subject", ""), "parent": state.get("parent"), "thread": state.get("thread")}
         summ = d / "summary.json"
         if summ.exists():
             s = json.loads(summ.read_text())
@@ -110,7 +110,8 @@ def _save_state(job_id: str) -> None:
     job = _jobs[job_id]
     (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
     (RESULTS / job_id / "state.json").write_text(json.dumps({"status": job["status"], "max_iter": job["max_iter"],
-                                                             "subject": job.get("subject", ""), "parent": job.get("parent")}))
+                                                             "subject": job.get("subject", ""), "parent": job.get("parent"),
+                                                             "thread": job.get("thread")}))
 
 
 def _events_from_history(history: list[dict]) -> list[dict]:
@@ -209,6 +210,13 @@ def _load_threads() -> None:
         _threads[f.stem]["busy"] = False
         for m in _threads[f.stem]["messages"]:
             m.pop("narrating", None)
+    # jobs the chat started before thread binding was persisted: bind them from the message log
+    for tid, th in _threads.items():
+        for m in th["messages"]:
+            j = _jobs.get(m.get("job") or "")
+            if j and not j.get("thread"):
+                j["thread"] = tid
+                _save_state(m["job"])
     for tid in _threads:
         threading.Thread(target=_narrate_if_done, args=(tid,), daemon=True).start()
 
@@ -218,11 +226,31 @@ def _save_thread(tid: str) -> None:
     (THREADS / f"{tid}.json").write_text(json.dumps(_threads[tid], ensure_ascii=False, indent=1))
 
 
+def _thread_jobs(tid: str) -> list[str]:
+    """Job ids bound to a thread, oldest first."""
+    th = _threads.get(tid) or {"messages": []}
+    ids = {jid for jid, j in _jobs.items() if j.get("thread") == tid} | {m["job"] for m in th["messages"] if m.get("job") and m["job"] in _jobs}
+    return sorted(ids, key=lambda j: _jobs[j]["created"])
+
+
+def _thread_note_job(tid: str, job_id: str, text: str, fork: bool) -> None:
+    """A job started from the thread's worktable: give it a turn in the conversation so it gets cards and a report."""
+    th = _threads.get(tid)
+    if not th:
+        return
+    first = next((m["text"] for m in th["messages"] if m["role"] == "user"), "")
+    with _lock:
+        th["messages"].append({"role": "assistant", "kind": "run", "text": text, "job": job_id, "lang": nl._lang(first), "t": time.time(),
+                               "fork": fork, "source": "worktable"})
+        _save_thread(tid)
+
+
 def _thread_context(th: dict) -> dict | None:
-    """The run the conversation is currently about, flattened for the LLM."""
-    jid = next((m["job"] for m in reversed(th["messages"]) if m.get("job")), None)
-    if not jid or jid not in _jobs:
+    """The run the conversation is currently about (the thread's newest job), flattened for the LLM."""
+    ids = _thread_jobs(th["id"])
+    if not ids:
         return None
+    jid = ids[-1]
     job = _jobs[jid]
     results = [e for e in job["events"] if e["kind"] == "result"]
     last = results[-1] if results else None
@@ -265,10 +293,11 @@ def _narrate_job_async(job_id: str) -> None:
             threading.Thread(target=_narrate_if_done, args=(tid,), daemon=True).start()
 
 
-def _submit(spec: dict, max_iter: int, sub: str, parent: dict | None = None) -> str:
+def _submit(spec: dict, max_iter: int, sub: str, parent: dict | None = None, thread: str | None = None) -> str:
     job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     with _lock:
-        _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [], "created": time.time(), "subject": sub, "parent": parent}
+        _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [], "created": time.time(), "subject": sub,
+                         "parent": parent, "thread": thread}
         (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
         (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
         _save_state(job_id)
@@ -325,7 +354,7 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
                 spec["initial_ir"] = cand
             parent = {"id": ctx["job"], "iteration": start.get("iteration")}
     max_iter = 8
-    job_id = _submit(spec, max_iter, sub, parent)
+    job_id = _submit(spec, max_iter, sub, parent, thread=tid)
     if not th["title"]:
         th["title"] = spec["task"]
     lines = [it["summary"]] + [("假设：" if lang == "zh" else "Assuming ") + a for a in it["assumptions"][:3]]
@@ -431,7 +460,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/threads":
             with _lock:
                 rows = [{"id": t["id"], "title": t.get("title") or (t["messages"][0]["text"][:60] if t["messages"] else "untitled"),
-                         "created": t["created"], "job": next((m["job"] for m in reversed(t["messages"]) if m.get("job")), None)} for t in _threads.values()]
+                         "created": t["created"], "job": (_thread_jobs(t["id"]) or [None])[-1]} for t in _threads.values()]
             for r in rows:
                 j = _jobs.get(r["job"]) if r["job"] else None
                 r["status"] = j["status"] if j else None
@@ -442,9 +471,11 @@ class Handler(BaseHTTPRequestHandler):
             th = _threads.get(parts[1])
             if not th:
                 return self._json(404, {"error": "no such thread"})
-            jobs_in = {m["job"]: _jobs[m["job"]] for m in th["messages"] if m.get("job") and m["job"] in _jobs}
+            with _lock:
+                jobs_in = {jid: _jobs[jid] for jid in _thread_jobs(parts[1])}
             return self._json(200, {**th, "jobs": {jid: {"status": j["status"], "spec": j["spec"], "summary": j.get("summary"), "error": j.get("error"),
-                                                        "n_events": len(j["events"]), "max_iter": j.get("max_iter"), "parent": j.get("parent")} for jid, j in jobs_in.items()}})
+                                                        "n_events": len(j["events"]), "max_iter": j.get("max_iter"), "parent": j.get("parent"),
+                                                        "created": j["created"], "task": j["spec"].get("task", "")} for jid, j in jobs_in.items()}})
         if path == "/schema":
             from .schema import SCHEMAS, OBJECTIVES
             return self._json(200, {"designs": SCHEMAS, "objectives": OBJECTIVES, "backends": {k: v["name"] for k, v in BACKENDS.items()}})
@@ -462,12 +493,15 @@ class Handler(BaseHTTPRequestHandler):
                             "lessons": sorted(({**l, "score": memory.score(l)} for l in ls), key=lambda l: -l["score"])})
             return self._json(200, out)
         if path == "/jobs":
+            # ?thread=<id>: that conversation's runs; ?thread= (empty): runs bound to no conversation; absent: everything
+            q = parse_qs(u.query, keep_blank_values=True)
+            want = q["thread"][0] if "thread" in q else None
             with _lock:
                 rows = [{"id": j, "status": v["status"], "task": v["spec"].get("task", ""),
                          "design": v["spec"].get("design", "matmul"), "backend": v["spec"].get("backend", "ecp5"),
-                         "created": v["created"], "subject": v.get("subject", ""), "parent": v.get("parent"),
+                         "created": v["created"], "subject": v.get("subject", ""), "parent": v.get("parent"), "thread": v.get("thread"),
                          "best": (v.get("summary") or {}).get("best"), "iterations": sum(1 for e in v["events"] if e["kind"] == "result")}
-                        for j, v in _jobs.items()]
+                        for j, v in _jobs.items() if want is None or (v.get("thread") or "") == want]
             rows.sort(key=lambda r: r["created"], reverse=True)
             return self._json(200, rows)
         if len(parts) >= 2 and parts[0] == "jobs":
@@ -482,7 +516,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(200, {"id": job_id, "status": job["status"], "spec": job["spec"],
                                             "events": job["events"][after:], "n_events": len(job["events"]),
                                             "summary": job.get("summary"), "error": job.get("error"),
-                                            "created": job["created"], "subject": job.get("subject", ""), "parent": job.get("parent"), "max_iter": job.get("max_iter")})
+                                            "created": job["created"], "subject": job.get("subject", ""), "parent": job.get("parent"),
+                                            "thread": job.get("thread"), "max_iter": job.get("max_iter")})
             if len(parts) >= 4 and parts[2] == "files":
                 rel = "/".join(parts[3:])
                 base = (RESULTS / job_id).resolve()
@@ -610,11 +645,18 @@ class Handler(BaseHTTPRequestHandler):
             job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
             with _lock:
                 _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [], "created": time.time(),
-                                 "subject": sub, "parent": {"id": parts[1], "iteration": pick.get("iteration") if pick else None}}
+                                 "subject": sub, "parent": {"id": parts[1], "iteration": pick.get("iteration") if pick else None},
+                                 "thread": body.get("thread") or src.get("thread")}
                 (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
                 (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
                 _save_state(job_id)
             _queue.put(job_id)
+            tid = body.get("thread") or src.get("thread")
+            if tid:
+                c = spec["constraints"]
+                cons = f"≥{c['fmax_mhz']} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
+                frm = f"iteration {pick['iteration']}" if pick and pick.get("iteration") else "the best design"
+                _thread_note_job(tid, job_id, f"Forked in the worktable from {frm} of the previous run with {cons}.", True)
             return self._json(202, {"id": job_id, "spec": spec})
         if len(parts) == 4 and parts[0] == "memory" and parts[3] == "vote":
             try:
@@ -646,13 +688,20 @@ class Handler(BaseHTTPRequestHandler):
         except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
             return self._json(400, {"error": f"bad request: {e}"})
         job_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+        thread = body.get("thread")
+        if thread and thread not in _threads:
+            return self._json(404, {"error": "no such thread"})
         with _lock:
             _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [],
-                             "created": time.time(), "subject": sub, "parent": body.get("parent")}
+                             "created": time.time(), "subject": sub, "parent": body.get("parent"), "thread": thread}
             (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
             (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
             _save_state(job_id)
         _queue.put(job_id)
+        if thread:
+            c = spec.get("constraints", {})
+            cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
+            _thread_note_job(thread, job_id, f"Started in the worktable: {spec.get('task', '')} ({spec.get('design', 'matmul')} on {spec.get('backend', 'ecp5')}, {cons}).", False)
         self._json(202, {"id": job_id})
 
     def do_DELETE(self):
@@ -668,6 +717,11 @@ class Handler(BaseHTTPRequestHandler):
             if not th:
                 return self._json(404, {"error": "no such thread"})
             (THREADS / f"{parts[1]}.json").unlink(missing_ok=True)
+            with _lock:
+                for jid, j in _jobs.items():
+                    if j.get("thread") == parts[1]:
+                        j["thread"] = None
+                        _save_state(jid)
             return self._json(200, {"ok": True})
         if len(parts) == 2 and parts[0] == "jobs":
             with _lock:

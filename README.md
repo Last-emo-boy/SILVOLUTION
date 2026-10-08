@@ -135,7 +135,13 @@ language of the conversation. `sa ask "…" [--thread id]` is the same from a sh
 
 ## Worktable
 
-`/work` is the engineer's view (also linked from each result card): a rail of runs,
+`/work?thread=<id>` is the engineer's view of **one conversation** (the "worktable ↗"
+link in the chat header and in each result card): only that conversation's runs are
+listed, and everything started there — a new run from the form, a fork, a re-run —
+is bound to the conversation and shows up in the chat as a turn tagged `worktable`,
+with its own cards and report. Compare only offers runs of the same conversation,
+and a deep link to another conversation's run is refused. Bare `/work` lists the
+runs that belong to no conversation (CLI `sa submit`, older runs). The view: a rail of runs,
 one transcript with a turn per iteration (what the planner did, the IR, one
 verdict line, the simulation ladder; hypothesis / recalled memory / candidates
 with estimates / critical path / lesson behind a per-turn disclosure), and a

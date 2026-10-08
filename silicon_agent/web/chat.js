@@ -68,6 +68,7 @@ const rtlShown = new Set();
   setInterval(refreshThreads, 6000);
   const h = location.hash.slice(1);
   if (h) openThread(h);
+  window.addEventListener("hashchange", () => { const id = location.hash.slice(1) || null; if (id !== tid) openThread(id); });
   $("#input").focus();
 })();
 
@@ -90,7 +91,7 @@ function openThread(id) {
   tid = id; thread = null; open.clear(); rtlShown.clear();
   if (!id) setLang((navigator.language || "").toLowerCase().startsWith("zh"));
   location.hash = id || "";
-  $("#msgs").innerHTML = ""; $("#hello").hidden = !!id; $("#title").textContent = ""; $("#stop").hidden = true;
+  $("#msgs").innerHTML = ""; $("#hello").hidden = !!id; $("#title").textContent = ""; $("#stop").hidden = true; $("#wt-link").hidden = !id;
   document.querySelectorAll("#threads li").forEach((li) => li.classList.toggle("sel", li.dataset.id === id));
   $(".shell").classList.remove("rail-shown");
   if (id) poll();
@@ -107,7 +108,7 @@ async function poll() {
   if (!tid) return;
   try { thread = await api(`/threads/${tid}`); } catch (e) { if (/404/.test(e.message)) { openThread(null); return; } throw e; }
   // pull event streams for every job this conversation talks about
-  for (const jid of new Set(thread.messages.filter((m) => m.job && m.kind === "run").map((m) => m.job))) {
+  for (const jid of Object.keys(thread.jobs || {})) {
     const j = jobs[jid] || (jobs[jid] = { events: [], seen: 0 });
     if (j.done) continue;
     const d = await api(`/jobs/${jid}?after=${j.seen}`);
@@ -147,6 +148,7 @@ function render() {
   const first = thread.messages.find((m) => m.role === "user");
   if (first && hasHan(first.text) !== zh) { setLang(hasHan(first.text)); $("#msgs").innerHTML = ""; }
   $("#title").textContent = thread.title || "";
+  $("#wt-link").href = `/work?thread=${encodeURIComponent(tid)}`;
   const live = liveJob();
   $("#stop").hidden = !live; $("#stop").disabled = false;
   const sc = $("#scroll"), atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80;
@@ -174,7 +176,7 @@ function msgSignature(m) {
 function buildMsg(m) {
   if (m.role === "user") return el(`<li class="msg user"><div class="bubble">${esc(m.text)}</div></li>`);
   const li = el(`<li class="msg assistant"></li>`);
-  if (m.text) li.appendChild(el(`<div class="prose ${m.kind === "run" ? "dim" : ""}">${esc(m.text)}</div>`));
+  if (m.text) li.appendChild(el(`<div class="prose ${m.kind === "run" ? "dim" : ""}">${m.source === "worktable" ? `<span class="tag">worktable</span> ` : ""}${esc(m.text)}</div>`));
   if (m.kind === "run" && m.job) {
     const j = jobs[m.job], spec = j?.spec || thread.jobs[m.job]?.spec;
     if (spec) li.appendChild(specCard(m.job, spec, m.fork));
@@ -322,7 +324,7 @@ function resultCard(jid, j, done, spec) {
     dl.onclick = async () => { const txt = await api(`/jobs/${jid}/rtl`); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain" })); a.download = `${top}.sv`; a.click(); };
     links.append(view, dl);
   }
-  links.appendChild(el(`<a href="/work#${esc(jid)}" target="_blank">${T.worktable}</a>`));
+  links.appendChild(el(`<a href="/work?thread=${encodeURIComponent(tid)}#${esc(jid)}" target="_blank">${T.worktable}</a>`));
   const refine = el(`<button>${T.refine}</button>`); refine.onclick = () => { $("#input").focus(); };
   links.appendChild(refine);
   inner.appendChild(links);

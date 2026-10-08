@@ -130,7 +130,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
   async function submit() {
     const msg = $("#submit-msg"); msg.className = "msg"; msg.textContent = "submitting…";
     try {
-      const r = await post("/jobs", { spec: toSpec(), max_iter: Number($("#maxiter").value) });
+      const r = await post("/jobs", { spec: toSpec(), max_iter: Number($("#maxiter").value), thread: state.thread || undefined });
       msg.textContent = `queued ${r.id}`;
       await refreshJobs(); select(r.id);
     } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
@@ -157,7 +157,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
         const over = { fmax_mhz: Number($("#fk-fmax").value) };
         if ($("#fk-dsp").value !== "") over.max_dsp = Number($("#fk-dsp").value);
         if ($("#fk-lut").value !== "") over.max_lut = Number($("#fk-lut").value);
-        const body = { max_iter: Number($("#fk-iter").value), spec_overrides: { constraints: over }, task: $("#fk-task").value };
+        const body = { max_iter: Number($("#fk-iter").value), spec_overrides: { constraints: over }, task: $("#fk-task").value, thread: state.thread || undefined };
         if (pick != null) body.from_iteration = pick;
         dlg.close();
         const r = await post(`/jobs/${state.selected}/fork`, body);
@@ -165,7 +165,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
       };
       dlg.showModal();
     };
-    $("#act-rerun").onclick = async () => { const d = state.detail; if (!d) return; const r = await post("/jobs", { spec: { ...d.spec, task: (d.spec.task || "") + " (re-run)" }, max_iter: d.max_iter || 8 }); await refreshJobs(); select(r.id); };
+    $("#act-rerun").onclick = async () => { const d = state.detail; if (!d) return; const r = await post("/jobs", { spec: { ...d.spec, task: (d.spec.task || "") + " (re-run)" }, max_iter: d.max_iter || 8, thread: state.thread || undefined }); await refreshJobs(); select(r.id); };
     $("#act-delete").onclick = async () => { if (!state.selected || !confirm("Delete this run and its artifacts?")) return; await api(`/jobs/${state.selected}`, { method: "DELETE" }); await refreshJobs(); show("empty"); };
     $("#act-compare").onclick = () => openCompare(state.selected);
     $("#cmp-back").onclick = () => { if (state.cmpA) select(state.cmpA); else show("empty"); };
@@ -177,6 +177,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     show("compare");
     location.hash = `compare/${aId}${bId ? "/" + bId : ""}`;
     const body = $("#cmp-body"); body.innerHTML = "";
+    if (state.thread && (!state.jobs.some((j) => j.id === aId) || (bId && !state.jobs.some((j) => j.id === bId)))) { show("empty"); return; }
     const a = await api(`/jobs/${aId}`);
     const others = state.jobs.filter((j) => j.id !== aId);
     const pick = el(`<div class="cmp-pick"><span>A: <b>${esc(a.spec.task || aId)}</b></span><span>vs B:</span><select id="cmp-sel"><option value="">choose a run…</option>${others.map((j) => `<option value="${j.id}" ${j.id === bId ? "selected" : ""}>${esc(j.task || j.id)} · ${esc(j.backend)} · ${j.status}</option>`).join("")}</select></div>`);

@@ -23,7 +23,9 @@ button:disabled { opacity: .45; cursor: default; }
 .shell.rail-hidden { grid-template-columns: minmax(0, 1fr); } .shell.rail-hidden .rail { display: none; }
 .rail { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .rail-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 8px; }
-.brand { font-weight: 600; font-size: 13px; } .brand .logo { color: var(--accent); margin-right: 4px; }
+.brand { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 4px; min-width: 0; } .brand .logo { color: var(--accent); margin-right: 4px; }
+.brand .back { color: var(--text-2); text-decoration: none; font-size: 18px; line-height: 1; padding: 0 4px; border-radius: 4px; } .brand .back:hover { background: var(--surface-2); color: var(--text); }
+.brand .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .runs { list-style: none; margin: 0; padding: 0 8px; overflow: auto; flex: 1; }
 .runs li { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
 .runs li:hover, .runs li.sel { background: var(--surface-2); }

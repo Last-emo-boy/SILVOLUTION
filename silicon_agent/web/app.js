@@ -15,9 +15,12 @@ const el = (html) => { const t = document.createElement("template"); t.innerHTML
 const STAGES = [["behavioral", "behavioral"], ["post_synth_func", "post-synth"], ["post_synth_time", "post-synth timing"], ["post_impl_func", "post-impl"], ["post_impl_time", "post-impl timing"]];
 
 // ---------------------------------------------------------------- state
+// /work?thread=<id> scopes the worktable to one conversation: only its runs are listed, and every
+// run created here (new, fork, re-run) is bound to it. Without ?thread it is the global view.
+const THREAD = new URLSearchParams(location.search).get("thread");
 let jobs = [], selected = null, detail = null, seen = 0, pollTimer = null, specs = [];
 let view = "empty";
-const state = { get jobs() { return jobs; }, get detail() { return detail; }, get selected() { return selected; }, cmpA: null, cmpB: null };
+const state = { get jobs() { return jobs; }, get detail() { return detail; }, get selected() { return selected; }, cmpA: null, cmpB: null, thread: THREAD };
 let ext = null;
 const openTurns = new Set(); // iteration numbers whose details are expanded
 
@@ -39,10 +42,20 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   $("#t-rail").onclick = () => { const sh = $(".shell"); if (window.innerWidth <= 800) sh.classList.toggle("rail-shown"); else sh.classList.toggle("rail-hidden"); };
   document.querySelectorAll(".tabs button[data-tab]").forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
   refreshMemCount();
+  if (THREAD) {
+    try {
+      const th = await api(`/threads/${THREAD}`);
+      const head = $(".rail-head"); head.querySelector(".brand").innerHTML = `<a class="back" href="/#${esc(THREAD)}" title="Back to the conversation">‹</a> <span class="logo">▣</span> <span class="tt" title="${esc(th.title)}">${esc(th.title || THREAD)}</span>`;
+      document.title = `${th.title || THREAD} · worktable`;
+    } catch { $(".rail-head .brand").insertAdjacentHTML("beforeend", ` <span class="muted">(thread not found)</span>`); }
+  }
   await refreshJobs();
   setInterval(refreshJobs, 5000);
   const hash = location.hash.slice(1);
-  if (hash === "memory") show("memory"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); } else if (hash) select(hash);
+  if (hash === "memory") show("memory"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
+  else if (hash && (!THREAD || jobs.some((j) => j.id === hash))) select(hash);
+  else if (THREAD && jobs.length) select(jobs[0].id);
+  else show("empty");
 })();
 
 function show(v) {
@@ -64,7 +77,7 @@ async function refreshMemCount() {
 
 // ---------------------------------------------------------------- rail
 async function refreshJobs() {
-  jobs = await api("/jobs");
+  jobs = await api(`/jobs?thread=${encodeURIComponent(THREAD || "")}`);  // "" = runs that belong to no conversation
   const ul = $("#runs"); ul.innerHTML = "";
   for (const j of jobs) {
     const b = j.best?.metrics;
@@ -77,6 +90,7 @@ async function refreshJobs() {
 
 // ---------------------------------------------------------------- run view
 async function select(id) {
+  if (THREAD && !jobs.some((j) => j.id === id)) { await refreshJobs(); if (!jobs.some((j) => j.id === id)) { show("empty"); location.hash = ""; return; } }
   selected = id; seen = 0; detail = null; openTurns.clear();
   location.hash = id;
   clearTimeout(pollTimer);
@@ -147,7 +161,7 @@ function render() {
   $("#j-best").textContent = best ? `best: ${fmt(best.metrics.fmax_mhz, 0)} MHz · ${best.metrics.lut} LUT · ${best.metrics.dsp} DSP · ${best.throughput} ${unit}` : `target: ≥${c.fmax_mhz} MHz${c.max_dsp != null ? ` · ≤${c.max_dsp} DSP` : ""}${c.max_lut != null ? ` · ≤${c.max_lut} LUT` : ""}`;
   $("#btn-stop").hidden = !live; $("#btn-stop").disabled = false;
   let pl = $(".parent-link");
-  if (detail.parent?.id) { if (!pl) { pl = el(`<div class="parent-link"></div>`); $("#transcript").before(pl); } pl.innerHTML = `forked from <a href="#${esc(detail.parent.id)}">${esc(jobs.find((j) => j.id === detail.parent.id)?.task || detail.parent.id)}</a>${detail.parent.iteration ? ` · iteration ${detail.parent.iteration}` : ""}`; pl.querySelector("a").onclick = (e) => { e.preventDefault(); select(detail.parent.id); }; }
+  if (detail.parent?.id) { if (!pl) { pl = el(`<div class="parent-link"></div>`); $("#transcript").before(pl); } const inScope = jobs.some((j) => j.id === detail.parent.id); pl.innerHTML = `forked from ${inScope ? `<a href="#${esc(detail.parent.id)}">` : "<span>"}${esc(jobs.find((j) => j.id === detail.parent.id)?.task || detail.parent.id)}${inScope ? "</a>" : "</span>"}${detail.parent.iteration ? ` · iteration ${detail.parent.iteration}` : ""}`; if (inScope) pl.querySelector("a").onclick = (e) => { e.preventDefault(); select(detail.parent.id); }; }
   else if (pl) pl.remove();
   renderTranscript(rows, unit, spec, c);
   $("#composer").classList.toggle("disabled", !live);
