@@ -252,7 +252,8 @@ function switchTab(name) {
 function renderDesign(row, done, spec) {
   const p = $("#pane-design"); p.innerHTML = "";
   if (!row?.ir) { p.appendChild(el(`<div class="muted">no design yet</div>`)); return; }
-  const ir = row.ir, design = spec.design || "matmul", locked = spec.locked || {}, xc = spec.backend === "xc7s50";
+  const design = spec.design || "matmul", locked = spec.locked || {}, xc = spec.backend === "xc7s50";
+  const ir = { ...locked, ...row.ir };  // planner-visible fields plus the task-locked ones
   const prev = done.filter((d) => d.n < row.n).at(-1)?.ir;
   const sec = el(`<div class="sec"><h3>Architecture <span class="hint">iteration ${row.n}${row.pending ? " (evaluating)" : ""}</span></h3></div>`);
   const arch = el(`<div class="arch"></div>`);
@@ -273,7 +274,7 @@ function renderDesign(row, done, spec) {
   const kl = ks.querySelector(".knobs");
   for (const [k, v] of Object.entries(ir)) {
     if (k === "coefs") continue;
-    const lockd = k in locked, changed = prev && JSON.stringify(prev[k]) !== JSON.stringify(v);
+    const lockd = k in locked, changed = !lockd && prev && JSON.stringify(prev[k]) !== JSON.stringify(v);
     const kn = el(`<div class="knob ${lockd ? "locked" : changed ? "changed" : ""}"><span>${esc(k)}</span><span class="v">${esc(JSON.stringify(v))}</span></div>`);
     if (!lockd) kn.onclick = () => { $("#steer").value = `next iteration: change ${k} (currently ${JSON.stringify(v)}) and keep everything else`; $("#steer").focus(); };
     kl.appendChild(kn);
