@@ -37,12 +37,13 @@ class Backend:
     toolchain: str                  # "yosys + nextpnr-ecp5", "Vivado 2025.2" ...
     emit_style: str = "behavioral"  # how emitters should render multipliers: "ecp5" (explicit MULT18X18D), "vivado", "behavioral"
     aliases: tuple[str, ...] = ()   # words the NL interpreter maps to this backend
+    parallel: int = 1               # how many candidate designs may run through this toolchain at once (CPU budget)
     extra: dict = field(default_factory=dict)
 
     def as_facts(self) -> dict:
         return {"key": self.key, "name": self.name, "vendor": self.vendor, "lut": self.lut, "dsp": self.dsp, "bram": self.bram,
                 "lut_kind": self.lut_kind, "dsp_kind": self.dsp_kind, "toolchain": self.toolchain,
-                "seconds_per_iter": self.seconds_per_iter, "fmax_range": self.fmax_range, "sim_stages": list(self.sim_stages)}
+                "seconds_per_iter": self.seconds_per_iter, "fmax_range": self.fmax_range, "sim_stages": list(self.sim_stages), "parallel": self.parallel}
 
 
 BACKENDS: dict[str, Backend] = {}

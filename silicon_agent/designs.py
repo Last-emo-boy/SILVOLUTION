@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from . import chain, conv, fir, vectors
+from . import chain, conv, cordic, fft, fir, vectors
 from .emit import drain_latency, emit_matmul, min_k_full_rate
 from .ir import MatmulArch, throughput_macs_per_cycle
 
@@ -85,6 +85,34 @@ DESIGNS: dict[str, Design] = {
         extra_sim_sources=("mult18x18d_sim.v",),
         vectors=vectors.chain_vectors,
         tb=lambda a, period: vectors.TB_CHAIN.format(DW=a.data_width, AW=a.acc_width, period=period),
+    ),
+    "cordic": Design(
+        kind="cordic",
+        ir_cls=cordic.CordicArch,
+        top="cordic_top",
+        emit=cordic.emit_cordic,
+        test_module="test_cordic",
+        sim_env=lambda a: {"SA_SAMPLES": "150"},
+        throughput=cordic.throughput,
+        throughput_unit="samples/cycle",
+        latency=cordic.latency_cycles,
+        extra_sim_sources=("mult18x18d_sim.v",),
+        vectors=vectors.cordic_vectors,
+        tb=lambda a, period: vectors.TB_CORDIC.format(W=a.width, period=period),
+    ),
+    "fft": Design(
+        kind="fft",
+        ir_cls=fft.FftArch,
+        top="fft_top",
+        emit=fft.emit_fft,
+        test_module="test_fft",
+        sim_env=lambda a: {"SA_FRAMES": "3"},
+        throughput=fft.throughput,
+        throughput_unit="samples/cycle",
+        latency=fft.latency_cycles,
+        extra_sim_sources=("mult18x18d_sim.v",),
+        vectors=vectors.fft_vectors,
+        tb=lambda a, period: vectors.TB_FFT.format(DW=a.data_width, OW=a.out_width, N=a.n, period=period),
     ),
 }
 

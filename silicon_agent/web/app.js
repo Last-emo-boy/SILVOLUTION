@@ -117,26 +117,27 @@ async function poll() {
 function turns() {
   const rows = new Map(), notes = [];
   let pendingMem = null, pendingSteer = [];
-  const get = (n) => { if (!rows.has(n)) rows.set(n, { n, pending: true, user: [], stages: {} }); return rows.get(n); };
+  const key = (e) => `${e.iteration}.${e.slot || 0}`;
+  const get = (e) => { const k = key(e); if (!rows.has(k)) rows.set(k, { n: e.iteration, slot: e.slot || 0, pending: true, user: [], stages: {} }); return rows.get(k); };
   for (const e of detail.events) {
     switch (e.kind) {
       case "user": pendingSteer.push(e); break;
-      case "note": notes.push(e); break;
-      case "steer": get(e.iteration).user.push(...pendingSteer.splice(0)); break;
+      case "note": if (e.iteration) get({ iteration: e.iteration }).note = e.message; else notes.push(e); break;
+      case "steer": get({ iteration: e.iteration }).user.push(...pendingSteer.splice(0)); break;
       case "memory": pendingMem = e; break;
-      case "rescreen": get(e.iteration).rescreen = e; break;
+      case "rescreen": get({ iteration: e.iteration }).rescreen = e; break;
       case "plan": {
-        const prev = rows.get(e.iteration - 1); if (prev) prev.next = e;
-        if (!e.stop) { const r = get(e.iteration); r.plan = e; if (pendingMem) { r.memory = pendingMem; pendingMem = null; } }
+        const prev = rows.get(`${e.iteration - 1}.0`); if (prev) prev.next = e;
+        if (!e.stop) { const r = get({ iteration: e.iteration }); r.plan = e; if (pendingMem) { r.memory = pendingMem; pendingMem = null; } }
         break;
       }
-      case "evaluating": { const r = get(e.iteration); r.ir = e.ir; if (pendingMem) { r.memory = pendingMem; pendingMem = null; } break; }
-      case "stage": { const r = get(e.iteration); r.stages[e.stage] = e; break; }
-      case "result": Object.assign(get(e.iteration), e, { pending: false }); break;
-      case "lesson": get(e.iteration).lesson = e; break;
+      case "evaluating": { const r = get(e); r.ir = e.ir; if (pendingMem && !e.slot) { r.memory = pendingMem; pendingMem = null; } break; }
+      case "stage": { const r = get(e); r.stages[e.stage] = e; break; }
+      case "result": Object.assign(get(e), e, { pending: false }); break;
+      case "lesson": get({ iteration: e.iteration }).lesson = e; break;
     }
   }
-  const out = [...rows.values()].sort((a, b) => a.n - b.n);
+  const out = [...rows.values()].sort((a, b) => a.n - b.n || a.slot - b.slot);
   if (pendingSteer.length && out.length) out.at(-1).userAfter = pendingSteer;
   if (notes.length && out.length) out[0].notes = notes;
   return out;
@@ -154,11 +155,12 @@ function render() {
   const best = detail.summary?.best || bestOf(done, c);
   const unit = detail.summary?.throughput_unit || (spec.design === "fir" ? "samples/cycle" : "MAC/cycle");
   const live = ["queued", "running"].includes(detail.status);
-  const liveRow = rows.find((r) => r.pending);
+  const liveRow = rows.find((r) => r.pending && !r.slot) || rows.find((r) => r.pending);
 
   $("#j-task").textContent = spec.task || selected;
   const pill = $("#j-pill"); pill.className = `pill ${detail.status}`;
-  pill.textContent = { queued: "queued", running: liveRow ? `iteration ${liveRow.n}` : "running", done: `PASS · ${done.length} iter`, failed: `FAIL · ${done.length} iter`, error: "error", interrupted: "interrupted" }[detail.status] || detail.status;
+  const nRounds = new Set(done.map((r) => r.n)).size;
+  pill.textContent = { queued: "queued", running: liveRow ? `iteration ${liveRow.n}${rows.filter((r) => r.pending).length > 1 ? " ×" + rows.filter((r) => r.pending).length : ""}` : "running", done: `PASS · ${nRounds} iter${done.length > nRounds ? ` · ${done.length} designs` : ""}`, failed: `FAIL · ${nRounds} iter`, error: "error", interrupted: "interrupted" }[detail.status] || detail.status;
   $("#j-best").textContent = best ? `best: ${fmt(best.metrics.fmax_mhz, 0)} MHz · ${best.metrics.lut} LUT · ${best.metrics.dsp} DSP · ${best.throughput} ${unit}` : `target: ≥${c.fmax_mhz} MHz${c.max_dsp != null ? ` · ≤${c.max_dsp} DSP` : ""}${c.max_lut != null ? ` · ≤${c.max_lut} LUT` : ""}`;
   $("#btn-stop").hidden = !live; $("#btn-stop").disabled = false;
   let pl = $(".parent-link");
@@ -204,17 +206,19 @@ const stageChips = (r, backend) => {
 
 function turnSignature(r) {
   // anything that changes what the turn shows; the open/closed state is deliberately not part of it
-  return JSON.stringify([r.pending, r.notes?.length, r.user.length, r.userAfter?.length, r.plan?.action, r.plan?.candidates?.length, r.plan?.rescreened, r.ir, r.violations, r.metrics?.fmax_mhz, r.metrics?.sim_stages && Object.keys(r.metrics.sim_stages).length, Object.keys(r.stages).map((k) => k + r.stages[k].passed), r.lesson?.lesson?.id, r.memory?.lessons?.length, r.next?.stop, r.diagnosis]);
+  return JSON.stringify([r.pending, r.slot, r.note, r.notes?.length, r.user.length, r.userAfter?.length, r.plan?.action, r.plan?.candidates?.length, r.plan?.rescreened, r.ir, r.violations, r.metrics?.fmax_mhz, r.metrics?.sim_stages && Object.keys(r.metrics.sim_stages).length, Object.keys(r.stages).map((k) => k + r.stages[k].passed), r.lesson?.lesson?.id, r.memory?.lessons?.length, r.next?.stop, r.diagnosis]);
 }
 
 function buildTurn(r, prevIr, unit, spec) {
-  const li = el(`<li class="turn ${r.pending ? "live" : ""}" data-n="${r.n}"><div class="num">${r.n}</div><div class="body"></div></li>`);
+  const li = el(`<li class="turn ${r.pending ? "live" : ""} ${r.slot ? "sib" : ""}" data-n="${r.n}.${r.slot}"><div class="num">${r.slot ? `${r.n}.${r.slot}` : r.n}</div><div class="body"></div></li>`);
   const b = li.querySelector(".body");
   for (const nt of r.notes || []) b.appendChild(el(`<div class="action"><span class="why">${esc(nt.message)}</span></div>`));
   for (const u of r.user) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)}</div>`));
   const a = r.plan?.action ?? r.action;
-  if (r.n === 1) b.appendChild(el(`<div class="action">Start from the spec's initial design.</div>`));
+  if (r.slot) b.appendChild(el(`<div class="action"><span class="why">sibling candidate (measured in parallel) — </span>${esc(r.action || "")}</div>`));
+  else if (r.n === 1) b.appendChild(el(`<div class="action">Start from the spec's initial design.</div>`));
   else if (a) b.appendChild(el(`<div class="action">${r.plan?.fallback ? `<span class="why">fallback candidate — </span>` : ""}${esc(a)}</div>`));
+  if (r.note) b.appendChild(el(`<div class="action"><span class="why">${esc(r.note)}</span></div>`));
   if (r.ir) b.appendChild(el(irChips(r.ir, prevIr, spec.locked)));
   if (r.pending) {
     b.appendChild(el(`<div class="head"><span class="verdict live">${r.ir ? "simulating · synthesizing · place & route" : "planning"}</span></div>`));
@@ -264,7 +268,7 @@ function renderTranscript(rows, unit, spec, c) {
   const existing = new Map([...ol.querySelectorAll("li.turn[data-n]")].map((li) => [li.dataset.n, li]));
   let prevIr = null, cursor = null;
   for (const r of rows) {
-    const key = String(r.n), cur = existing.get(key);
+    const key = `${r.n}.${r.slot}`, cur = existing.get(key);
     if (cur && cur.dataset.sig === turnSignature(r)) { cursor = cur; }
     else {
       const li = buildTurn(r, prevIr, unit, spec);

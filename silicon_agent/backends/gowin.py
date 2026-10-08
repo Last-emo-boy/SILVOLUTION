@@ -79,5 +79,5 @@ DEV = register(Backend(
     lut=8640, dsp=20, bram=26, lut_kind="LUT4", dsp_kind="MULT18X18", dsp_width=18,
     synth_pnr=synth_pnr, netlist_sims=netlist_sims, sim_stages=("behavioral", "post_synth_func"),
     seconds_per_iter="15-60 s", fmax_range="30-200 MHz", toolchain="yosys + nextpnr-himbaechel/gowin (open source)",
-    emit_style="behavioral", aliases=("gowin", "gw1n", "tang nano", "sipeed", "高云"),
+    parallel=3, emit_style="behavioral", aliases=("gowin", "gw1n", "tang nano", "sipeed", "高云"),
 ))

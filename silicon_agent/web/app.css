@@ -61,6 +61,7 @@ button:disabled { opacity: .45; cursor: default; }
 .turn.open { background: var(--surface); }
 .turn .num { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 600 11px var(--mono); color: var(--muted); background: var(--surface-2); margin-top: 2px; }
 .turn.live .num { color: var(--accent); background: var(--accent-soft); }
+.turn.sib { padding-top: 6px; padding-bottom: 10px; } .turn.sib + .turn.sib, .turn + .turn.sib { border-top: 1px dashed var(--border); } .turn.sib .num { font-size: 9px; background: transparent; border: 1px dashed var(--border-2); }
 .turn .body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 
 /* primary line of each turn: what happened */

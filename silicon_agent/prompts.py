@@ -151,8 +151,68 @@ FIR facts below applies per stage.\n""" + FIR_FACTS["ecp5"],
 }
 
 
+CORDIC_WHAT = "a fixed-point CORDIC engine (rotation: sin/cos; vectoring: magnitude/atan2) as a streaming pipeline or an iterative unit"
+
+CORDIC_IR = """IR fields and legal ranges:
+  mode        str rotate|vector   (task parameter)
+  width       int 8..32           data path bits (task parameter)
+  iterations  int 4..width+2      micro-rotations = output precision in bits; each is one shift-add stage
+  unroll      int, divides iterations   micro-rotations per pipeline register: 1 = one per stage (deep pipeline,
+                                   high Fmax, iterations registers); iterations = all combinational (one stage, low Fmax)
+  fold        int 1 | iterations  1 = pipelined, 1 sample/cycle; iterations = one iterative engine reused every cycle,
+                                   1/iterations samples per cycle, ~1/iterations the registers and adders
+  guard_bits  int 0..4            extra LSBs through the rotation (precision at the cost of width)
+  scale_comp  bool                constant-multiply pre-scale by 1/K (adds one multiplier / DSP and a stage)
+
+Structure summary: no multipliers at all (unless scale_comp); the datapath is three adders of width+guard bits per
+micro-rotation plus barrel-free constant shifts. Fmax is set by the adder carry chain of one stage: with unroll=U the
+critical path is U chained adders. Resources: pipelined ~ 3*(width+guard)*iterations FFs + the same in LUT adders;
+iterative ~ 3*(width+guard) FFs + one adder set + a shift mux (the variable shifter costs LUTs)."""
+
+CORDIC_IR_JSON = '{"iterations":..,"unroll":..,"fold":..,"guard_bits":..,"scale_comp":..}'
+
+CORDIC_FACTS = {
+    "ecp5": """ECP5 facts, measured on a 16-bit rotate, 16 iterations, guard 2: unroll=2 pipelined -> 108.6 MHz, 2706 LUT, 467 FF
+(two chained 18-bit adders per stage set the period); Gowin GW1NR-9 same design -> 181.8 MHz, 2336 LUT; iCE40 UP5K
+-> 32 MHz, 3950 LUT (over half the device). Rule: unroll=1 roughly doubles Fmax over unroll=2 at the cost of 2x FFs;
+fold=iterations cuts LUTs ~iterations-fold but throughput too.""",
+}
+
+FFT_WHAT = "a streaming N-point complex FFT (radix-2 single-path delay feedback pipeline, one sample per cycle)"
+
+FFT_IR = """IR fields and legal ranges:
+  n           int power of 2, 16..4096   (task parameter)
+  data_width  int 8..24                  (task parameter)
+  tw_width    int 8..18                  twiddle factor bits (precision of the rotations)
+  growth      str scale|grow             scale: /2 per stage, output = FFT/N in data_width bits; grow: +1 bit per stage,
+                                         exact FFT, output width data_width+log2(n) (wider adders and multipliers)
+  tw_mem      str lut|bram               twiddle ROMs (N/2^(s+1) entries per stage) in LUTs or block RAM
+  delay_mem   str auto|lut|bram          the delay-feedback lines (N/2, N/4, ..., 1 deep): LUT shift registers or BRAM
+  bram_min    int 16..512                with auto: lines at least this deep go to BRAM
+  mul_regs    int 0..3                   pipeline registers after each stage's complex multiplier (4 real multipliers)
+  bf_regs     int 0|1                    register the butterfly output
+  dsp_regs    str in {"none","out","in_out","in_pipe_out"}  multiplier register stages (mul_regs + dsp_regs <= 3)
+  bit_reverse bool                       add an N-sample reorder buffer so the output is in natural order (+N latency, +BRAM)
+
+Structure summary: log2(n) stages, each a butterfly + delay line + one complex multiplier (except the last stage); the
+multiplier costs 4 DSPs when data_width and tw_width fit the DSP (3 with Karatsuba on Vivado); the critical path with
+few registers is the complex multiply-add (two products + add + rounding) -- mul_regs/dsp_regs break it. Delay lines
+deeper than ~32 are cheaper in BRAM; shallow ones in LUTs. Throughput is always 1 sample/cycle; latency ~ n + stages."""
+
+FFT_IR_JSON = '{"tw_width":..,"growth":"..","tw_mem":"..","delay_mem":"..","bram_min":..,"mul_regs":..,"bf_regs":..,"dsp_regs":".."}'
+
+FFT_FACTS = {
+    "ecp5": """ECP5 facts, measured on a 256-point 16-bit FFT, tw 16, scale, delay auto/bram_min 32, mul_regs 1, bf_regs 1,
+dsp_regs out: 47.1 MHz, 3695 LUT, 1868 FF, 28 MULT18X18D, 3 DP16KD -- the multiply-add-round of each stage is
+unpipelined (mul_regs 1 only registers the output), so the complex multiplier + rounding adder is the critical path.
+More mul_regs and in_pipe_out dsp_regs are the first moves; growth=grow widens every adder.""",
+}
+
+
 PROMPTS = {
     "matmul": {"what": MATMUL_WHAT, "ir": MATMUL_IR, "ir_json": MATMUL_IR_JSON, "facts": MATMUL_FACTS},
+    "cordic": {"what": CORDIC_WHAT, "ir": CORDIC_IR, "ir_json": CORDIC_IR_JSON, "facts": CORDIC_FACTS},
+    "fft": {"what": FFT_WHAT, "ir": FFT_IR, "ir_json": FFT_IR_JSON, "facts": FFT_FACTS},
     "fir_chain": {"what": CHAIN_WHAT, "ir": CHAIN_IR, "ir_json": CHAIN_IR_JSON, "facts": CHAIN_FACTS},
     "fir": {"what": FIR_WHAT, "ir": FIR_IR, "ir_json": FIR_IR_JSON, "facts": FIR_FACTS},
     "conv2d": {"what": CONV_WHAT, "ir": CONV_IR, "ir_json": CONV_IR_JSON, "facts": CONV_FACTS},

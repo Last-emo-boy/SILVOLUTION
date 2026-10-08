@@ -65,9 +65,16 @@ module DP16KD(
     end
   endtask
 
+  // 36-bit pseudo-dual-port mode (DATA_WIDTH 36): the two ports form one wide port -- A writes {DIB,DIA} at ADA
+  // (36-bit words, address bits [13:5]), B reads {DOB,DOA} at ADB
+  wire wide = (DATA_WIDTH_A == 36) || (DATA_WIDTH_B == 36);
+  task wr36; input [13:0] ad; input [35:0] d; integer b; begin b = ad[13:5] * 4; mem[b] = d[8:0]; mem[b+1] = d[17:9]; mem[b+2] = d[26:18]; mem[b+3] = d[35:27]; end endtask
+  function [35:0] rd36; input [13:0] ad; integer b; begin b = ad[13:5] * 4; rd36 = {mem[b+3], mem[b+2], mem[b+1], mem[b]}; end endfunction
   always @(posedge CLKA) begin
     if (CEA) begin
-      if (WEA) begin
+      if (wide) begin
+        if (WEA) wr36(ada, {dib, dia});
+      end else if (WEA) begin
         if (WRITEMODE_A == "READBEFOREWRITE") doa <= rd(ada, DATA_WIDTH_A);
         wr(ada, DATA_WIDTH_A, dia);
         if (WRITEMODE_A == "WRITETHROUGH") doa <= dia;
@@ -77,7 +84,9 @@ module DP16KD(
   end
   always @(posedge CLKB) begin
     if (CEB) begin
-      if (WEB) begin
+      if (wide) begin
+        {dob, doa} <= rd36(adb);
+      end else if (WEB) begin
         if (WRITEMODE_B == "READBEFOREWRITE") dob <= rd(adb, DATA_WIDTH_B);
         wr(adb, DATA_WIDTH_B, dib);
         if (WRITEMODE_B == "WRITETHROUGH") dob <= dib;
@@ -228,4 +237,52 @@ module SPX9 (DO, DI, BLKSEL, AD, WRE, CLK, CE, OCE, RESET);
     end else dq <= rd(AD, BIT_WIDTH);
   end
   assign DO = dq;
+endmodule
+
+// Gowin simple-dual-port SDPX9B (18 kbit, x9 lanes): port A writes (CEA = write enable), port B reads (CEB = read clock enable).
+module SDPX9B(CLKA, CEA, CLKB, CEB, OCE, RESETA, RESETB, ADA, ADB, BLKSELA, BLKSELB, DI, DO);
+  input CLKA, CEA, CLKB, CEB, OCE, RESETA, RESETB; input [13:0] ADA, ADB; input [2:0] BLKSELA, BLKSELB; input [35:0] DI; output reg [35:0] DO;
+  parameter READ_MODE = 1'b0, BIT_WIDTH_0 = 36, BIT_WIDTH_1 = 36, BLK_SEL_0 = 3'b000, BLK_SEL_1 = 3'b000, RESET_MODE = "SYNC";
+  parameter INIT_RAM_00=288'h0, INIT_RAM_01=288'h0, INIT_RAM_02=288'h0, INIT_RAM_03=288'h0, INIT_RAM_04=288'h0, INIT_RAM_05=288'h0, INIT_RAM_06=288'h0, INIT_RAM_07=288'h0, INIT_RAM_08=288'h0, INIT_RAM_09=288'h0, INIT_RAM_0A=288'h0, INIT_RAM_0B=288'h0, INIT_RAM_0C=288'h0, INIT_RAM_0D=288'h0, INIT_RAM_0E=288'h0, INIT_RAM_0F=288'h0;
+  parameter INIT_RAM_10=288'h0, INIT_RAM_11=288'h0, INIT_RAM_12=288'h0, INIT_RAM_13=288'h0, INIT_RAM_14=288'h0, INIT_RAM_15=288'h0, INIT_RAM_16=288'h0, INIT_RAM_17=288'h0, INIT_RAM_18=288'h0, INIT_RAM_19=288'h0, INIT_RAM_1A=288'h0, INIT_RAM_1B=288'h0, INIT_RAM_1C=288'h0, INIT_RAM_1D=288'h0, INIT_RAM_1E=288'h0, INIT_RAM_1F=288'h0;
+  parameter INIT_RAM_20=288'h0, INIT_RAM_21=288'h0, INIT_RAM_22=288'h0, INIT_RAM_23=288'h0, INIT_RAM_24=288'h0, INIT_RAM_25=288'h0, INIT_RAM_26=288'h0, INIT_RAM_27=288'h0, INIT_RAM_28=288'h0, INIT_RAM_29=288'h0, INIT_RAM_2A=288'h0, INIT_RAM_2B=288'h0, INIT_RAM_2C=288'h0, INIT_RAM_2D=288'h0, INIT_RAM_2E=288'h0, INIT_RAM_2F=288'h0;
+  parameter INIT_RAM_30=288'h0, INIT_RAM_31=288'h0, INIT_RAM_32=288'h0, INIT_RAM_33=288'h0, INIT_RAM_34=288'h0, INIT_RAM_35=288'h0, INIT_RAM_36=288'h0, INIT_RAM_37=288'h0, INIT_RAM_38=288'h0, INIT_RAM_39=288'h0, INIT_RAM_3A=288'h0, INIT_RAM_3B=288'h0, INIT_RAM_3C=288'h0, INIT_RAM_3D=288'h0, INIT_RAM_3E=288'h0, INIT_RAM_3F=288'h0;
+  reg [8:0] mem [0:2047];
+  integer i; initial begin for (i = 0; i < 2048; i = i + 1) mem[i] = 9'd0; DO = 0; end
+  function [35:0] rd; input [13:0] ad; input integer w; integer b, off;
+    begin
+      if (w >= 36) begin b = ad[13:5] * 4; rd = {mem[b+3], mem[b+2], mem[b+1], mem[b]}; end
+      else if (w == 18) begin b = ad[13:4] * 2; rd = {18'd0, mem[b+1], mem[b]}; end
+      else if (w == 9) begin b = ad[13:3]; rd = {27'd0, mem[b]}; end
+      else begin b = ad[13:3]; off = ad[2:0]; rd = (mem[b] >> off) & ((1 << w) - 1); end
+    end
+  endfunction
+  task wr; input [13:0] ad; input integer w; input [35:0] d; integer b, off, k;
+    begin
+      if (w >= 36) begin b = ad[13:5] * 4; {mem[b+3], mem[b+2], mem[b+1], mem[b]} = d; end
+      else if (w == 18) begin b = ad[13:4] * 2; mem[b] = d[8:0]; mem[b+1] = d[17:9]; end
+      else if (w == 9) begin b = ad[13:3]; mem[b] = d[8:0]; end
+      else begin b = ad[13:3]; off = ad[2:0]; for (k = 0; k < w; k = k + 1) mem[b][off+k] = d[k]; end
+    end
+  endtask
+  always @(posedge CLKA) if (CEA) wr(ADA, BIT_WIDTH_0, DI);
+  always @(posedge CLKB) if (CEB) begin
+    if (RESETB && RESET_MODE == "SYNC") DO <= 0;
+    else DO <= rd(ADB, BIT_WIDTH_1);
+  end
+endmodule
+
+// SDPB: 16 kbit x8-lane variant; yosys packs data through x8_wr_data / x8_rd_data
+module SDPB(CLKA, CEA, CLKB, CEB, OCE, RESETA, RESETB, ADA, ADB, BLKSELA, BLKSELB, DI, DO);
+  input CLKA, CEA, CLKB, CEB, OCE, RESETA, RESETB; input [13:0] ADA, ADB; input [2:0] BLKSELA, BLKSELB; input [31:0] DI; output [31:0] DO;
+  parameter READ_MODE = 1'b0, BIT_WIDTH_0 = 32, BIT_WIDTH_1 = 32, BLK_SEL_0 = 3'b000, BLK_SEL_1 = 3'b000, RESET_MODE = "SYNC";
+  parameter INIT_RAM_00=256'h0, INIT_RAM_01=256'h0, INIT_RAM_02=256'h0, INIT_RAM_03=256'h0, INIT_RAM_04=256'h0, INIT_RAM_05=256'h0, INIT_RAM_06=256'h0, INIT_RAM_07=256'h0, INIT_RAM_08=256'h0, INIT_RAM_09=256'h0, INIT_RAM_0A=256'h0, INIT_RAM_0B=256'h0, INIT_RAM_0C=256'h0, INIT_RAM_0D=256'h0, INIT_RAM_0E=256'h0, INIT_RAM_0F=256'h0;
+  parameter INIT_RAM_10=256'h0, INIT_RAM_11=256'h0, INIT_RAM_12=256'h0, INIT_RAM_13=256'h0, INIT_RAM_14=256'h0, INIT_RAM_15=256'h0, INIT_RAM_16=256'h0, INIT_RAM_17=256'h0, INIT_RAM_18=256'h0, INIT_RAM_19=256'h0, INIT_RAM_1A=256'h0, INIT_RAM_1B=256'h0, INIT_RAM_1C=256'h0, INIT_RAM_1D=256'h0, INIT_RAM_1E=256'h0, INIT_RAM_1F=256'h0;
+  parameter INIT_RAM_20=256'h0, INIT_RAM_21=256'h0, INIT_RAM_22=256'h0, INIT_RAM_23=256'h0, INIT_RAM_24=256'h0, INIT_RAM_25=256'h0, INIT_RAM_26=256'h0, INIT_RAM_27=256'h0, INIT_RAM_28=256'h0, INIT_RAM_29=256'h0, INIT_RAM_2A=256'h0, INIT_RAM_2B=256'h0, INIT_RAM_2C=256'h0, INIT_RAM_2D=256'h0, INIT_RAM_2E=256'h0, INIT_RAM_2F=256'h0;
+  parameter INIT_RAM_30=256'h0, INIT_RAM_31=256'h0, INIT_RAM_32=256'h0, INIT_RAM_33=256'h0, INIT_RAM_34=256'h0, INIT_RAM_35=256'h0, INIT_RAM_36=256'h0, INIT_RAM_37=256'h0, INIT_RAM_38=256'h0, INIT_RAM_39=256'h0, INIT_RAM_3A=256'h0, INIT_RAM_3B=256'h0, INIT_RAM_3C=256'h0, INIT_RAM_3D=256'h0, INIT_RAM_3E=256'h0, INIT_RAM_3F=256'h0;
+  wire [35:0] do36;
+  SDPX9B #(.READ_MODE(READ_MODE), .BIT_WIDTH_0(BIT_WIDTH_0 / 8 * 9 + BIT_WIDTH_0 % 8), .BIT_WIDTH_1(BIT_WIDTH_1 / 8 * 9 + BIT_WIDTH_1 % 8), .RESET_MODE(RESET_MODE))
+    u (.CLKA(CLKA), .CEA(CEA), .CLKB(CLKB), .CEB(CEB), .OCE(OCE), .RESETA(RESETA), .RESETB(RESETB), .ADA(ADA), .ADB(ADB), .BLKSELA(BLKSELA), .BLKSELB(BLKSELB),
+       .DI({1'b0, DI[31:24], 1'b0, DI[23:16], 1'b0, DI[15:8], 1'b0, DI[7:0]}), .DO(do36));
+  assign DO = {do36[34:27], do36[25:18], do36[16:9], do36[7:0]};
 endmodule

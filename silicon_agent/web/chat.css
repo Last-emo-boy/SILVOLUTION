@@ -85,6 +85,7 @@ button:disabled { opacity: .45; cursor: default; }
 .iter:first-child { border-top: 0; }
 .iter .n { font: 600 11px var(--mono); color: var(--muted); padding-top: 3px; }
 .iter .n.live { color: var(--accent); }
+.iter.sib { padding-left: 14px; border-top: 1px dashed var(--border); } .iter.sib .n { font-size: 10px; } .iter.sib .what { color: var(--text-2); font-size: 12px; }
 .iter .what { color: var(--text); font-size: 13px; }
 .iter .nums { font: 11.5px var(--mono); color: var(--text-2); margin-top: 2px; } .iter .nums b { color: var(--text); font-weight: 500; }
 .iter .nums .v { color: var(--good); } .iter .nums .x { color: var(--bad); }

@@ -21,7 +21,7 @@ L.zh = {
   placeholder: "描述你要的硬件，或者对当前结果提要求…", hint: "⏎ 发送 · ⇧⏎ 换行", stop: "■ 停止", thinking: "思考中", newChat: "新对话",
   spec: "理解的规格", progress: "运行中", traj: "轨迹", result: "结果", noResult: "未找到可行设计", iter: "第 {n} 轮", iters: "{n} 轮", feasible: "{n} 轮可行",
   planning: "规划下一轮", sim: "行为级仿真", synth: "综合", pnr: "布局布线", queued: "排队中", stopped: "已停止", error: "出错",
-  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续",
+  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续",
   stages: ["行为级仿真", "综合后功能", "综合后时序", "实现后功能", "实现后时序"], signoff: "实现后时序仿真通过",
   design: "设计", backend: "器件", constraints: "约束", objective: "目标", locked: "固定参数", start: "起点", closest: "最接近",
   secs: "秒", critical: "关键路径", startFrom: "从起点设计开始。", fork: "基于上一次的最佳设计继续。",
@@ -33,7 +33,7 @@ L.en = {
   placeholder: "Describe the hardware you want, or ask for changes to the current result…", hint: "⏎ send · ⇧⏎ newline", stop: "■ Stop", thinking: "Thinking", newChat: "New chat",
   spec: "Understood spec", progress: "Running", traj: "Trajectory", result: "Result", noResult: "No feasible design", iter: "iteration {n}", iters: "{n} iterations", feasible: "{n} feasible",
   planning: "planning", sim: "behavioral sim", synth: "synthesis", pnr: "place & route", queued: "queued", stopped: "stopped", error: "error",
-  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here",
+  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here",
   stages: ["behavioral", "post-synth func", "post-synth timing", "post-impl func", "post-impl timing"], signoff: "post-implementation timing sim passed",
   design: "design", backend: "device", constraints: "constraints", objective: "objective", locked: "locked", start: "start", closest: "closest",
   secs: "s", critical: "critical path", startFrom: "Start from the initial design.", fork: "Continue from the previous best design.",
@@ -44,7 +44,7 @@ let T = zh ? L.zh : L.en;
 const t = (k, v) => T[k].replace("{n}", v).replace("{f}", v);
 function setLang(isZh) { zh = isZh; T = zh ? L.zh : L.en; $("#input").placeholder = T.placeholder; $("#chint").textContent = T.hint; $("#stop").textContent = T.stop; }
 const STAGE_KEYS = ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"];
-const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top", fir_chain: "fir_chain_top" };
+const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top", fir_chain: "fir_chain_top", cordic: "cordic_top", fft: "fft_top" };
 let DEV = { ecp5: "ECP5 LFE5U-45F", xc7s50: "Spartan-7 XC7S50", ice40: "iCE40 UP5K", gowin: "Gowin GW1NR-9" };
 let BSTAGES = { ecp5: ["behavioral", "post_synth_func"], xc7s50: STAGE_KEYS_ALL(), ice40: ["behavioral", "post_synth_func"], gowin: ["behavioral", "post_synth_func"] };
 function STAGE_KEYS_ALL() { return ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"]; }
@@ -193,7 +193,7 @@ function buildMsg(m) {
     }
     if (j) {
       const rows = turns(j.events), done = rows.filter((r) => !r.pending);
-      const liveRow = rows.find((r) => r.pending);
+      const liveRow = rows.find((r) => r.pending && !r.slot) || rows.find((r) => r.pending);
       if (["queued", "running"].includes(j.status) || done.length) li.appendChild(trajCard(m.job, j, rows, done, liveRow, spec));
       if (j.done) li.appendChild(resultCard(m.job, j, done, spec));
     }
@@ -241,19 +241,22 @@ function specCard(jid, spec, fork) {
 }
 
 function turns(events) {
+  // one row per (iteration, slot): slot 0 is the chosen candidate, slots 1.. are siblings measured in parallel
   const rows = new Map(); let pendingSteer = [];
-  const get = (n) => { if (!rows.has(n)) rows.set(n, { n, pending: true, user: [], stages: {} }); return rows.get(n); };
+  const key = (e) => `${e.iteration}.${e.slot || 0}`;
+  const get = (e) => { const k = key(e); if (!rows.has(k)) rows.set(k, { n: e.iteration, slot: e.slot || 0, pending: true, user: [], stages: {} }); return rows.get(k); };
   for (const e of events) {
     switch (e.kind) {
       case "user": pendingSteer.push(e); break;
-      case "steer": get(e.iteration).user.push(...pendingSteer.splice(0)); break;
-      case "plan": { const prev = rows.get(e.iteration - 1); if (prev) prev.next = e; if (!e.stop) get(e.iteration).plan = e; break; }
-      case "evaluating": get(e.iteration).ir = e.ir; break;
-      case "stage": get(e.iteration).stages[e.stage] = e; break;
-      case "result": Object.assign(get(e.iteration), e, { pending: false }); break;
+      case "steer": get({ iteration: e.iteration }).user.push(...pendingSteer.splice(0)); break;
+      case "plan": { const prev = rows.get(`${e.iteration - 1}.0`); if (prev) prev.next = e; if (!e.stop) get({ iteration: e.iteration }).plan = e; break; }
+      case "evaluating": get(e).ir = e.ir; break;
+      case "stage": get(e).stages[e.stage] = e; break;
+      case "result": Object.assign(get(e), e, { pending: false }); break;
+      case "note": if (e.iteration) get({ iteration: e.iteration }).note = e.message; break;
     }
   }
-  const out = [...rows.values()].sort((a, b) => a.n - b.n);
+  const out = [...rows.values()].sort((a, b) => a.n - b.n || a.slot - b.slot);
   if (pendingSteer.length && out.length) out.at(-1).userAfter = pendingSteer;
   return out;
 }
@@ -286,7 +289,7 @@ function eta(j, rows, done) {
   let per = ts.length >= 2 ? (ts[ts.length - 1] - ts[0]) / (ts.length - 1) : ts.length === 1 ? ts[0] : null;
   if (per == null) { const band = (BFACTS[j.spec?.backend] || {}).seconds_per_iter || ""; const m = band.match(/([\d.]+)-([\d.]+)\s*(s|min)/); if (m) per = ((+m[1] + +m[2]) / 2) * (m[3] === "min" ? 60 : 1) + 20; }
   if (per == null) return "";
-  const left = Math.max(0, (j.max_iter - done.length)) * per;
+  const left = Math.max(0, (j.max_iter - new Set(done.map((r) => r.n)).size)) * per;
   return left >= 90 ? `~${Math.round(left / 60)} min` : `~${Math.round(left)} s`;
 }
 let BFACTS = {};
@@ -295,20 +298,22 @@ function trajCard(jid, j, rows, done, liveRow, spec) {
   const live = ["queued", "running"].includes(j.status), unit = j.summary?.throughput_unit || (spec.design === "fir" ? "samples/cycle" : "MAC/cycle");
   const feas = done.filter((r) => r.violations?.length === 0).length;
   const remaining = live ? eta(j, rows, done) : "";
-  const sub = live ? `<span class="live">${t("iter", liveRow?.n ?? done.length + 1)} / ${j.max_iter} · ${phase(liveRow, j)}</span>${remaining ? ` · ${remaining} ${T.left}` : ""}` : `${t("iters", done.length)}${feas ? ` · ${t("feasible", feas)}` : ""}`;
+  const nRounds = new Set(done.map((r) => r.n)).size, nPar = rows.filter((r) => r.pending).length;
+  const sub = live ? `<span class="live">${t("iter", liveRow?.n ?? nRounds + 1)} / ${j.max_iter}${nPar > 1 ? ` ×${nPar}` : ""} · ${phase(liveRow, j)}</span>${remaining ? ` · ${remaining} ${T.left}` : ""}` : `${t("iters", nRounds)}${done.length > nRounds ? ` (${done.length} ${T.designs})` : ""}${feas ? ` · ${t("feasible", feas)}` : ""}`;
   const d = card(`${jid}:traj`, live ? T.progress : T.traj, sub);
   const inner = d.querySelector(".inner"), list = el(`<div class="iters"></div>`);
   let prev = null;
   for (const r of rows) {
     const m = r.metrics, ok = m && r.violations.length === 0;
-    const what = r.n === 1 ? (j.parent ? T.fork : T.startFrom) : (r.plan?.action ?? r.action ?? "");
-    const row = el(`<div class="iter"><span class="n ${r.pending ? "live" : ""}">${r.n}</span><div>
+    const what = r.slot ? (r.action ?? "") : r.n === 1 ? (j.parent ? T.fork : T.startFrom) : (r.plan?.action ?? r.action ?? "");
+    const row = el(`<div class="iter ${r.slot ? "sib" : ""}"><span class="n ${r.pending ? "live" : ""}">${r.slot ? `${r.n}.${r.slot}` : r.n}</span><div>
       ${r.user.map((u) => `<div class="user">${esc(u.message)}</div>`).join("")}
       <div class="what">${esc(what)}</div>
       ${r.ir ? chips(r.ir, prev, spec.locked) : ""}
       ${r.pending ? `<div class="nums"><span class="live" style="color:var(--accent)">${esc(phase(r, j))}</span></div>` : `<div class="nums"><span class="${ok ? "v" : "x"}">${ok ? "✓" : "✕"}</span> <b>${fmt(m.fmax_mhz)} MHz</b>${seedSpan(m)} · ${m.lut} LUT · ${m.dsp} DSP · ${r.throughput} ${esc(unit)} · ${r.eda_seconds}${T.secs}${ok ? "" : ` · <span class="x">${esc(r.violations.join(", "))}</span>`}</div>`}
       ${r.ir ? stageChips(r, spec.backend) : ""}
-      ${r.n > 1 && (r.plan?.diagnosis ?? r.diagnosis) ? `<div class="why">${esc(r.plan?.diagnosis ?? r.diagnosis)}</div>` : ""}
+      ${r.n > 1 && !r.slot && (r.plan?.diagnosis ?? r.diagnosis) ? `<div class="why">${esc(r.plan?.diagnosis ?? r.diagnosis)}</div>` : ""}
+      ${r.note ? `<div class="why">${esc(r.note)}</div>` : ""}
       ${!r.pending && m.critical_path?.length > 1 ? `<div class="cp"><span>${T.critical} ${fmt(m.critical_path[0].total_ns, 2)} ns:</span>${m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl.split(".").slice(-2).join("."))}</i> ${fmt(s.logic_ns + s.route_ns, 2)}</span>`).join("")}</div>` : ""}
       ${r.next?.stop ? `<div class="why">■ ${esc(r.next.stop_reason || r.next.action)}</div>` : ""}
       ${(r.userAfter || []).map((u) => `<div class="user">${esc(u.message)}</div>`).join("")}

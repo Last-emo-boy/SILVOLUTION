@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 
@@ -202,6 +204,48 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
     shown_lessons: list[dict] = []
     fallbacks: list[dict] = []  # screened candidates not yet evaluated, best first
 
+    from .backends import BACKENDS as _REG
+    n_par = max(1, min(_REG[backend].parallel, int(spec.get("parallel", 99))))
+    emit_lock = threading.Lock()
+
+    def evaluate_one(it: int, ir_x, action_x: str, diagnosis_x: str, slot: int = 0) -> dict:
+        """One EDA evaluation -> history entry. Events carry `slot` so the UI can show siblings of one round."""
+        def ev(e):
+            with emit_lock:
+                emit({**e, "slot": slot} if slot else e)
+        ev({"kind": "evaluating", "iteration": it, "ir": ir_view(ir_x, locked)})
+        t0 = time.time()
+        m = evaluate(design, ir_x, c.fmax_mhz, ROOT / "runs", backend=backend,
+                     on_stage=lambda key, st: ev({"kind": "stage", "iteration": it, "stage": key, **{k: v for k, v in st.items() if k != "log"}}))
+        entry = {
+            "iteration": it, "slot": slot,
+            "ir": ir_x.to_dict(),
+            "metrics": asdict(m),
+            "throughput": design.throughput(ir_x),
+            "latency_cycles": design.latency(ir_x),
+            "violations": m.violations(c),
+            "diagnosis": diagnosis_x,
+            "action": action_x,
+            "eda_seconds": round(time.time() - t0, 1),
+        }
+        if m.fits and m.sim_passed:
+            screen.record(design.kind, backend, ir_x.to_dict(), asdict(m))
+        v = entry["violations"]
+        print(f"     [{it}{'.' + str(slot) if slot else ''}] fmax={m.fmax_mhz:.1f} lut={m.lut} dsp={m.dsp} ff={m.ff} sim={'ok' if m.sim_passed else 'FAIL'} "
+              f"{'FEASIBLE' if not v else 'violations: ' + '; '.join(v)}  ({entry['eda_seconds']}s)", flush=True)
+        ev({"kind": "result", **{k: val for k, val in entry.items() if k not in ("metrics", "ir")},
+            "ir": ir_view(ir_x, locked), "metrics": {k: val for k, val in asdict(m).items() if k != "sim_log"}})
+        return entry
+
+    def record(entry: dict) -> None:
+        history.append(entry)
+        tag = f"{entry['iteration']:02d}" + (f"_{entry['slot']}" if entry.get("slot") else "")
+        (out / f"iter_{tag}.json").write_text(json.dumps(entry, indent=2))
+        if len(history) >= 2 and not spec.get("no_memory"):
+            _learn(design, backend, c, run_id, history[-2], history[-1], shown_lessons, emit)
+
+    siblings: list[dict] = []  # extra screened candidates to evaluate alongside the chosen one this round
+
     for it in range(1, max_iter + 1):
         errs = ir.validate()
         if errs:
@@ -213,37 +257,35 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             action = "REJECTED (duplicate of an earlier iteration) -- propose a different IR"
         else:
             seen.add(ir.digest(backend))
-            print(f"[{it}] evaluating {ir_view(ir, locked)}", flush=True)
-            emit({"kind": "evaluating", "iteration": it, "ir": ir_view(ir, locked)})
-            t0 = time.time()
-            m = evaluate(design, ir, c.fmax_mhz, ROOT / "runs", backend=backend,
-                         on_stage=lambda key, st: emit({"kind": "stage", "iteration": it, "stage": key, **{k: v for k, v in st.items() if k != "log"}}))
-            entry = {
-                "iteration": it,
-                "ir": ir.to_dict(),
-                "metrics": asdict(m),
-                "throughput": design.throughput(ir),
-                "latency_cycles": design.latency(ir),
-                "violations": m.violations(c),
-                "diagnosis": diagnosis,
-                "action": action,
-                "eda_seconds": round(time.time() - t0, 1),
-            }
-            history.append(entry)
-            (out / f"iter_{it:02d}.json").write_text(json.dumps(entry, indent=2))
-            if m.fits and m.sim_passed:
-                screen.record(design.kind, backend, ir.to_dict(), asdict(m))
-            v = entry["violations"]
-            print(f"     fmax={m.fmax_mhz:.1f} lut={m.lut} dsp={m.dsp} ff={m.ff} sim={'ok' if m.sim_passed else 'FAIL'} "
-                  f"{'FEASIBLE' if not v else 'violations: ' + '; '.join(v)}  ({entry['eda_seconds']}s)", flush=True)
-            emit({"kind": "result", **{k: val for k, val in entry.items() if k not in ("metrics", "ir")},
-                  "ir": ir_view(ir, locked), "metrics": {k: val for k, val in asdict(m).items() if k != "sim_log"}})
-            if len(history) >= 2 and not spec.get("no_memory"):
-                _learn(design, backend, c, run_id, history[-2], history[-1], shown_lessons, emit)
+            extra = []
+            for sb in siblings[: n_par - 1]:
+                sb_ir = IR.from_dict(sb["ir"])
+                if sb_ir.digest(backend) not in seen and not sb_ir.validate():
+                    seen.add(sb_ir.digest(backend))
+                    extra.append((sb_ir, sb["why"]))
+            siblings = []
+            print(f"[{it}] evaluating {ir_view(ir, locked)}" + (f"  (+{len(extra)} sibling candidate(s) in parallel)" if extra else ""), flush=True)
+            if extra:
+                with ThreadPoolExecutor(max_workers=1 + len(extra)) as pool:
+                    futs = [pool.submit(evaluate_one, it, ir, action, diagnosis, 0)] + \
+                           [pool.submit(evaluate_one, it, x_ir, f"sibling candidate: {why}", diagnosis, k + 1) for k, (x_ir, why) in enumerate(extra)]
+                    entries = [f.result() for f in futs]
+                # the chosen candidate stays the round's "main" entry; siblings are recorded after it so the
+                # planner sees every measurement and pick_best considers all of them
+                for e in entries:
+                    record(e)
+                # continue from the best of the round (feasible by objective, else fewest violations)
+                round_best = pick_best(entries, c) or min(entries, key=lambda e: len(e["violations"]))
+                if round_best is not entries[0]:
+                    print(f"     round winner is sibling #{round_best['slot']}", flush=True)
+                    ir = IR.from_dict(round_best["ir"])
+                    emit({"kind": "note", "iteration": it, "message": f"sibling candidate #{round_best['slot']} won this round; continuing from it"})
+            else:
+                record(evaluate_one(it, ir, action, diagnosis, 0))
 
         if it == max_iter:
             break
-        last = history[-1]
+        last = history[-1] if not history or not history[-1].get("slot") else max(history[-(n_par):], key=lambda e: (not e["violations"], -len(e["violations"])))
         if last["violations"] and fallbacks and not (control is not None and control.should_stop()):
             nxt = fallbacks.pop(0)
             nxt_ir = IR.from_dict(nxt["ir"])
@@ -352,7 +394,11 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             except RuntimeError as e:
                 print(f"     re-plan failed: {e}; proceeding with the best estimated candidate", flush=True)
         ir = IR.from_dict(chosen["ir"])
-        fallbacks = [r for r in ranked[1:] if not r["est_violations"]]
+        runners = [r for r in ranked[1:] if not r["est_violations"]]
+        if n_par > 1:
+            siblings, fallbacks = runners, []   # measured now, in parallel, instead of maybe later
+        else:
+            fallbacks = runners
 
     best = pick_best(history, c)
     summary = {"run_id": run_id, "spec": spec, "design": design.kind, "backend": backend,

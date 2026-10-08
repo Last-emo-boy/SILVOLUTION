@@ -102,5 +102,5 @@ DEV = register(Backend(
     lut=5280, dsp=8, bram=30, lut_kind="LUT4", dsp_kind="SB_MAC16", dsp_width=16,
     synth_pnr=synth_pnr, netlist_sims=netlist_sims, sim_stages=("behavioral", "post_synth_func"),
     seconds_per_iter="10-40 s", fmax_range="20-120 MHz", toolchain="yosys + nextpnr-ice40 (open source)",
-    emit_style="behavioral", aliases=("ice40", "up5k", "icebreaker", "icestick", "tinyfpga"),
+    parallel=3, emit_style="behavioral", aliases=("ice40", "up5k", "icebreaker", "icestick", "tinyfpga"),
 ))

@@ -34,6 +34,10 @@ Available designs:
   conv2d  streaming single-channel K x K 2-D convolution (image filter / blur / edge kernel) with line buffers.
           locked: k (3/5/7), width (image width in pixels), data_width (8/12/16), coef_width (8/12/16).
           Throughput is par_rows/k pixels per cycle. A pixel rate R MHz means fmax >= R*k/par_rows.
+  cordic  sin/cos (rotate) or magnitude/atan2 (vector) engine, no multipliers. locked: mode, width.
+          Pipelined 1 sample/cycle or iterative (fold = iterations) for tiny area. Precision ~ iterations bits.
+  fft     streaming N-point complex FFT, radix-2 SDF pipeline, 1 sample/cycle. locked: n (power of 2), data_width.
+          4 DSPs per stage; natural-order output needs bit_reverse=true (+N latency).
   fir_chain  a cascade of 2-4 FIR stages with FIFOs between them (e.g. anti-alias then shaping, or decimation
           chains). locked: {"stages": [{"taps","data_width","coef_width","cutoff"}, ...]} -- one entry per stage.
           initial_ir: {"stages": [<full FIR IR per stage>], "fifo_depth": 16, "round_mode": "truncate"}.
@@ -52,7 +56,9 @@ Spec shape:
   "initial_ir": {<a deliberately naive starting point so the agent has something to improve; matmul: pe_rows/pe_cols sized
                  to the throughput hint, acc_width 32, pipe_mul 0, reg_in false, dsp_regs "none", acc_in_dsp true;
                  fir: fold 1, symmetric false, acc_width dw+cw+8, pipe_mul 0, reg_in false, dsp_regs "none", acc_in_dsp true;
-                 conv2d: par_rows k, line_mem "bram", acc_width dw+cw+8, tree_regs 0, pipe_mul 0, dsp_regs "none">}
+                 conv2d: par_rows k, line_mem "bram", acc_width dw+cw+8, tree_regs 0, pipe_mul 0, dsp_regs "none";
+                 cordic: iterations = width, unroll 1, fold 1, guard_bits 2, scale_comp false;
+                 fft: tw_width 16, growth "scale", delay_mem "auto", bram_min 64, mul_regs 0, bf_regs 1, dsp_regs "none">}
 }
 Objective order matters: the agent optimizes lexicographically, so whatever comes first is pushed to its extreme. Unless
 the user says the design itself should be as small/cheap as possible, maximize_throughput comes first -- someone asking

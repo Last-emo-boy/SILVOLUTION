@@ -117,7 +117,36 @@ def estimate_chain(ir: dict, backend: str) -> dict:
             "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
 
 
-ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain}
+def estimate_cordic(ir: dict, backend: str) -> dict:
+    W = ir["width"] + ir.get("guard_bits", 2); N = ir["iterations"]; U = ir.get("unroll", 1); fold = ir.get("fold", 1)
+    dsp = 1 if ir.get("scale_comp") else 0
+    if fold == 1:
+        lut = 3 * W * N * 0.9; ff = 3 * W * (N // U + 1)
+        fmax = 200 / (0.55 + 0.5 * U) * (W / 18) ** -0.3
+    else:
+        lut = 3 * W * 1.2 + W * 6; fmax = 160 * (W / 18) ** -0.3
+    if _style(backend) == "vivado":
+        fmax *= 1.8
+    fmax *= _scale(backend)
+    return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(1 / fold, 4)}
+
+
+def estimate_fft(ir: dict, backend: str) -> dict:
+    n, dw, tw = ir["n"], ir["data_width"], ir.get("tw_width", 16); S = int(math.log2(n))
+    w_avg = dw + (S / 2 if ir.get("growth") == "grow" else 0)
+    dsp = 4 * (S - 1)
+    regs = ir.get("mul_regs", 0) + {"none": 0, "out": 1, "in_out": 2, "in_pipe_out": 3}.get(ir.get("dsp_regs", "none"), 0)
+    lut = S * (w_avg * 12 + 40) + (n * 2 * w_avg * 0.5 if ir.get("delay_mem") == "lut" else 0)
+    fmax = 45 if regs <= 1 else (90 if regs == 2 else 130)
+    if ir.get("bf_regs", 1) == 0:
+        fmax *= 0.7
+    if _style(backend) == "vivado":
+        fmax *= 2.2
+    fmax *= _scale(backend)
+    return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": 1.0}
+
+
+ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft}
 
 
 # ---------------------------------------------------------------- calibration from measured runs
@@ -135,6 +164,12 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
     elif design == "fir":
         f += [math.log2(ir["taps"]), math.log2(ir.get("fold", 1)), 1.0 if ir.get("symmetric") else 0.0, ir["acc_width"] / 40,
               1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0)]
+    elif design == "cordic":
+        f += [ir["width"] / 16, ir["iterations"] / 16, math.log2(ir.get("unroll", 1) + 0.0) if ir.get("unroll", 1) > 0 else 0, 1.0 if ir.get("fold", 1) > 1 else 0.0,
+              ir.get("guard_bits", 0) / 4, 1.0 if ir.get("scale_comp") else 0.0, 0.0]
+    elif design == "fft":
+        f += [math.log2(ir["n"]), ir["data_width"] / 16, 1.0 if ir.get("growth") == "grow" else 0.0, ir.get("mul_regs", 0) + {"none": 0, "out": 1, "in_out": 2, "in_pipe_out": 3}.get(ir.get("dsp_regs", "none"), 0),
+              float(ir.get("bf_regs", 1)), 1.0 if ir.get("delay_mem") == "lut" else 0.0, 1.0 if ir.get("bit_reverse") else 0.0]
     elif design == "fir_chain":
         st = ir["stages"]
         f += [math.log2(sum(s["taps"] for s in st)), math.log2(max(s.get("fold", 1) for s in st)), sum(1.0 for s in st if s.get("symmetric")) / len(st),
@@ -223,24 +258,48 @@ def _fit(design: str, backend: str) -> dict | None:
     return fit
 
 
+def _knn(design: str, backend: str, f: list[float], k: int = 4) -> list[tuple[float, dict]]:
+    """Nearest measured observations in (standardized) feature space, as (distance, obs)."""
+    obs = [o for o in _load_obs(design, backend) if o["measured"]["fmax_mhz"] > 0 and len(o["features"]) == len(f)]
+    if len(obs) < 3:
+        return []
+    cols = list(zip(*[o["features"] for o in obs]))
+    sd = [max((sum((x - sum(c) / len(c)) ** 2 for x in c) / len(c)) ** 0.5, 1e-6) for c in cols]
+    def dist(a):
+        return sum(((x - y) / s_) ** 2 for x, y, s_ in zip(a, f, sd)) ** 0.5
+    return sorted(((dist(o["features"]), o) for o in obs), key=lambda t: t[0])[:k]
+
+
 def calibrated(design: str, backend: str, ir: dict) -> dict:
-    """Closed-form estimate with the learned multiplicative correction applied (if enough data)."""
+    """Estimate = closed form corrected by (a) the ridge fit when it beats raw and (b) the nearest measured
+    designs: each neighbour contributes its own measured/estimate ratio, weighted by 1/(d+0.3), and the
+    neighbour term dominates when the nearest point is close (d < 1 in standardized units). An exact
+    feature match (d ~ 0) therefore returns the measured value -- the same design under another spec."""
     e = ESTIMATORS[design](ir, backend)
     fit = _fit(design, backend)
-    if not fit:
-        return {**e, "calibrated": False}
     f = _features(design, ir, backend)
     out = dict(e)
+    nn = _knn(design, backend, f)
     for metric in ("fmax_mhz", "lut", "dsp"):
-        corr = math.exp(max(-1.5, min(1.5, sum(wi * xi for wi, xi in zip(fit[metric]["w"], f)))))
+        corr_fit = math.exp(max(-1.5, min(1.5, sum(wi * xi for wi, xi in zip(fit[metric]["w"], f))))) if fit else 1.0
+        corr = corr_fit
+        if nn:
+            w = [1.0 / (d + 0.3) for d, _ in nn]
+            ratios = [math.log(max(o["measured"][metric], 1) / max(o["estimate"][metric], 1)) for _, o in nn]
+            corr_nn = math.exp(max(-1.5, min(1.5, sum(wi * r for wi, r in zip(w, ratios)) / sum(w))))
+            d0 = nn[0][0]
+            alpha = 1.0 / (1.0 + d0)  # 1 at an exact match, 0.5 at distance 1, -> 0 far away
+            corr = math.exp(alpha * math.log(corr_nn) + (1 - alpha) * math.log(corr_fit))
         out[metric] = e[metric] * corr if metric == "fmax_mhz" else int(round(e[metric] * corr))
-    out["calibrated"] = True
-    out["n_obs"] = fit["n"]
+    out["calibrated"] = bool(fit or nn)
+    out["n_obs"] = fit["n"] if fit else len(_load_obs(design, backend))
+    if nn:
+        out["nearest"] = round(nn[0][0], 2)
     return out
 
 
 def calibration_report(design: str, backend: str) -> dict:
-    """How good the estimator is right now, raw vs calibrated, leave-one-out-free (in-sample)."""
+    """How good the estimator is right now: raw, ridge-only (LOO), and ridge+nearest-neighbour (LOO)."""
     obs = [o for o in _load_obs(design, backend) if o["measured"]["fmax_mhz"] > 0]
     fit = _fit(design, backend)
     rep = {"n": len(obs), "calibrated": bool(fit)}
@@ -250,6 +309,23 @@ def calibration_report(design: str, backend: str) -> dict:
                        "raw_rmse_pct": round((math.exp(fit[metric]["raw_rmse_log"]) - 1) * 100, 1) if fit else None,
                        "loo_rmse_pct": round((math.exp(fit[metric]["rmse_log"]) - 1) * 100, 1) if fit else None,
                        "applied": bool(fit and fit[metric]["lam"] is not None)}
+    # leave-one-out of the knn blend: drop each observation, predict it from the rest
+    if len(obs) >= 4:
+        for metric in ("fmax_mhz", "lut", "dsp"):
+            errs = []
+            for i, o in enumerate(obs):
+                rest = obs[:i] + obs[i + 1:]
+                cols = list(zip(*[r["features"] for r in rest]))
+                sd = [max((sum((x - sum(c) / len(c)) ** 2 for x in c) / len(c)) ** 0.5, 1e-6) for c in cols]
+                nn = sorted(((sum(((x - y) / s_) ** 2 for x, y, s_ in zip(r["features"], o["features"], sd)) ** 0.5, r) for r in rest), key=lambda t: t[0])[:4]
+                w = [1.0 / (d + 0.3) for d, _ in nn]
+                ratios = [math.log(max(r["measured"][metric], 1) / max(r["estimate"][metric], 1)) for _, r in nn]
+                corr_nn = sum(wi * r for wi, r in zip(w, ratios)) / sum(w)
+                corr_fit = sum(wi * xi for wi, xi in zip(fit[metric]["w"], o["features"])) if fit else 0.0
+                alpha = 1.0 / (1.0 + nn[0][0])
+                pred = math.log(max(o["estimate"][metric], 1)) + alpha * corr_nn + (1 - alpha) * corr_fit
+                errs.append(pred - math.log(max(o["measured"][metric], 1)))
+            rep[metric]["loo_knn_rmse_pct"] = round((math.exp((sum(x * x for x in errs) / len(errs)) ** 0.5) - 1) * 100, 1)
     return rep
 
 

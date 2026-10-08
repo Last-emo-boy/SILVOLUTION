@@ -68,5 +68,5 @@ DEV = register(Backend(
     lut=43848, dsp=72, bram=108, lut_kind="LUT4", dsp_kind="MULT18X18D", dsp_width=18,
     synth_pnr=synth_pnr, netlist_sims=netlist_sims, sim_stages=("behavioral", "post_synth_func"),
     seconds_per_iter="15-60 s", fmax_range="60-250 MHz", toolchain="yosys + nextpnr-ecp5 (open source)",
-    emit_style="ecp5", aliases=("ecp5", "lattice", "ulx3s", "orangecrab", "open source", "开源"),
+    parallel=3, emit_style="ecp5", aliases=("ecp5", "lattice", "ulx3s", "orangecrab", "open source", "开源"),
 ))
