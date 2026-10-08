@@ -627,7 +627,8 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     lang = nl._lang(first)
     # the method itself is injected by the plugin's context hook (sessions keyed sa-thread-*); the bracketed line
     # only carries the thread id the tools need
-    prompt = f"[silicon-agent chat · thread {tid} · answer in {'Chinese' if lang == 'zh' else 'English'}]\n{text}"
+    # the reply follows the language of this message (a thread opened in English may continue in Chinese)
+    prompt = f"[silicon-agent chat · thread {tid} · answer in {'Chinese' if nl._lang(text) == 'zh' else 'English'}]\n{text}"
     r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
     # the harness's ledger for this turn (tokens, estimated cost, wall time): shown under the reply
     r["usage"] = c.usage(sid)
