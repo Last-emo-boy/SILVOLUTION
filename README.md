@@ -18,6 +18,34 @@ sa watch <job>      ◀── events ──        ▲                          
                                          └──── metrics + critical path ◀─────┘
 ```
 
+## Verification ladder
+
+Every evaluated design passes through five simulations before its numbers count:
+
+| # | stage | tool | what it proves |
+|---|---|---|---|
+| 1 | Behavioral | cocotb + iverilog | RTL matches the Python golden model (random + extreme vectors, back-pressure) |
+| 2 | Post-synthesis functional | xsim, unisim | the synthesized netlist is logically the same design |
+| 3 | Post-synthesis timing | xsim, simprim + SDF | …and still works with estimated cell delays at the target period |
+| 4 | Post-implementation functional | xsim, unisim | the placed-and-routed netlist is logically the same design |
+| 5 | Post-implementation timing | xsim, simprim + SDF | …and works with real routed delays at the target period — the signoff |
+
+Stages 2–5 run on the Vivado backend; a failing stage is a constraint violation
+the planner sees. Verified both ways: a 2×2 matmul passes all five at 250 MHz; an
+unpipelined 4×4 asked for 600 MHz passes 2 and 4 and fails 3 and 5.
+
+## Planner loop
+
+Each iteration the planner reads the last result (metrics, summarized critical
+path, simulation ladder), the lessons design memory recalls for that situation,
+and any instructions typed into the console, then proposes **up to three
+candidate IRs**. A closed-form screening model (`screen.py`) estimates each one;
+only the top candidate is sent through EDA, estimated-feasible runners-up are
+kept as fallbacks and tried without re-planning if the chosen one violates, and
+if nothing looks feasible the planner gets one re-plan with the verdicts. After
+each result the move is distilled into a lesson and the recalled lessons that
+matched the move are confirmed or contradicted automatically.
+
 The LLM never writes Verilog. It edits a small architecture IR (`silicon_agent/ir.py`);
 a deterministic generator (`silicon_agent/emit.py`) emits the RTL, so every design
 is correct by construction and the generated names map straight back to IR fields
@@ -75,11 +103,14 @@ turned that into a new knob plus one line of device facts in the prompt.
 ## Web console
 
 `https://silicon.w33d.xyz` — behind sluice SSO (route `silicon-agent-root`,
-permission `studio.console.enter`, same gate as the Vivado desktop). Pick a spec
-template, edit the JSON, Run; the page streams each iteration: constraint tiles,
-Fmax / LUT / DSP per iteration, a throughput-vs-LUT Pareto view, and the agent log
-(hypothesis → action → result with the summarized critical path). Past runs are
-rebuilt from `results/` on server start, so nothing is lost across restarts.
+permission `studio.console.enter`). A worktable, not a dashboard: a rail of runs,
+one transcript with a turn per iteration (what the planner did, the IR, one
+verdict line, the simulation ladder; hypothesis / recalled memory / candidates
+with estimates / critical path / lesson behind a per-turn disclosure), and a
+composer that steers the planner before its next proposal. **Details ▸** opens the
+inspector: architecture sketch + IR knobs (click to draft a steer) + critical
+path, trajectory charts, the simulation ladder with logs, generated RTL, and
+memory recalled/learned. Lessons take 👍/👎 votes. Events persist per job.
 
 Auth model: sluice injects `X-Auth-Subject` + `X-Auth-Sig` (HMAC-SHA256 over
 `subject\ngroups\nepoch-minute` with the gateway key). The server shares that key
