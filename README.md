@@ -133,6 +133,15 @@ AGH as the `agh` compose service (`deploy/agh-entry.sh`, provisioning in `deploy
 DeepSeek account from `DEEPSEEK_API_KEY`, plugin install → trust → enable; the harness fork ships a
 `silicon` preset). `SA_AGH=0` falls back to the built-in `nl.py` loop.
 
+### A knob the agent asked for
+
+In deep mode (DeepSeek V4 Pro + thinking) the agent analysed a 16-tap FIR on iCE40 stuck at 49.5 MHz
+with 3% margin and showed from the critical path that every IR knob sat upstream of the limiter (the
+post-accumulator reduction `part[*] → out_data`). Its first proposal — register the M-way reduction as a
+balanced tree — became the `sum_tree` knob of the FIR generator; measured A/B on the same device: 49.5 →
+55.0 MHz at identical LUT/DSP, +2 cycles latency, formal equivalence and stream properties PASS.
+`fir-ice40-55-4dsp` in the bench guards it.
+
 ## Chat
 
 `https://silicon.w33d.xyz` — behind sluice SSO (route `silicon-agent-root`,

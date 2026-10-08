@@ -69,6 +69,12 @@ CASES: list[tuple[str, dict, dict]] = [
         "constraints": {"fmax_mhz": 40, "max_dsp": 8, "objective": ["maximize_throughput", "minimize_lut"]},
         "initial_ir": {"pe_rows": 2, "pe_cols": 2, "acc_width": 24, "pipe_mul": 0, "reg_in": False, "dsp_regs": "none"}},
      {"feasible": True, "max_rounds": 5}),
+    ("fir-ice40-55-4dsp", {
+        # the post-accumulator reduction is the limiter on iCE40; only sum_tree moves it (49.5 -> 55 MHz measured)
+        "task": "16-tap 12-bit FIR, iCE40, 55 MHz, 4 DSP", "design": "fir", "backend": "ice40", "locked": {"taps": 16, "data_width": 12, "coef_width": 12, "cutoff": 0.25},
+        "constraints": {"fmax_mhz": 52, "max_dsp": 4, "objective": ["maximize_throughput", "maximize_fmax"]},
+        "initial_ir": {"acc_width": 29, "symmetric": True, "fold": 2, "pipe_mul": 2, "reg_in": True, "dsp_regs": "out", "sum_tree": False}},
+     {"feasible": True, "max_rounds": 4}),
     ("cordic-ecp5-200", {
         "task": "16-bit sin/cos CORDIC, ECP5, 200 MHz", "design": "cordic", "backend": "ecp5", "locked": {"mode": "rotate", "width": 16},
         "constraints": {"fmax_mhz": 200, "max_lut": 3500, "objective": ["maximize_throughput", "minimize_lut"]},
