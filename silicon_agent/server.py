@@ -259,10 +259,7 @@ def _resume_turns() -> None:
                     except Exception as e2:
                         th["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e2}", "t": time.time()})
                 finally:
-                    with _lock:
-                        th["busy"] = False
-                        th.pop("live", None); th.pop("live_note", None)
-                        _save_thread(tid)
+                    _turn_done(tid)
             threading.Thread(target=go, daemon=True).start()
         else:
             th["busy"] = False
@@ -637,10 +634,22 @@ def _chat_turn(tid: str, text: str, sub: str) -> None:
     except Exception as e:
         _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
     finally:
-        with _lock:
-            _threads[tid]["busy"] = False
-            _threads[tid].pop("live", None); _threads[tid].pop("live_note", None)
-            _save_thread(tid)
+        _turn_done(tid)
+
+
+def _turn_done(tid: str) -> None:
+    """End of a turn: the thread is free again, unless a message queued while the agent worked -- then it runs next."""
+    th = _threads[tid]
+    with _lock:
+        th.pop("live", None); th.pop("live_note", None)
+        nxt = (th.get("queue") or [None]).pop(0) if th.get("queue") else None
+        if nxt:
+            th["messages"].append({"role": "user", "kind": "text", "text": nxt["text"], "t": time.time()})
+        else:
+            th["busy"] = False
+        _save_thread(tid)
+    if nxt:
+        threading.Thread(target=_chat_turn, args=(tid, nxt["text"], nxt["sub"]), daemon=True).start()
 
 
 # ---------------------------------------------------------------- http
@@ -910,7 +919,10 @@ class Handler(BaseHTTPRequestHandler):
             th = _threads.get(parts[1])
             if not th or not _visible(th, sub):
                 return self._json(404, {"error": "no such thread"})
-            stopped = {"turn": False, "jobs": []}
+            stopped = {"turn": False, "jobs": [], "dropped": len(th.get("queue") or [])}
+            with _lock:
+                # stop means stop: what was waiting behind the turn is dropped too
+                th.pop("queue", None)
             if th.get("agh_session"):
                 try:
                     from . import agh
@@ -951,7 +963,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(404, {"error": "no such thread"})
                 th = _threads.setdefault(tid, {"id": tid, "title": "", "messages": [], "created": time.time(), "subject": sub})
                 if th.get("busy"):
-                    return self._json(409, {"error": "still thinking"})
+                    # the agent is mid-turn: the message waits its turn (the chat shows it as queued) and runs next
+                    if len(th.get("queue") or []) >= 5:
+                        return self._json(429, {"error": "too many queued messages"})
+                    th.setdefault("queue", []).append({"text": text, "sub": sub, "t": time.time()})
+                    _save_thread(tid)
+                    return self._json(200, {"thread": tid, "queued": len(th["queue"])})
                 th["busy"] = True
                 th["messages"].append({"role": "user", "kind": "text", "text": text, "t": time.time()})
                 _save_thread(tid)

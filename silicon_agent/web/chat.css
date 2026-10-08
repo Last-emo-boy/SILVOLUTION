@@ -169,3 +169,5 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .live-note { margin-top: 6px; max-width: 70ch; white-space: pre-wrap; }
 .agent-tools .tchip i { font-style: normal; opacity: .65; margin-left: 6px; }
 .agent-tools .tchip i:empty { display: none; }
+.msg.queued { opacity: .55; flex-direction: column; align-items: flex-end; }
+.msg.queued .qtag { font-size: 11px; color: var(--muted); margin-top: 2px; }

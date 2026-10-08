@@ -205,6 +205,12 @@ function renderAgentTab() {
       }
       sec.appendChild(list);
       sec.appendChild(el(`<div class="agent-reply">${esc(m.text || "")}</div>`));
+      if (m.usage) {
+        const u = m.usage, tok = (u.input || 0) + (u.cache_read || 0) + (u.output || 0);
+        const cost = u.usd_micros == null ? "—" : `$${(u.usd_micros / 1e6).toFixed(u.usd_micros < 10000 ? 4 : 2)}`;
+        const t = u.ms == null ? "—" : u.ms < 60000 ? `${(u.ms / 1000).toFixed(1)} s` : `${Math.floor(u.ms / 60000)} min ${Math.round((u.ms % 60000) / 1000)} s`;
+        sec.appendChild(el(`<div class="hint mono" title="Agnes Harness ledger for this turn">${u.calls ?? "?"} model calls · ${u.input || 0} in + ${u.cache_read || 0} cached + ${u.output || 0} out = ${tok} tokens · ${cost} · ${t}${u.model ? ` · ${esc(u.model)}` : ""}${m.resumed ? " · resumed after a server restart" : ""}</div>`));
+      }
     } else {
       sec.appendChild(el(`<div class="muted small-text">${esc(m.text || "run started by the agent")}</div>`));
     }
