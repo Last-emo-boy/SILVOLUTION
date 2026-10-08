@@ -109,6 +109,21 @@ an unbreakable wall and that no IR field could move it. Measuring the four
 combinations of `dsp_regs × acc_in_dsp` on the real design (190 / 151 / 277 / 299 MHz)
 turned that into a new knob plus one line of device facts in the prompt.
 
+## Agent runtime: Agnes Harness
+
+The chat's agent loop runs inside [Agnes Harness](https://github.com/AgnesAI-Labs/agnes-harness) (AGH):
+the model loop on DeepSeek, every tool call with its inputs and structured output, approvals, session
+history and compaction are AGH's. silicon-agent is an AGH **plugin** (`agh-plugin/`): the `sa_*` tools
+(`sa_schema`, `sa_interpret`, `sa_estimate`, `sa_run`, `sa_job`, `sa_steer`, `sa_stop`, `sa_jobs`,
+`sa_pareto`, `sa_job_file`, `sa_formal`, `sa_bench`) call the job server's HTTP API, and the
+`silicon-agent` Skill tells the agent how to drive a request end to end. `silicon_agent/agh.py` is the
+job server's JSON-RPC client for the AGH daemon (one AGH session per conversation thread); with
+`SA_AGH=1` every chat turn is an AGH prompt, runs the agent starts become cards, and the agent's tool
+trail is shown under its reply. The deployment runs AGH as the `agh` compose service
+(`deploy/agh-entry.sh`, provisioning in `deploy/agh-provision.mjs`: DeepSeek account from
+`DEEPSEEK_API_KEY`, plugin install → trust → enable). `SA_AGH=0` falls back to the built-in `nl.py`
+loop.
+
 ## Chat
 
 `https://silicon.w33d.xyz` — behind sluice SSO (route `silicon-agent-root`,
@@ -377,7 +392,9 @@ silicon_agent/backends/    device plugins: ecp5, xc7s50 + xc7a35t (Vivado), ice4
 silicon_agent/prompts.py   per-design planner knowledge with measured device facts (+ generic facts from the registry)
 silicon_agent/eda.py       behavioral simulation + cached evaluate() over the backend registry
 silicon_agent/loop.py      generic optimization loop
-silicon_agent/nl.py        natural language → spec; narration; Q&A about a run
+silicon_agent/nl.py        natural language → spec; narration; Q&A about a run (built-in loop and the sa_interpret tool)
+silicon_agent/agh.py       Agnes Harness client (unix-socket JSON-RPC, sessions, prompts with tool tracking)
+agh-plugin/                AGH backend plugin: sa_* tools + the silicon-agent Skill
 silicon_agent/server.py    HTTP job server + threads + static web UI, token or gateway-HMAC auth
 silicon_agent/web/         chat (index.html, chat.js, chat.css) and worktable (work.html, app.js, form.js, app.css) — no build step
 silicon_agent/llm.py       DeepSeek client
