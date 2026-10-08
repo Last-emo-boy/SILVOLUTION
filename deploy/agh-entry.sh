@@ -34,7 +34,7 @@ rm -f "$AGH_HOME/data/daemon/owner.json" "$AGH_HOME/data/daemon/agnesd.sock" 2>/
   done
   # the SDK is loaded from the AGH source checkout (TypeScript), hence tsx; the daemon resolves the
   # plugin's file: source against its workspace, so provisioning runs from the app checkout
-  (cd /opt/silicon-agent/app && AGH_REPO=/opt/agnes-harness node --import /opt/agnes-harness/node_modules/tsx/dist/loader.mjs tools/agh-provision.mjs "$AGH_DIST") \
+  (cd /opt/silicon-agent/app && AGH_REPO=/opt/agnes-harness node --import /opt/agnes-harness/node_modules/tsx/dist/loader.mjs deploy/agh-provision.mjs "$AGH_DIST") \
     || echo "agh: provisioning failed" >&2
 ) &
 # workspace = the app checkout: `file:./agh-plugin` resolves there, and sessions run in a read-only tree
