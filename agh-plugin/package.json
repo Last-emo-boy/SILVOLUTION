@@ -1,0 +1,25 @@
+{
+  "name": "@silicon-agent/agh-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": "./index.mjs",
+  "agnes": {
+    "plugins": [
+      {
+        "export": "siliconAgent",
+        "id": "ext:silicon-agent/eda",
+        "inject": [
+          "extension",
+          "skills"
+        ],
+        "config": {
+          "server": "http://127.0.0.1:8765",
+          "tokenEnv": "SA_TOKEN",
+          "tokenFile": "/srv/sa/agh/sa-token"
+        }
+      }
+    ]
+  }
+}

@@ -11,6 +11,8 @@ API
   GET  /api/jobs/<id>/formal[?depth=20]  SymbiYosys: bounded equivalence of the measured RTL vs a fresh emit + stream properties
   GET  /api/specs                example specs shipped in specs/
   GET  /api/health
+  POST /api/interpret            {"text": "...", "thread"?: id} -> spec + assumptions + alternatives (no run)
+  POST /api/estimate             {"spec"} or {"design","backend","ir"} -> screening estimate, no EDA
   POST /api/jobs/<id>/steer      {"message": "..."}  -> read by the planner before its next proposal
   POST /api/jobs/<id>/stop
   GET  /api/memory               lessons per (design, backend), scored
@@ -287,6 +289,10 @@ def _narrate_if_done(tid: str) -> None:
     for m in th["messages"]:
         if m.get("kind") != "run" or m.get("narrated"):
             continue
+        if m.get("source") == "agh":
+            # the agent reported on its own runs in its turn text; a second narration would repeat it
+            m["narrated"] = True
+            continue
         job = _jobs.get(m["job"])
         if not job or job["status"] in ("queued", "running"):
             continue
@@ -389,9 +395,82 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
     return {"action": "fork" if parent else "run", "job": job_id}
 
 
+def _run_note(spec: dict, lang: str) -> str:
+    c = spec.get("constraints", {})
+    cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
+    return (f"开始运行：{spec.get('task', '')}（{spec.get('design')} on {spec.get('backend')}，{cons}）" if lang == "zh"
+            else f"Run started: {spec.get('task', '')} ({spec.get('design')} on {spec.get('backend')}, {cons}).")
+
+
+def _agh_turn(tid: str, text: str, sub: str) -> dict:
+    """The same user turn, but run by Agnes Harness: the LLM loop, tool records, approvals and session history
+    live in AGH; silicon-agent's capabilities are the `sa_*` tools of the agh-plugin. Runs the tools started
+    (sa_run) become run cards in the thread; the assistant text is AGH's final answer; every tool call is kept
+    on the message so the chat can show the trajectory of the agent itself."""
+    from . import agh
+    th = _threads[tid]
+    c = agh.client()
+    sid = th.get("agh_session")
+    if sid:
+        try:
+            c.load_session(sid, agh.workspace())
+        except agh.AghError:
+            sid = None
+    if not sid:
+        sid = c.new_session(agh.workspace(), session_key=f"sa-thread-{tid}")
+        with _lock:
+            th["agh_session"] = sid
+            _save_thread(tid)
+    first = next((m["text"] for m in th["messages"] if m["role"] == "user"), text)
+    lang = nl._lang(first)
+    # the Skill is preloaded only when named; the bracketed line is context for the agent, not part of the user's words
+    prompt = (f"[silicon-agent chat · thread {tid} · use the `silicon-agent` skill · the chat renders the spec, every iteration "
+              f"and the result as cards beside your reply, so answer in a few plain sentences, no headings or tables]\n{text}")
+    started: list[str] = []
+    seen: set[str] = set()
+
+    def on_event(kind, upd, meta):
+        # a run started mid-turn gets its card immediately, not when the whole turn ends
+        if kind == "tool_call_update" and (upd.get("title") or "") == "sa_run":
+            out = upd.get("_result") or {}
+            jid = out.get("id") if isinstance(out, dict) else None
+            if jid and jid in _jobs and jid not in seen:
+                seen.add(jid)
+                started.append(jid)
+                with _lock:
+                    _jobs[jid]["thread"] = tid
+                    _save_state(jid)
+                    th["messages"].append({"role": "assistant", "kind": "run", "text": _run_note(_jobs[jid]["spec"], lang), "job": jid, "lang": lang, "t": time.time(),
+                                           "fork": bool(_jobs[jid].get("parent")), "source": "agh"})
+                    _save_thread(tid)
+
+    r = c.prompt(sid, prompt, on_event=on_event, timeout=3600)
+    for t in r["tools"]:
+        if t.get("name") == "sa_run" and isinstance(t.get("result"), dict):
+            jid = t["result"].get("id")
+            if jid and jid in _jobs and jid not in seen:
+                seen.add(jid); started.append(jid)
+                with _lock:
+                    _jobs[jid]["thread"] = tid
+                    _save_state(jid)
+                    th["messages"].append({"role": "assistant", "kind": "run", "text": _run_note(_jobs[jid]["spec"], lang), "job": jid, "lang": lang, "t": time.time(), "source": "agh"})
+    with _lock:
+        th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
+                               "job": started[-1] if started else None, "t": time.time(), "source": "agh",
+                               "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40]})
+        if not th["title"] and started:
+            th["title"] = _jobs[started[-1]]["spec"].get("task", "")[:120]
+        _save_thread(tid)
+    return {"action": "agh", "jobs": started}
+
+
 def _chat_turn(tid: str, text: str, sub: str) -> None:
     try:
-        _handle_chat(tid, text, sub)
+        from . import agh
+        if agh.enabled():
+            _agh_turn(tid, text, sub)
+        else:
+            _handle_chat(tid, text, sub)
     except Exception as e:
         _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
     finally:
@@ -456,7 +535,7 @@ class Handler(BaseHTTPRequestHandler):
             path = path[4:]
         if path in ("/health", "/healthz"):
             return self._json(200, {"ok": True, "backends": list(BACKENDS), "designs": list(DESIGNS),
-                                    "queued": _queue.qsize(), "jobs": len(_jobs)})
+                                    "queued": _queue.qsize(), "jobs": len(_jobs), "runtime": "agh" if os.environ.get("SA_AGH") == "1" else "builtin"})
         # static UI (public: sluice gates it before it reaches us)
         if path == "/" or path == "/index.html":
             return self._file(STATIC / "index.html")
@@ -703,20 +782,47 @@ class Handler(BaseHTTPRequestHandler):
                 _save_thread(tid)
             threading.Thread(target=_chat_turn, args=(tid, text, sub), daemon=True).start()
             return self._json(200, {"thread": tid})
-        if path == "/estimate":
-            # cheap screening estimate + validation for the form, no EDA
+        if path == "/interpret":
+            # the NL interpreter alone: spec + assumptions + alternatives, no run (the AGH plugin drives runs separately)
             try:
                 body = json.loads(self.rfile.read(n) or b"{}")
-                spec = body["spec"]
-                design = spec.get("design", "matmul"); backend = spec.get("backend", "ecp5")
+                text = str(body.get("text", "")).strip()[:4000]
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            if not text:
+                return self._json(400, {"error": "empty"})
+            ctx = None
+            tid = body.get("thread")
+            if tid and tid in _threads:
+                ctx = _thread_context(_threads[tid])
+            try:
+                return self._json(200, nl.interpret(text, ctx))
+            except Exception as e:
+                return self._json(500, {"error": f"interpreter failed: {e}"})
+        if path == "/estimate":
+            # cheap screening estimate + validation for the form / the agent, no EDA. Accepts either a full
+            # {"spec": {...}} or a bare {"design", "backend", "ir"[, "constraints"]}.
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
                 from . import screen as _screen
                 from .ir import Constraints as _C
-                ir = DESIGNS[design].ir_cls.from_dict({**spec.get("initial_ir", {}), **spec.get("locked", {})})
+                if "spec" in body:
+                    spec = body["spec"]
+                    design = spec.get("design", "matmul"); backend = spec.get("backend", "ecp5")
+                    ir = DESIGNS[design].ir_cls.from_dict({**spec.get("initial_ir", {}), **spec.get("locked", {})})
+                    cons = _C.from_dict(spec["constraints"])
+                else:
+                    design = body.get("design", "matmul"); backend = body.get("backend", "ecp5")
+                    if design not in DESIGNS or backend not in BACKENDS:
+                        return self._json(400, {"error": f"unknown design/backend: have {list(DESIGNS)} / {list(BACKENDS)}"})
+                    ir = DESIGNS[design].ir_cls.from_dict(body.get("ir") or {})
+                    cons = _C.from_dict(body.get("constraints") or {"fmax_mhz": 1})
                 errs = ir.validate()
                 if errs:
                     return self._json(200, {"valid": False, "errors": errs})
-                ranked = _screen.screen(design, backend, [{"ir": ir.to_dict(), "why": ""}], _C.from_dict(spec["constraints"]))
-                return self._json(200, {"valid": True, "estimate": ranked[0]["estimate"], "est_violations": ranked[0]["est_violations"]})
+                ranked = _screen.screen(design, backend, [{"ir": ir.to_dict(), "why": ""}], cons)
+                return self._json(200, {"valid": True, "estimate": ranked[0]["estimate"], "est_violations": ranked[0]["est_violations"],
+                                        "throughput": DESIGNS[design].throughput(ir), "latency_cycles": DESIGNS[design].latency(ir)})
             except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
                 return self._json(400, {"error": f"bad request: {e}"})
         if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "fork":
@@ -798,6 +904,7 @@ class Handler(BaseHTTPRequestHandler):
         thread = body.get("thread")
         if thread and thread not in _threads:
             return self._json(404, {"error": "no such thread"})
+        via_agent = bool(thread) and _threads[thread].get("busy") and os.environ.get("SA_AGH") == "1"
         with _lock:
             _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [],
                              "created": time.time(), "subject": sub, "parent": body.get("parent"), "thread": thread}
@@ -805,7 +912,7 @@ class Handler(BaseHTTPRequestHandler):
             (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
             _save_state(job_id)
         _queue.put(job_id)
-        if thread:
+        if thread and not via_agent:
             c = spec.get("constraints", {})
             cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "")
             _thread_note_job(thread, job_id, f"Started in the worktable: {spec.get('task', '')} ({spec.get('design', 'matmul')} on {spec.get('backend', 'ecp5')}, {cons}).", False)

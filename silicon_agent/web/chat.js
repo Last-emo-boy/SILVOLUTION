@@ -174,6 +174,32 @@ function render() {
   if (atBottom) sc.scrollTop = sc.scrollHeight;
 }
 
+// a small, safe markdown subset for assistant prose: escapes first, then bold / code / lists / paragraphs
+function md(text) {
+  const lines = esc(text).split("\n");
+  let out = "", list = null, table = null;
+  const inline = (t) => t.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\*(?!\s)([^*]+?)\*/g, "<i>$1</i>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  const flush = () => { if (list) { out += `</${list}>`; list = null; } if (table) { out += "</tbody></table>"; table = null; } };
+  const cells = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  for (const raw of lines) {
+    const l = raw.trimEnd();
+    let m;
+    if (/^\s*\|.*\|\s*$/.test(l)) {
+      if (/^\s*\|?\s*:?-{2,}/.test(l)) continue;   // the header separator row
+      if (!table) { if (list) { out += `</${list}>`; list = null; } out += `<table><thead><tr>${cells(l).map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>`; table = "t"; }
+      else out += `<tr>${cells(l).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`;
+      continue;
+    }
+    if ((m = l.match(/^\s*#{1,6}\s+(.*)$/))) { flush(); out += `<h4>${inline(m[1])}</h4>`; }
+    else if ((m = l.match(/^\s*[-*]\s+(.*)$/))) { if (table) flush(); if (list !== "ul") { flush(); out += "<ul>"; list = "ul"; } out += `<li>${inline(m[1])}</li>`; }
+    else if ((m = l.match(/^\s*\d+[.)]\s+(.*)$/))) { if (table) flush(); if (list !== "ol") { flush(); out += "<ol>"; list = "ol"; } out += `<li>${inline(m[1])}</li>`; }
+    else if (!l.trim()) { flush(); }
+    else { flush(); out += `<p>${inline(l)}</p>`; }
+  }
+  flush();
+  return out;
+}
+
 function msgSignature(m) {
   const j = m.job && jobs[m.job];
   return JSON.stringify([m.role, m.kind, m.text, m.job, j?.seen, j?.status, j?.error && 1, [...open].filter((k) => k.startsWith(m.job + ":")), rtlShown.has(m.job)]);
@@ -182,7 +208,11 @@ function msgSignature(m) {
 function buildMsg(m) {
   if (m.role === "user") return el(`<li class="msg user"><div class="bubble">${esc(m.text)}</div></li>`);
   const li = el(`<li class="msg assistant"></li>`);
-  if (m.text) li.appendChild(el(`<div class="prose ${m.kind === "run" ? "dim" : ""}">${m.source === "worktable" ? `<span class="tag">worktable</span> ` : ""}${esc(m.text)}</div>`));
+  if (m.text) li.appendChild(el(`<div class="prose ${m.kind === "run" ? "dim" : ""}">${m.source === "worktable" ? `<span class="tag">worktable</span> ` : ""}${md(m.text)}</div>`));
+  // the agent's own trajectory (AGH tool records): one chip per tool call, in order
+  if (m.tools?.length) {
+    li.appendChild(el(`<div class="agent-tools">${m.tools.map((t) => `<span class="tchip ${t.status === "failed" ? "x" : ""}" title="${esc(JSON.stringify(t.args ?? {}).slice(0, 300))}">${esc(t.name || "?")}</span>`).join("")}</div>`));
+  }
   if (m.kind === "run" && m.job) {
     const j = jobs[m.job], spec = j?.spec || thread.jobs[m.job]?.spec;
     if (spec) li.appendChild(specCard(m.job, spec, m.fork));
