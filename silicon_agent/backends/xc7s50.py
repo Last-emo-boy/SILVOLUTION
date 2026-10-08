@@ -39,6 +39,8 @@ write_verilog -force -mode funcsim {out}/post_impl_func.v
 write_verilog -force -mode timesim -sdf_anno true {out}/post_impl_time.v
 write_sdf -force -mode timesim {out}/post_impl.sdf
 report_utilization -file {out}/util.txt
+set_switching_activity -default_toggle_rate 25 -default_static_probability 0.5
+report_power -file {out}/power.txt
 report_timing_summary -file {out}/timing_summary.txt -no_detailed_paths
 report_timing -max_paths 1 -file {out}/timing_path.txt
 set fh [open {out}/metrics.json w]
@@ -77,7 +79,22 @@ def synth_pnr(work: Path, fmax_target: float, top: str) -> dict:
         "lut": m["lut"], "ff": m["ff"], "dsp": m["dsp"], "bram": m["bram"],
         "critical_path": summarize_critical_path((out / "timing_path.txt").read_text()),
         "fits": True,
+        "power_mw": parse_power(out / "power.txt"),
     }
+
+
+def parse_power(path: Path) -> float | None:
+    """Dynamic power (mW) from report_power at the constrained clock with default 25% toggle rates:
+    a relative measure for ranking architectures, not a board number."""
+    if not path.exists():
+        return None
+    for line in path.read_text().splitlines():
+        if line.strip().startswith("| Dynamic (W)"):
+            try:
+                return round(float(line.split("|")[2].strip()) * 1000, 1)
+            except (IndexError, ValueError):
+                return None
+    return None
 
 
 _VIV_CELL = re.compile(r"^\s+(\S+)\s+(\S+)\s+\(([^)]+)\)\s+([\d.]+)\s+([\d.]+)\s+[rf]\s+(\S+)")

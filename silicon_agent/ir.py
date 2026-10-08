@@ -72,6 +72,7 @@ class Constraints:
     max_dsp: int | None = None
     max_bram: int | None = None
     max_ff: int | None = None
+    max_power_mw: float | None = None  # dynamic power estimate (Vivado report_power); None on devices without a power model
     objective: list[str] = field(default_factory=lambda: ["maximize_throughput", "minimize_lut"])
 
     @classmethod
@@ -92,6 +93,8 @@ class Metrics:
     sim_log: str = ""
     fits: bool = True  # False when synthesis shows the design exceeds the device
     sim_stages: dict = field(default_factory=dict)  # netlist simulation ladder: {stage: {"passed", "label", ...}}
+    fmax_seeds: list = field(default_factory=list)  # per-seed Fmax when P&R ran with several seeds; fmax_mhz is their median
+    power_mw: float | None = None  # dynamic power estimate where the toolchain reports one (Vivado)
 
     def violations(self, c: Constraints) -> list[str]:
         v = []
@@ -107,6 +110,8 @@ class Metrics:
         for name, limit in (("lut", c.max_lut), ("dsp", c.max_dsp), ("bram", c.max_bram), ("ff", c.max_ff)):
             if limit is not None and getattr(self, name) > limit:
                 v.append(f"{name} {getattr(self, name)} > {limit}")
+        if c.max_power_mw is not None and self.power_mw is not None and self.power_mw > c.max_power_mw:
+            v.append(f"power {self.power_mw} mW > {c.max_power_mw} mW")
         return v
 
 

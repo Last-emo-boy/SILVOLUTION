@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 from . import Backend, register
-from ._common import TB_DIR, flat_sim_lib, iverilog_netlist_sim, nextpnr_report, run
+from ._common import TB_DIR, flat_sim_lib, iverilog_netlist_sim, nextpnr_report, nextpnr_seeds, run
 from .ice40 import _wrapper
 
 DEVICE, FAMILY = "GW1NR-LV9QN88PC6/I5", "GW1N-9C"
@@ -59,13 +59,10 @@ def synth_pnr(work: Path, fmax_target: float, top: str) -> dict:
     if p.returncode != 0:
         raise RuntimeError(f"yosys (wrapper) failed, see {out / 'yosys_wrap.log'}")
     (out / "pins.cst").write_text(CST)
-    p = run(["nextpnr-himbaechel", "--device", DEVICE, "--vopt", f"family={FAMILY}", "--vopt", f"cst={out / 'pins.cst'}",
-             "--json", str(out / "synth.json"), "--freq", str(fmax_target), "--timing-allow-fail",
-             "--report", str(out / "report.json"), "--detailed-timing-report", "--seed", "1"], out, out / "nextpnr.log")
-    if p.returncode != 0:
-        raise RuntimeError(f"nextpnr-himbaechel failed, see {out / 'nextpnr.log'}")
+    seeds = nextpnr_seeds(["nextpnr-himbaechel", "--device", DEVICE, "--vopt", f"family={FAMILY}", "--vopt", f"cst={out / 'pins.cst'}",
+                           "--json", str(out / "synth.json"), "--freq", str(fmax_target), "--timing-allow-fail", "--detailed-timing-report"], out)
     r = nextpnr_report(out, ("LUT4", "ALU"), ("DFF",), ("MULT18X18", "MULT9X9", "MULTALU18X18", "MULTALU36X18", "MULTADDALU18X18", "PADD18", "PADD9"), ("BSRAM",), _classify)
-    return {**r, "lut": synth["lut"], "ff": synth["ff"], "dsp": synth["dsp"], "bram": synth["bram"], "fits": True}
+    return {**r, "lut": synth["lut"], "ff": synth["ff"], "dsp": synth["dsp"], "bram": synth["bram"], "fits": True, "fmax_seeds": seeds}
 
 
 def netlist_sims(d, arch, work: Path, fmax_target: float, on_stage=None) -> dict:

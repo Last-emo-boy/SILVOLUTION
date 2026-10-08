@@ -263,7 +263,7 @@ def screen(design_kind: str, backend: str, candidates: list[dict], c: Constraint
         key = []
         for obj in c.objective:
             key.append({"maximize_throughput": -e["throughput"], "maximize_fmax": -e["fmax_mhz"],
-                        "minimize_lut": e["lut"], "minimize_dsp": e["dsp"]}.get(obj, 0))
+                        "minimize_lut": e["lut"], "minimize_dsp": e["dsp"]}.get(obj, 0))  # minimize_power/latency: not estimated
         rows.append({**cand, "estimate": e, "est_violations": viol, "_sort": (len(viol) > 0, miss, tuple(key))})
     rows.sort(key=lambda r: r["_sort"])
     for i, r in enumerate(rows):

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from . import Backend, register
-from ._common import TB_DIR, TOOLS, flat_sim_lib, iverilog_netlist_sim, nextpnr_report, run
+from ._common import TB_DIR, TOOLS, flat_sim_lib, iverilog_netlist_sim, nextpnr_report, nextpnr_seeds, run
 
 PART, PACKAGE, SPEED = "45k", "CABGA381", "6"
 _PRIMS = ("MULT18X18D", "CCU2C", "LUT4", "DP16KD", "ALU54B", "TRELLIS_FF")
@@ -49,14 +49,12 @@ def synth_pnr(work: Path, fmax_target: float, top: str) -> dict:
     synth = synth_counts(out / "stat.json")
     if synth["dsp"] > DEV.dsp or synth["lut"] > DEV.lut:
         return {**synth, "fmax_mhz": 0.0, "critical_path": [], "fits": False}
-    p = run([
+    seeds = nextpnr_seeds([
         "nextpnr-ecp5", f"--{PART}", "--package", PACKAGE, "--speed", SPEED,
         "--json", str(out / "synth.json"), "--out-of-context", "--freq", str(fmax_target),
-        "--timing-allow-fail", "--report", str(out / "report.json"), "--detailed-timing-report", "--seed", "1",
-    ], out, out / "nextpnr.log")
-    if p.returncode != 0:
-        raise RuntimeError(f"nextpnr failed, see {out / 'nextpnr.log'}")
-    return {**nextpnr_report(out, ("TRELLIS_COMB",), ("TRELLIS_FF",), ("MULT18X18D",), ("DP16KD",), _classify), "fits": True}
+        "--timing-allow-fail", "--detailed-timing-report",
+    ], out)
+    return {**nextpnr_report(out, ("TRELLIS_COMB",), ("TRELLIS_FF",), ("MULT18X18D",), ("DP16KD",), _classify), "fits": True, "fmax_seeds": seeds}
 
 
 def netlist_sims(d, arch, work: Path, fmax_target: float, on_stage=None) -> dict:

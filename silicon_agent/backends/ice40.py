@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from . import Backend, register
-from ._common import TOOLS, flat_sim_lib, iverilog_netlist_sim, nextpnr_report, run
+from ._common import TOOLS, flat_sim_lib, iverilog_netlist_sim, nextpnr_report, nextpnr_seeds, run
 
 DEVICE, PACKAGE = "up5k", "sg48"
 
@@ -86,14 +86,11 @@ def synth_pnr(work: Path, fmax_target: float, top: str) -> dict:
     p = run(["yosys", "-q", "-s", str(out / "wrap.ys")], out, out / "yosys_wrap.log")
     if p.returncode != 0:
         raise RuntimeError(f"yosys (wrapper) failed, see {out / 'yosys_wrap.log'}")
-    p = run(["nextpnr-ice40", f"--{DEVICE}", "--package", PACKAGE, "--json", str(out / "synth.json"), "--freq", str(fmax_target),
-             "--timing-allow-fail", "--pcf-allow-unconstrained", "--report", str(out / "report.json"), "--detailed-timing-report", "--seed", "1"],
-            out, out / "nextpnr.log")
-    if p.returncode != 0:
-        raise RuntimeError(f"nextpnr-ice40 failed, see {out / 'nextpnr.log'}")
+    seeds = nextpnr_seeds(["nextpnr-ice40", f"--{DEVICE}", "--package", PACKAGE, "--json", str(out / "synth.json"), "--freq", str(fmax_target),
+                           "--timing-allow-fail", "--pcf-allow-unconstrained", "--detailed-timing-report"], out)
     r = nextpnr_report(out, ("ICESTORM_LC",), (), ("ICESTORM_DSP",), ("ICESTORM_RAM", "ICESTORM_SPRAM"), _classify)
     # the wrapper's shift registers are LCs too; report the core's synth counts, nextpnr's Fmax/path
-    return {**r, "lut": synth["lut"], "ff": synth["ff"], "dsp": synth["dsp"], "bram": synth["bram"], "fits": True}
+    return {**r, "lut": synth["lut"], "ff": synth["ff"], "dsp": synth["dsp"], "bram": synth["bram"], "fits": True, "fmax_seeds": seeds}
 
 
 def netlist_sims(d, arch, work: Path, fmax_target: float, on_stage=None) -> dict:

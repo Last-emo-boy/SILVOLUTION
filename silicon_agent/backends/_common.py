@@ -115,3 +115,29 @@ def nextpnr_report(out: Path, lut_names: tuple[str, ...], ff_names: tuple[str, .
         "lut": used(lut_names), "ff": used(ff_names), "dsp": used(dsp_names), "bram": used(bram_names),
         "critical_path": ([{"total_ns": round(total, 2)}] + entries) if paths else [],
     }
+
+
+SEEDS = int(os.environ.get("SA_SEEDS", "3"))  # P&R seeds per design on the open-source flows (median Fmax is reported)
+
+
+def nextpnr_seeds(cmd: list[str], out: Path, n: int = SEEDS) -> list[float]:
+    """Run `cmd` (a nextpnr command line without --seed/--report) once per seed, writing report_<seed>.json;
+    leave the median run's report as report.json and its log as nextpnr.log. Returns the per-seed Fmax list."""
+    import json
+    import shutil
+    fm = []
+    for seed in range(1, n + 1):
+        rep = out / f"report_{seed}.json"
+        p = run(cmd + ["--seed", str(seed), "--report", str(rep)], out, out / f"nextpnr_{seed}.log")
+        if p.returncode != 0:
+            raise RuntimeError(f"nextpnr failed (seed {seed}), see {out / f'nextpnr_{seed}.log'}")
+        r = json.loads(rep.read_text())
+        f = 0.0
+        for v in r.get("fmax", {}).values():
+            f = v["achieved"]
+        fm.append(round(f, 2))
+    order = sorted(range(n), key=lambda i: fm[i])
+    med = order[len(order) // 2] if n % 2 else order[len(order) // 2 - 1]  # lower median for even n: conservative
+    shutil.copy(out / f"report_{med + 1}.json", out / "report.json")
+    shutil.copy(out / f"nextpnr_{med + 1}.log", out / "nextpnr.log")
+    return fm

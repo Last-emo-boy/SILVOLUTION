@@ -88,23 +88,30 @@ CASES: list[tuple[str, dict, dict]] = [
 ]
 
 
-def _req(server: str, token: str, method: str, path: str, body=None):
-    import urllib.request
+def _req(server: str, token: str, method: str, path: str, body=None, retries: int = 30):
+    """Tolerates server restarts (deploys) and tunnel hiccups: GETs are retried for a few minutes."""
+    import urllib.error, urllib.request
     data = json.dumps(body).encode() if body is not None else None
-    r = urllib.request.Request(f"{server}/api{path}", data=data, method=method,
-                               headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(r, timeout=120) as resp:
-        return json.loads(resp.read())
+    for attempt in range(retries if method == "GET" else 1):
+        try:
+            r = urllib.request.Request(f"{server}/api{path}", data=data, method=method,
+                                       headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(r, timeout=120) as resp:
+                return json.loads(resp.read())
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+            if attempt == retries - 1 or method != "GET":
+                raise
+            time.sleep(10)
 
 
-def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str) -> dict:
+def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str, reuse: str | None = None) -> dict:
     """Submit through the job server (so it serializes with everything else and shows in the UI), wait, score."""
     spec = json.loads(json.dumps(spec))
     spec["task"] = f"[{tag}] {spec['task']}"
     if no_memory:
         spec["no_memory"] = True
     t0 = time.time()
-    jid = _req(server, token, "POST", "/jobs", {"spec": spec, "max_iter": max_iter})["id"]
+    jid = reuse or _req(server, token, "POST", "/jobs", {"spec": spec, "max_iter": max_iter})["id"]
     while True:
         j = _req(server, token, "GET", f"/jobs/{jid}")
         if j["status"] not in ("queued", "running"):
@@ -130,9 +137,10 @@ def cmd_run(a) -> int:
     only = set(a.only.split(",")) if a.only else None
     cases = [c for c in CASES if not only or c[1]["backend"] in only or c[0] in only]
     rows = []
+    existing = {j["task"]: j["id"] for j in _req(server, token, "GET", "/jobs")} if a.reuse else {}
     for name, spec, expect in cases:
         print(f"== {name} ({spec['design']}/{spec['backend']})", flush=True)
-        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag)
+        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"))
         rows.append(r)
         b = r["best"]
         print(f"   {'OK ' if r['ok'] else 'REG'} feasible={r['feasible']} first@{r['first_feasible']} rounds={r['rounds']} "
@@ -179,6 +187,7 @@ def main(argv: list[str]) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run"); r.add_argument("--only"); r.add_argument("--max-iter", type=int, default=6); r.add_argument("--tag", default="bench"); r.add_argument("--no-memory", action="store_true")
     r.add_argument("--server"); r.add_argument("--token"); r.add_argument("--out", help="report directory (default SA_ROOT/bench)")
+    r.add_argument("--reuse", action="store_true", help="attach to jobs with the same [tag] task already on the server instead of resubmitting")
     s = sub.add_parser("show"); s.add_argument("--last", type=int, default=5); s.add_argument("--dir")
     sub.add_parser("cases")
     a = ap.parse_args(argv)

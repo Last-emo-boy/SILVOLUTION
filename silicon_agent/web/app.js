@@ -214,7 +214,8 @@ function buildTurn(r, prevIr, unit, spec) {
     if (r.ir) b.appendChild(el(stageChips(r, spec.backend)));
   } else {
     const m = r.metrics, ok = r.violations.length === 0;
-    b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b> · ${m.lut} LUT · ${m.dsp} DSP · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
+    const seeds = m.fmax_seeds && m.fmax_seeds.length > 1 ? ` <span class="muted" title="${m.fmax_seeds.length} P&R seeds">${fmt(Math.min(...m.fmax_seeds), 0)}–${fmt(Math.max(...m.fmax_seeds), 0)}</span>` : "";
+    b.appendChild(el(`<div class="head"><span class="verdict ${ok ? "ok" : "bad"}">${ok ? "FEASIBLE" : "VIOLATES"}</span><span class="nums"><b>${fmt(m.fmax_mhz)} MHz</b>${seeds} · ${m.lut} LUT · ${m.dsp} DSP${m.bram ? ` · ${m.bram} BRAM` : ""}${m.power_mw != null ? ` · ${m.power_mw} mW` : ""} · ${r.throughput} ${unit} · ${r.eda_seconds}s</span>${ok ? "" : `<span class="viol">${esc(r.violations.join(" · "))}</span>`}</div>`));
   }
   // details: grows in place under this turn; the list around it does not move
   const d = el(`<details class="more" ${openTurns.has(r.n) ? "open" : ""}><summary>details</summary><div class="inner"></div></details>`);
@@ -418,6 +419,41 @@ function renderTrajectory(done, c, unit) {
     p.appendChild(sec);
     requestAnimationFrame(() => chart(sec.querySelector(".chart"), done, key, target, label, color, opts));
   }
+  renderPareto(p, done, c, unit);
+}
+
+// every measured point of this design kind on this device across all runs, with the Pareto front;
+// this run's points are highlighted so you can see where it sits against everything known
+async function renderPareto(p, done, c, unit) {
+  const spec = detail.spec, design = spec.design || "matmul", backend = spec.backend || "ecp5";
+  let data; try { data = await api(`/pareto?design=${design}&backend=${backend}`); } catch { return; }
+  if (!data.points.length) return;
+  const sec = el(`<div class="sec"><h3>Pareto front <span class="hint">${data.n_points} measured designs on ${esc(backend)} · ${data.front.length} non-dominated</span></h3><div class="chart"></div><div class="plegend"><span><i style="background:var(--accent)"></i>this run</span><span><i style="background:var(--good)"></i>front</span><span><i style="background:var(--surface-3)"></i>other runs</span></div></div>`);
+  p.appendChild(sec);
+  requestAnimationFrame(() => {
+    const box = sec.querySelector(".chart"), W = box.clientWidth || 340, H = 170, pad = { l: 40, r: 10, t: 8, b: 24 };
+    const svg = svgEl("svg", { width: W, height: H });
+    const xs = data.points.map((q) => q.dsp), ys = data.points.map((q) => q.fmax_mhz);
+    const x0 = 0, x1 = Math.max(...xs, c.max_dsp || 0) * 1.1 + 1, y0 = 0, y1 = Math.max(...ys, c.fmax_mhz) * 1.1;
+    const X = (v) => pad.l + ((v - x0) / (x1 - x0)) * (W - pad.l - pad.r), Y = (v) => H - pad.b - ((v - y0) / (y1 - y0)) * (H - pad.t - pad.b);
+    svg.appendChild(svgEl("line", { x1: pad.l, y1: Y(c.fmax_mhz), x2: W - pad.r, y2: Y(c.fmax_mhz), stroke: "var(--border-2)", "stroke-dasharray": "3 3" }));
+    if (c.max_dsp != null) svg.appendChild(svgEl("line", { x1: X(c.max_dsp), y1: pad.t, x2: X(c.max_dsp), y2: H - pad.b, stroke: "var(--border-2)", "stroke-dasharray": "3 3" }));
+    const mine = new Set(done.map((r) => JSON.stringify(r.ir)));
+    const frontSet = new Set(data.front.map((q) => q.job + ":" + q.iteration));
+    const fr = [...data.front].sort((a, b) => a.dsp - b.dsp);
+    if (fr.length > 1) svg.appendChild(svgEl("polyline", { points: fr.map((q) => `${X(q.dsp)},${Y(q.fmax_mhz)}`).join(" "), fill: "none", stroke: "var(--good)", "stroke-width": 1, opacity: 0.6 }));
+    for (const q of data.points) {
+      const isMine = q.job === selected, onFront = frontSet.has(q.job + ":" + q.iteration);
+      const dot = svgEl("circle", { cx: X(q.dsp), cy: Y(q.fmax_mhz), r: isMine ? 4.5 : 3, fill: isMine ? "var(--accent)" : onFront ? "var(--good)" : "var(--surface-3)", stroke: isMine ? "var(--bg)" : "none" });
+      dot.addEventListener("mousemove", (ev) => showTip(ev, `${q.task.slice(0, 40)} · iter ${q.iteration}\n${fmt(q.fmax_mhz, 0)} MHz · ${q.lut} LUT · ${q.dsp} DSP · ${q.throughput} ${unit}\n${Object.entries(q.ir).map(([k, v]) => k + "=" + JSON.stringify(v)).join(" ")}`));
+      dot.addEventListener("mouseleave", hideTip);
+      dot.style.cursor = "pointer"; dot.onclick = () => { if (q.job !== selected && jobs.some((j) => j.id === q.job)) select(q.job); };
+      svg.appendChild(dot);
+    }
+    for (const [v, lbl] of [[y1 * 0.9, `${fmt(y1 * 0.9, 0)} MHz`], [c.fmax_mhz, `target`]]) svg.appendChild(Object.assign(svgEl("text", { x: 2, y: Y(v) + 3, fill: "var(--muted)", "font-size": 9, "font-family": "var(--mono)" }), { textContent: lbl }));
+    svg.appendChild(Object.assign(svgEl("text", { x: W - pad.r, y: H - 6, fill: "var(--muted)", "font-size": 9, "text-anchor": "end", "font-family": "var(--mono)" }), { textContent: "DSP →" }));
+    box.appendChild(svg);
+  });
 }
 
 // ---------------------------------------------------------------- memory

@@ -31,7 +31,11 @@ Each iteration you must (1) diagnose the last result from its critical path and 
 candidate IRs that attack the diagnosis from different angles, each with a one-line rationale. A cheap screening model
 ranks them and only the top candidate is sent through EDA this iteration; the others stay as fallbacks. Order the
 candidates by your own confidence. Never repeat an IR already in the history.
-When the current best is feasible and you believe no further improvement is likely, set "stop": true and give no candidates.
+When the current best is feasible and you believe no further improvement is likely, set "stop": true, give no
+candidates, and put the *evidence* in "stop_reason": which objective term is at a bound that no remaining knob can
+move (e.g. "throughput at the DSP cap: 32 PEs = 32 DSP", "acc_width at its legal minimum", "critical path is the
+device's intrinsic DSP M->P stage, 2.31 ns, no IR field touches it"), and which knobs were tried without gain. A stop
+without a measured bound is not acceptable: if a knob is untested and could plausibly help, try it instead.
 
 Respond with a JSON object:
 {
@@ -40,7 +44,8 @@ Respond with a JSON object:
     {"ir": @IR_JSON@, "why": "<one sentence: the mechanism this change exploits>"},
     ...
   ],
-  "stop": false
+  "stop": false,
+  "stop_reason": "<only when stop is true: the bound reached and the evidence, 1-3 sentences>"
 }"""
 
 
@@ -63,7 +68,9 @@ def fmt_history(history: list[dict], c: Constraints, unit: str, locked: dict) ->
         status = "FEASIBLE" if not v else "INFEASIBLE: " + "; ".join(v)
         shown = {k: val for k, val in h["ir"].items() if k not in locked and k != "coefs"}
         lines.append(f"### iteration {h['iteration']}  ir={json.dumps(shown)}")
-        lines.append(f"fmax={m.fmax_mhz:.1f}MHz lut={m.lut} ff={m.ff} dsp={m.dsp} bram={m.bram} "
+        seeds = f" (median of {len(m.fmax_seeds)} P&R seeds: {min(m.fmax_seeds):.1f}-{max(m.fmax_seeds):.1f})" if len(m.fmax_seeds) > 1 else ""
+        pw = f" power={m.power_mw}mW" if m.power_mw is not None else ""
+        lines.append(f"fmax={m.fmax_mhz:.1f}MHz{seeds} lut={m.lut} ff={m.ff} dsp={m.dsp} bram={m.bram}{pw} "
                      f"throughput={h['throughput']} {unit}  latency={h['latency_cycles']} cycles  "
                      f"sim={'pass' if m.sim_passed else 'FAIL'}  -> {status}")
         if m.critical_path:
@@ -98,6 +105,8 @@ def pick_best(history: list[dict], c: Constraints) -> dict | None:
                 k.append(m.dsp)
             elif obj == "minimize_latency":
                 k.append(h["latency_cycles"])
+            elif obj == "minimize_power":
+                k.append(m.power_mw if m.power_mw is not None else 0)
         return tuple(k)
 
     return min(feas, key=key)
@@ -262,8 +271,9 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
         cands = reply.get("candidates") or ([{"ir": reply["next_ir"], "why": reply.get("action", "")}] if reply.get("next_ir") else [])
         cands = [c for c in cands if isinstance(c, dict) and isinstance(c.get("ir"), dict)][:3]
         if reply.get("stop") and (best or steer) and not cands:
-            print(f"     diagnosis: {diagnosis}\n     planner says stop.", flush=True)
-            emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": reply.get("action", "stop"), "candidates": [], "stop": True})
+            reason = reply.get("stop_reason") or reply.get("action") or "stop"
+            print(f"     diagnosis: {diagnosis}\n     planner says stop: {reason}", flush=True)
+            emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": reason, "stop_reason": reason, "candidates": [], "stop": True})
             break
         if not cands:
             cands = [{"ir": ir.to_dict(), "why": "planner returned no candidate; retrying from the last design"}]

@@ -280,6 +280,26 @@ FIR, **XC7S50 via Vivado**, 32-tap 16-bit lowpass, Fmax ≥ 250 MHz, DSP ≤ 8:
 Adding a design kind = one IR dataclass + one emitter + one cocotb test + one
 registry entry in `designs.py` + a prompt block in `prompts.py`.
 
+## Trust and delivery
+
+- **Benchmark + regression** (`python -m silicon_agent.bench run --tag nightly`): 11 fixed cases over three
+  designs and four devices, each with an expectation (feasible, rounds to first feasible). Submitted as
+  ordinary jobs, scored, written to `bench/<tag>-<ts>.json`; `bench show` tabulates the last reports.
+- **Multi-seed Fmax**: the open-source backends place-and-route every design with 3 seeds (`SA_SEEDS`) and
+  report the median; the spread (typically ±3-5 %) is shown next to Fmax and given to the planner, so a
+  near-miss is not decided by one placement roll.
+- **Evidence for stopping**: the planner may stop only with a `stop_reason` naming the bound it hit (DSP cap,
+  minimum accumulator width, an intrinsic device stage); it is shown in the trajectory and in the report.
+- **Power** (Vivado): `report_power` dynamic power becomes `power_mw`, usable as `max_power_mw` and
+  `minimize_power`.
+- **Cross-run Pareto front** (`GET /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]`): every
+  measured point of a design kind on a device, the non-dominated set, and the best measured point under given
+  constraints; drawn in the worktable's Trajectory tab and given to the chat so "what is the best achievable"
+  is answered with measured numbers.
+- **Delivery package** (`GET /api/jobs/<id>/package`): RTL, an AXI4-Stream wrapper with output FIFO
+  (verified under random back-pressure), the self-checking vector testbench, tool reports, the trajectory and
+  a README. "Download package (zip)" in the chat result card and the worktable menu.
+
 ## Platform: adding a design or a device
 
 A **design** is one module (see `fir.py`, `conv.py`): a frozen IR dataclass with `validate()`,

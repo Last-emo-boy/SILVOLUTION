@@ -13,6 +13,7 @@ API
   POST /api/jobs/<id>/steer      {"message": "..."}  -> read by the planner before its next proposal
   POST /api/jobs/<id>/stop
   GET  /api/memory               lessons per (design, backend), scored
+  GET  /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]   every measured point, the Pareto front, best under constraints
   POST /api/memory/<d>/<b>/vote  {"id": ..., "vote": "up"|"down"}
   GET  /api/threads              conversations (newest first)
   GET  /api/threads/<id>         messages + the jobs they refer to
@@ -314,7 +315,7 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
     lang = nl._lang(text)
     # a running job: requests steer it instead of starting another run; questions are just answered
     if ctx and ctx["status"] in ("queued", "running"):
-        ans = nl.reply(text, ctx)
+        ans = nl.reply(text, ctx, None)
         if not ans["is_request"]:
             th["messages"].append({"role": "assistant", "kind": "text", "text": ans["text"], "job": ctx["job"], "t": time.time()})
             _save_thread(tid)
@@ -332,7 +333,10 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
         return {"action": "steer", "job": ctx["job"]}
     # otherwise: is it a question about the run, or a (new/refined) request?
     if ctx:
-        ans = nl.reply(text, ctx)
+        from . import pareto
+        with _lock:
+            fr = pareto.front(pareto.points(_jobs, ctx["spec"].get("design", "matmul"), ctx["spec"].get("backend", "ecp5")))
+        ans = nl.reply(text, ctx, fr)
         if not ans["is_request"]:
             th["messages"].append({"role": "assistant", "kind": "text", "text": ans["text"], "job": ctx["job"], "t": time.time()})
             _save_thread(tid)
@@ -478,6 +482,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {**th, "jobs": {jid: {"status": j["status"], "spec": j["spec"], "summary": j.get("summary"), "error": j.get("error"),
                                                         "n_events": len(j["events"]), "max_iter": j.get("max_iter"), "parent": j.get("parent"),
                                                         "created": j["created"], "task": j["spec"].get("task", "")} for jid, j in jobs_in.items()}})
+        if path == "/pareto":
+            from . import pareto
+            q = parse_qs(u.query)
+            design, backend = q.get("design", ["matmul"])[0], q.get("backend", ["ecp5"])[0]
+            with _lock:
+                pts = pareto.points(_jobs, design, backend)
+            fr = pareto.front(pts)
+            want = {k: float(q[k][0]) for k in ("fmax_mhz", "max_dsp", "max_lut") if k in q}
+            best = pareto.best_under(pts, want.get("fmax_mhz"), want.get("max_dsp"), want.get("max_lut")) if want else None
+            return self._json(200, {"design": design, "backend": backend, "n_points": len(pts), "front": fr, "points": pts, "best_under": best})
         if path == "/schema":
             from .schema import SCHEMAS, OBJECTIVES
             return self._json(200, {"designs": SCHEMAS, "objectives": OBJECTIVES, "backends": {k: v["name"] for k, v in BACKENDS.items()},

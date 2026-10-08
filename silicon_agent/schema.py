@@ -77,4 +77,4 @@ SCHEMAS = {
     },
 }
 
-OBJECTIVES = ["maximize_throughput", "minimize_lut", "minimize_dsp", "maximize_fmax", "minimize_latency"]
+OBJECTIVES = ["maximize_throughput", "minimize_lut", "minimize_dsp", "maximize_fmax", "minimize_latency", "minimize_power"]
