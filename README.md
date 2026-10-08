@@ -293,6 +293,11 @@ registry entry in `designs.py` + a prompt block in `prompts.py`.
   drives both with the same free inputs and asserts every output agrees cycle by cycle -- the guard for
   generator refactors. *Properties*: no `out_valid` in reset, defined outputs after reset, no handshake
   retraction. Positive and negative controls (a corrupted copy fails) are part of the check.
+- **Planner A/B**: `spec.planner` names the LLM that proposes for that job (default `SA_MODEL`); `bench run
+  --planner <model> --tag <model>` runs the whole suite under one model so two reports can be compared case by
+  case. The interpreter's "alternatives" also offer a *different generator* for the same request (a two-stage
+  `fir_chain` for a long FIR, CORDIC instead of a table, `cmul=three` FFT on a multiplier-bound part), so an
+  architecture A/B is two chat turns and a compare link.
 - **Functional coverage**: every cocotb bench reports named bins (back-to-back, gaps, stalls, extreme
   operands, frame restarts...) as `sim_coverage`; the chat shows the bins hit, so "simulation passed" says
   what was exercised.
@@ -317,8 +322,13 @@ registry entry in `designs.py` + a prompt block in `prompts.py`.
 
 Designs: `matmul`, `fir` (optionally with a runtime-writable coefficient port), `conv2d`, `cordic`
 (rotate/vector, unrolled or folded, bit-exact golden), `fft` (radix-2 SDF, 16..4096 points, scale or grow,
-BRAM delay lines, bit-reversal reorder; cycle-exact fixed-point golden), `fir_chain` and the generic
-`graph`. Devices: ECP5, Spartan-7 and Artix-7 (Vivado), iCE40 UP5K, Gowin GW1NR-9, GateMate CCGM1A1.
+BRAM delay lines, bit-reversal reorder, `cmul` four / three (Gauss) / LUT-only complex multipliers, the last
+two stages multiplier-free; cycle-exact fixed-point golden), `fir_chain` and the generic `graph`. Devices:
+ECP5, Spartan-7 (Vivado), iCE40 UP5K, Gowin GW1NR-9, GateMate CCGM1A1; Artix-7 is registered and enabled
+once the Vivado install has its device files (`SA_DISABLE_BACKENDS` hides a backend whose toolchain is
+missing on a host). Measured on the EDA host: 256-point 16-bit FFT on Gowin, natural order, 153.9 MHz with
+18 of 20 multipliers (`cmul=three`); FIR -> CORDIC graph on ECP5 218 MHz, 3 DSP; 16-tap FIR with a
+coefficient port on GateMate 60.3 MHz; 5x5 conv on Spartan-7 219.8 MHz through all five simulation stages.
 
 A **composite design** (see `chain.py`, `graph.py`) is a design whose IR holds a list of node IRs; its
 emitter instantiates the nodes' generated modules (renamed `n<i>_*`) with FIFOs and width adapters between
