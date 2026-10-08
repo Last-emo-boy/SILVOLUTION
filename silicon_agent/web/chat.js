@@ -270,6 +270,20 @@ function turns(events) {
 
 const seedSpan = (m) => (m.fmax_seeds && m.fmax_seeds.length > 1) ? ` <span class="muted" title="${m.fmax_seeds.length} P&R seeds">${fmt(Math.min(...m.fmax_seeds), 0)}–${fmt(Math.max(...m.fmax_seeds), 0)}</span>` : "";
 
+// critical path as a proportional bar: one segment per stage (logic solid, routing hatched), the target period as a tick
+function cpBar(cp, spec) {
+  const total = cp[0].total_ns, target = spec?.constraints?.fmax_mhz ? 1000 / spec.constraints.fmax_mhz : 0;
+  const span = Math.max(total, target) || 1;
+  const segs = cp.slice(1).map((s) => {
+    const l = Math.max(0, s.logic_ns || 0), rt = Math.max(0, s.route_ns || 0), name = (s.rtl || "").split(".").slice(-2).join(".");
+    return `<span class="seg" style="width:${(100 * (l + rt) / span).toFixed(2)}%" title="${esc(s.kind)} ${esc(name)}: ${fmt(l, 2)} ns logic + ${fmt(rt, 2)} ns route">` +
+      `<i class="lg ${esc((s.kind || "").toLowerCase().replace(/[^a-z0-9]+/g, "-"))}" style="width:${l + rt ? (100 * l / (l + rt)).toFixed(1) : 0}%"></i></span>`;
+  }).join("");
+  return `<div class="cp"><span>${T.critical} ${fmt(total, 2)} ns${target ? ` / ${fmt(target, 2)} ns` : ""}:</span>` +
+    `<div class="cpbar">${segs}${target ? `<b class="tick" style="left:${(100 * target / span).toFixed(2)}%"></b>` : ""}</div>` +
+    cp.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc((s.rtl || "").split(".").slice(-2).join("."))}</i> ${fmt((s.logic_ns || 0) + (s.route_ns || 0), 2)}</span>`).join("") + `</div>`;
+}
+
 function stageChips(r, backend) {
   const st = r.pending ? r.stages : (r.metrics?.sim_stages || {});
   const keys = stagesOf(backend);
@@ -321,7 +335,7 @@ function trajCard(jid, j, rows, done, liveRow, spec) {
       ${r.ir ? stageChips(r, spec.backend) : ""}
       ${r.n > 1 && !r.slot && (r.plan?.diagnosis ?? r.diagnosis) ? `<div class="why">${esc(r.plan?.diagnosis ?? r.diagnosis)}</div>` : ""}
       ${r.note ? `<div class="why">${esc(r.note)}</div>` : ""}
-      ${!r.pending && m.critical_path?.length > 1 ? `<div class="cp"><span>${T.critical} ${fmt(m.critical_path[0].total_ns, 2)} ns:</span>${m.critical_path.slice(1).map((s) => `<span>${esc(s.kind)} <i>${esc(s.rtl.split(".").slice(-2).join("."))}</i> ${fmt(s.logic_ns + s.route_ns, 2)}</span>`).join("")}</div>` : ""}
+      ${!r.pending && m.critical_path?.length > 1 ? cpBar(m.critical_path, spec) : ""}
       ${r.next?.stop ? `<div class="why">■ ${esc(r.next.stop_reason || r.next.action)}</div>` : ""}
       ${(r.userAfter || []).map((u) => `<div class="user">${esc(u.message)}</div>`).join("")}
     </div></div>`);

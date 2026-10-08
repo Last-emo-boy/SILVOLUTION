@@ -105,6 +105,12 @@ button:disabled { opacity: .45; cursor: default; }
 .simtable .p { color: var(--muted); font-size: 12px; }
 .log { font: 10.5px var(--mono); color: var(--bad); white-space: pre-wrap; max-height: 160px; overflow: auto; margin-top: 4px; }
 .cp { font: 11px var(--mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; } .cp i { color: var(--text-2); font-style: normal; }
+.cpbar { flex-basis: 100%; position: relative; display: flex; height: 10px; border-radius: 3px; overflow: visible; background: var(--surface-2, #1a1a22); }
+.cpbar .seg { display: block; height: 100%; background: repeating-linear-gradient(135deg, var(--muted) 0 2px, transparent 2px 5px); border-right: 1px solid var(--bg); box-sizing: border-box; }
+.cpbar .seg i { display: block; height: 100%; background: var(--text-2); }
+.cpbar .seg i.dsp48e1, .cpbar .seg i.mult18x18d, .cpbar .seg i.mult18x18, .cpbar .seg i.sb-mac16, .cpbar .seg i.cc-mult { background: var(--accent); }
+.cpbar .seg i.carry-chain, .cpbar .seg i.carry4, .cpbar .seg i.ccu2c { background: var(--warn, #d9a441); }
+.cpbar .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--bad, #e5484d); }
 
 /* result card */
 .result .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: 13px; }
