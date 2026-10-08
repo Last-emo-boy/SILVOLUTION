@@ -262,6 +262,74 @@ class AghClient:
         return {"text": (final.strip() or "".join(texts).strip() or state["last_assistant"]), "full_text": "".join(texts).strip(),
                 "steps": steps, "tools": tools, "stop": r.get("stopReason")}
 
+    def project(self, session_id: str) -> dict:
+        """The harness's UI projection of a session: opState (a turn in flight?), nodes (messages / tool calls)."""
+        return self.call("_agnes/v1/session.projectUI", {"sessionId": session_id, "surface": "web"}, timeout=60)
+
+    def wait_idle(self, session_id: str, timeout: float = 3600, on_event=None) -> dict:
+        """Follow a turn that another connection (a previous server process) started: attach for its session/update
+        stream and return when the harness reports the turn over. Returns the same shape as prompt()."""
+        tools: list[dict] = []
+        calls: dict[str, dict] = {}
+        texts: list[str] = []
+        steps: list[dict] = []
+        done = threading.Event()
+
+        def on_update(method: str, params: dict) -> None:
+            if method != "session/update":
+                return
+            upd = params.get("update") or {}
+            kind = upd.get("sessionUpdate")
+            meta = (params.get("_meta") or {}).get(META) or {}
+            if kind == "agent_message_chunk":
+                c = upd.get("content") or {}
+                if c.get("type") == "text":
+                    texts.append(c.get("text", ""))
+                    if steps and steps[-1]["kind"] == "text":
+                        steps[-1]["text"] += c.get("text", "")
+                    else:
+                        steps.append({"kind": "text", "text": c.get("text", "")})
+            elif kind == "tool_call":
+                calls[upd.get("toolCallId")] = {"name": upd.get("title") or upd.get("kind"), "raw": upd.get("rawInput"), "status": upd.get("status")}
+                steps.append({"kind": "tool", "id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind")})
+            elif kind == "tool_call_update":
+                c = calls.setdefault(upd.get("toolCallId"), {})
+                c["status"] = upd.get("status", c.get("status"))
+                if upd.get("content"):
+                    txt = "".join(b.get("content", {}).get("text", "") for b in upd["content"] if isinstance(b, dict) and b.get("type") == "content")
+                    try:
+                        c["result"] = json.loads(txt) if txt else None
+                    except json.JSONDecodeError:
+                        c["result"] = txt
+                upd = {**upd, "_result": c.get("result"), "title": c.get("name")}
+            if meta.get("turnEnd") or meta.get("phase") in ("terminalQuiescence", "parked"):
+                done.set()
+            if on_event:
+                on_event(kind, upd, meta)
+
+        self.listen(session_id, on_update)
+        try:
+            self.call("_agnes/v1/session.attach", {"sessionId": session_id, "filter": {"acpUpdates": True}}, timeout=30)
+            # already idle? then there is nothing to wait for
+            op = (self.project(session_id) or {}).get("opState")
+            if not op:
+                done.set()
+            done.wait(timeout)
+        finally:
+            self.unlisten(session_id, on_update)
+        for cid, c in calls.items():
+            tools.append({"id": cid, "name": c.get("name"), "args": c.get("raw"), "result": c.get("result"), "status": c.get("status")})
+        for st in steps:
+            if st["kind"] == "tool":
+                st["status"] = calls.get(st["id"], {}).get("status")
+        final = ""
+        for st in reversed(steps):
+            if st["kind"] == "tool":
+                break
+            if st["kind"] == "text":
+                final = st["text"] + final
+        return {"text": final.strip() or "".join(texts).strip(), "full_text": "".join(texts).strip(), "steps": steps, "tools": tools, "stop": "resumed"}
+
     def cancel(self, session_id: str) -> None:
         self.notify("session/cancel", {"sessionId": session_id})
 

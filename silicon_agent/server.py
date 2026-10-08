@@ -223,29 +223,40 @@ def _load_threads() -> None:
 
 
 def _resume_turns() -> None:
-    """A thread left `busy` by a restart had an agent turn in flight. The AGH session kept running (it is another
-    process); the harness holds the turn's answer in that session, so we ask it to carry on: a short prompt in the
-    same session makes the agent pick up where it was (its tool records are in its own history) and the chat gets a
-    reply instead of a spinner forever. Without AGH the turn is simply marked interrupted."""
+    """A thread left `busy` by a restart had an agent turn in flight. The AGH session is another process and may
+    still be running that turn: attach to it and take its outcome as the reply (runs it starts get their cards);
+    if the turn is already over, a short prompt in the same session makes the agent report from its own records.
+    Without AGH the turn is simply marked interrupted."""
     from . import agh
     for tid, th in list(_threads.items()):
         if not th.get("busy"):
             continue
         if agh.enabled() and th.get("agh_session"):
-            first = next((m["text"] for m in th["messages"] if m["role"] == "user"), "")
-            lang = nl._lang(first)
-            nudge = ("服务器刚重启过。请根据你之前的工具记录继续刚才的任务：查一下你启动的运行现在的状态（sa_jobs / sa_job），把结果报告出来。"
-                     if lang == "zh" else
-                     "The server was restarted. Continue the task you were on using your own tool records: check the runs you started (sa_jobs / sa_job) and report the result.")
-            def go(tid=tid, nudge=nudge, sub=th.get("subject", "cli")):
+            def go(tid=tid):
+                th = _threads[tid]
+                first = next((m["text"] for m in th["messages"] if m["role"] == "user"), "")
+                lang = nl._lang(first)
                 try:
-                    _agh_turn(tid, nudge, sub)
-                except Exception as e:
-                    _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
+                    c = agh.client()
+                    sid = th["agh_session"]
+                    c.load_session(sid, agh.workspace())
+                    r = c.wait_idle(sid, timeout=3600, on_event=_run_watcher(tid, lang))
+                    if not r["text"] and not r["tools"]:
+                        raise agh.AghError("turn already over; nothing observed")
+                    _record_turn(tid, r, lang)
+                except Exception:
+                    # the turn could not be followed: ask the agent to report from its own tool records instead
+                    nudge = ("服务器刚重启过。请根据你之前的工具记录继续刚才的任务：查一下你启动的运行现在的状态（sa_jobs / sa_job），把结果报告出来。"
+                             if lang == "zh" else
+                             "The server was restarted. Continue the task you were on using your own tool records: check the runs you started (sa_jobs / sa_job) and report the result.")
+                    try:
+                        _agh_turn(tid, nudge, th.get("subject", "cli"))
+                    except Exception as e2:
+                        th["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e2}", "t": time.time()})
                 finally:
                     with _lock:
-                        _threads[tid]["busy"] = False
-                        _threads[tid].pop("live", None)
+                        th["busy"] = False
+                        th.pop("live", None)
                         _save_thread(tid)
             threading.Thread(target=go, daemon=True).start()
         else:
@@ -253,18 +264,6 @@ def _resume_turns() -> None:
             th.pop("live", None)
             th["messages"].append({"role": "assistant", "kind": "text", "text": "（服务器重启，这一轮被打断了）" if nl._lang(th["messages"][0]["text"] if th["messages"] else "") == "zh" else "(the server restarted; this turn was interrupted)", "t": time.time()})
             _save_thread(tid)
-        _threads[f.stem]["busy"] = False
-        for m in _threads[f.stem]["messages"]:
-            m.pop("narrating", None)
-    # jobs the chat started before thread binding was persisted: bind them from the message log
-    for tid, th in _threads.items():
-        for m in th["messages"]:
-            j = _jobs.get(m.get("job") or "")
-            if j and not j.get("thread"):
-                j["thread"] = tid
-                _save_state(m["job"])
-    for tid in _threads:
-        threading.Thread(target=_narrate_if_done, args=(tid,), daemon=True).start()
 
 
 def _save_thread(tid: str) -> None:
@@ -481,11 +480,75 @@ def _run_note(spec: dict, lang: str) -> str:
             else f"Run started: {spec.get('task', '')} ({spec.get('design')} on {spec.get('backend')}, {cons}).")
 
 
+def _run_watcher(tid: str, lang: str):
+    """Event hook for an AGH turn: keeps the live tool trail on the thread and gives a run the agent starts its
+    card the moment sa_run returns (not when the whole turn ends)."""
+    th = _threads[tid]
+    trail: list[dict] = []
+    seen: set[str] = set()
+
+    def on_event(kind, upd, meta):
+        if kind == "tool_call":
+            trail.append({"id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind"), "status": upd.get("status", "pending")})
+            with _lock:
+                th["live"] = trail[-40:]
+        elif kind == "tool_call_update":
+            for t in trail:
+                if t["id"] == upd.get("toolCallId"):
+                    t["status"] = upd.get("status", t["status"])
+            with _lock:
+                th["live"] = trail[-40:]
+        if kind == "tool_call_update" and (upd.get("title") or "") == "sa_run":
+            out = upd.get("_result") or {}
+            jid = out.get("id") if isinstance(out, dict) else None
+            if jid and jid in _jobs and jid not in seen:
+                seen.add(jid)
+                _note_agent_run(tid, jid, lang)
+    on_event.seen = seen
+    return on_event
+
+
+def _note_agent_run(tid: str, jid: str, lang: str) -> None:
+    th = _threads[tid]
+    with _lock:
+        if any(m.get("kind") == "run" and m.get("job") == jid for m in th["messages"]):
+            return
+        _jobs[jid]["thread"] = tid
+        _save_state(jid)
+        th["messages"].append({"role": "assistant", "kind": "run", "text": _run_note(_jobs[jid]["spec"], lang), "job": jid, "lang": lang, "t": time.time(),
+                               "fork": bool(_jobs[jid].get("parent")), "source": "agh"})
+        _save_thread(tid)
+
+
+def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
+    """Append the agent's reply (and any run it started that the watcher missed) to the thread."""
+    th = _threads[tid]
+    started: list[str] = []
+    for t in r["tools"]:
+        if t.get("name") == "sa_run" and isinstance(t.get("result"), dict):
+            jid = t["result"].get("id")
+            if jid and jid in _jobs:
+                started.append(jid)
+                _note_agent_run(tid, jid, lang)
+    if r.get("stop") == "cancelled":
+        r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（已停止）" if lang == "zh" else "(stopped)")
+    with _lock:
+        th.pop("live", None)
+        th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
+                               "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh",
+                               "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40],
+                               "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status")} for st in r.get("steps", [])][:80]})
+        if not th["title"] and started:
+            th["title"] = _jobs[started[-1]]["spec"].get("task", "")[:120]
+        _save_thread(tid)
+    return started
+
+
 def _agh_turn(tid: str, text: str, sub: str) -> dict:
     """The same user turn, but run by Agnes Harness: the LLM loop, tool records, approvals and session history
-    live in AGH; silicon-agent's capabilities are the `sa_*` tools of the agh-plugin. Runs the tools started
-    (sa_run) become run cards in the thread; the assistant text is AGH's final answer; every tool call is kept
-    on the message so the chat can show the trajectory of the agent itself."""
+    live in AGH; silicon-agent's capabilities are the `sa_*` tools of the agh-plugin. Runs the agent starts become
+    run cards in the thread; the assistant text is AGH's final answer; every tool call is kept on the message so
+    the chat can show the trajectory of the agent itself."""
     from . import agh
     th = _threads[tid]
     c = agh.client()
@@ -505,58 +568,8 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
     # the method itself is injected by the plugin's context hook (sessions keyed sa-thread-*); the bracketed line
     # only carries the thread id the tools need
     prompt = f"[silicon-agent chat · thread {tid}]\n{text}"
-    started: list[str] = []
-    seen: set[str] = set()
-
-    trail: list[dict] = []
-
-    def on_event(kind, upd, meta):
-        # the live tool trail: the chat shows what the agent is doing while the turn runs
-        if kind == "tool_call":
-            trail.append({"id": upd.get("toolCallId"), "name": upd.get("title") or upd.get("kind"), "status": upd.get("status", "pending")})
-            with _lock:
-                th["live"] = trail[-40:]
-        elif kind == "tool_call_update":
-            for t in trail:
-                if t["id"] == upd.get("toolCallId"):
-                    t["status"] = upd.get("status", t["status"])
-            with _lock:
-                th["live"] = trail[-40:]
-        # a run started mid-turn gets its card immediately, not when the whole turn ends
-        if kind == "tool_call_update" and (upd.get("title") or "") == "sa_run":
-            out = upd.get("_result") or {}
-            jid = out.get("id") if isinstance(out, dict) else None
-            if jid and jid in _jobs and jid not in seen:
-                seen.add(jid)
-                started.append(jid)
-                with _lock:
-                    _jobs[jid]["thread"] = tid
-                    _save_state(jid)
-                    th["messages"].append({"role": "assistant", "kind": "run", "text": _run_note(_jobs[jid]["spec"], lang), "job": jid, "lang": lang, "t": time.time(),
-                                           "fork": bool(_jobs[jid].get("parent")), "source": "agh"})
-                    _save_thread(tid)
-
-    r = c.prompt(sid, prompt, on_event=on_event, timeout=3600)
-    if r.get("stop") == "cancelled":
-        r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（已停止）" if lang == "zh" else "(stopped)")
-    for t in r["tools"]:
-        if t.get("name") == "sa_run" and isinstance(t.get("result"), dict):
-            jid = t["result"].get("id")
-            if jid and jid in _jobs and jid not in seen:
-                seen.add(jid); started.append(jid)
-                with _lock:
-                    _jobs[jid]["thread"] = tid
-                    _save_state(jid)
-                    th["messages"].append({"role": "assistant", "kind": "run", "text": _run_note(_jobs[jid]["spec"], lang), "job": jid, "lang": lang, "t": time.time(), "source": "agh"})
-    with _lock:
-        th.pop("live", None)
-        th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
-                               "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh",
-                               "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40],
-                               "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status")} for st in r.get("steps", [])][:80]})
-        if not th["title"] and started:
-            th["title"] = _jobs[started[-1]]["spec"].get("task", "")[:120]
-        _save_thread(tid)
+    r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
+    started = _record_turn(tid, r, lang)
     return {"action": "agh", "jobs": started}
 
 
