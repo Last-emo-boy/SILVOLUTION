@@ -240,17 +240,21 @@ def _resume_turns() -> None:
                     c = agh.client()
                     sid = th["agh_session"]
                     c.load_session(sid, agh.workspace())
-                    r = c.wait_idle(sid, timeout=3600, on_event=_run_watcher(tid, lang))
-                    if not r["text"] and not r["tools"]:
-                        raise agh.AghError("turn already over; nothing observed")
-                    _record_turn(tid, r, lang)
+                    # the harness aborts a turn whose client connection went away (that is what a restart looks
+                    # like to it), so usually there is nothing to follow; when there is, take its outcome
+                    r = c.wait_idle(sid, timeout=3600, on_event=_run_watcher(tid, lang)) if (c.project(sid) or {}).get("opState") else None
+                    if r and (r["text"] or r["tools"]):
+                        _record_turn(tid, r, lang)
+                    else:
+                        raise agh.AghError("turn already over")
                 except Exception:
-                    # the turn could not be followed: ask the agent to report from its own tool records instead
-                    nudge = ("服务器刚重启过。请根据你之前的工具记录继续刚才的任务：查一下你启动的运行现在的状态（sa_jobs / sa_job），把结果报告出来。"
+                    # ask the agent to carry on from its own tool records: the runs it started are still on the
+                    # job server, and the session history holds everything it had found out
+                    nudge = ("服务器刚重启过，上一轮被打断。请根据你之前的工具记录继续刚才的任务：查一下你启动的运行现在的状态（sa_jobs / sa_job），需要的话继续后续步骤，然后把结果报告出来。"
                              if lang == "zh" else
-                             "The server was restarted. Continue the task you were on using your own tool records: check the runs you started (sa_jobs / sa_job) and report the result.")
+                             "The server was restarted and the previous turn was cut short. Continue the task from your own tool records: check the runs you started (sa_jobs / sa_job), finish any remaining steps, then report the result.")
                     try:
-                        _agh_turn(tid, nudge, th.get("subject", "cli"))
+                        _agh_turn(tid, nudge, th.get("subject", "cli"), resumed=True)
                     except Exception as e2:
                         th["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e2}", "t": time.time()})
                 finally:
@@ -535,7 +539,7 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
     with _lock:
         th.pop("live", None)
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
-                               "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh",
+                               "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh", **({"resumed": True} if r.get("resumed") else {}),
                                "tools": [{"name": t.get("name"), "status": t.get("status"), "args": t.get("args")} for t in r["tools"]][:40],
                                "steps": [{"kind": st["kind"], "text": st.get("text", "")[:600], "name": st.get("name"), "status": st.get("status")} for st in r.get("steps", [])][:80]})
         if not th["title"] and started:
@@ -544,7 +548,7 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
     return started
 
 
-def _agh_turn(tid: str, text: str, sub: str) -> dict:
+def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     """The same user turn, but run by Agnes Harness: the LLM loop, tool records, approvals and session history
     live in AGH; silicon-agent's capabilities are the `sa_*` tools of the agh-plugin. Runs the agent starts become
     run cards in the thread; the assistant text is AGH's final answer; every tool call is kept on the message so
@@ -569,6 +573,8 @@ def _agh_turn(tid: str, text: str, sub: str) -> dict:
     # only carries the thread id the tools need
     prompt = f"[silicon-agent chat · thread {tid}]\n{text}"
     r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
+    if resumed:
+        r["resumed"] = True
     started = _record_turn(tid, r, lang)
     return {"action": "agh", "jobs": started}
 
