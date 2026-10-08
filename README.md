@@ -120,7 +120,9 @@ history and compaction are AGH's. silicon-agent is an AGH **plugin** (`agh-plugi
 job server's JSON-RPC client for the AGH daemon (one AGH session per conversation thread); with
 `SA_AGH=1` every chat turn is an AGH prompt, runs the agent starts become cards, and the agent's tool
 trail is shown under its reply (`Agent steps`: the notes between calls and every call with its
-status). Chat sessions (key `sa-thread-<id>`) get the method as a prompt section and the host tools
+status, then the harness's ledger for the turn: model calls, tokens, estimated cost, wall time; the
+topbar keeps the conversation total). While the agent works its narration and tool calls stream into
+the thinking row; a message sent meanwhile queues behind the turn. Chat sessions (key `sa-thread-<id>`) get the method as a prompt section and the host tools
 (`write`, `edit`, `shell`, …) refused by a `tool_call` hook: the only way the agent changes anything is
 through the job server. A job-server restart does not lose a turn: if the harness is still running it the
 server re-attaches and follows it, if the harness aborted it (the client connection dropped) the session
