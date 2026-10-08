@@ -45,7 +45,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   refreshMemCount();
   if (THREAD) {
     try {
-      const th = await api(`/threads/${THREAD}`);
+      const th = await api(`/threads/${THREAD}`); threadData = th;
       const head = $(".rail-head"); head.querySelector(".brand").innerHTML = `<a class="back" href="/#${esc(THREAD)}" title="Back to the conversation">‹</a> <span class="logo">▣</span> <span class="tt" title="${esc(th.title)}">${esc(th.title || THREAD)}</span>`;
       document.title = `${th.title || THREAD} · worktable`;
     } catch { $(".rail-head .brand").insertAdjacentHTML("beforeend", ` <span class="muted">(thread not found)</span>`); }
@@ -175,6 +175,41 @@ function render() {
   renderSim(liveRow || done.at(-1), spec);
   if (best && !$("#rtl").textContent) api(`/jobs/${selected}/rtl`).then((t) => { $("#rtl").textContent = t; }).catch(() => {});
   renderMemoryTab(rows);
+  renderAgentTab();
+}
+
+// the Agnes Harness side of a run: the chat turns that started it and the agent's tool trail (steps) with arguments
+let threadData = null;
+function renderAgentTab() {
+  const tab = $("#tab-agent"), p = $("#pane-agent");
+  const msgs = (threadData?.messages || []).filter((m) => m.source === "agh" && (m.job === selected || (m.kind === "text" && m.tools?.some((t) => JSON.stringify(t.args || {}).includes(selected)))));
+  tab.hidden = !msgs.length;
+  if (!msgs.length) { p.innerHTML = ""; return; }
+  const sig = JSON.stringify(msgs.map((m) => [m.t, m.steps?.length]));
+  if (p.dataset.sig === sig) return;
+  p.dataset.sig = sig; p.innerHTML = "";
+  p.appendChild(el(`<div class="sec"><h3>Agent <span class="hint">Agnes Harness session · ${esc(threadData.agh_session || "")}</span></h3></div>`));
+  for (const m of msgs) {
+    const sec = el(`<div class="sec agent-turn"></div>`);
+    if (m.kind === "text") {
+      const steps = m.steps || [];
+      // the trailing text step is the reply itself (shown below), not a working note
+      const lastTool = steps.map((s) => s.kind).lastIndexOf("tool");
+      const list = el(`<div class="agent-steps-list"></div>`);
+      let k = 0;
+      for (const [i, st] of steps.entries()) {
+        if (st.kind === "text") { if (st.text.trim() && i < lastTool) list.appendChild(el(`<div class="note">${esc(st.text.trim())}</div>`)); continue; }
+        const t = (m.tools || [])[k++] || {};
+        const args = t.args ? JSON.stringify(t.args) : "";
+        list.appendChild(el(`<div class="call ${st.status === "failed" ? "x" : ""}"><span class="n">${k}</span><code>${esc(st.name || "?")}</code>${args ? `<span class="args" title="${esc(args)}">${esc(args.length > 160 ? args.slice(0, 160) + "…" : args)}</span>` : ""}${st.status === "failed" ? `<span class="bad"> failed</span>` : ""}</div>`));
+      }
+      sec.appendChild(list);
+      sec.appendChild(el(`<div class="agent-reply">${esc(m.text || "")}</div>`));
+    } else {
+      sec.appendChild(el(`<div class="muted small-text">${esc(m.text || "run started by the agent")}</div>`));
+    }
+    p.appendChild(sec);
+  }
 }
 
 // ---------------------------------------------------------------- transcript

@@ -115,12 +115,13 @@
           </div>
         </div>
         <aside class="inspector" id="inspector">
-          <nav class="tabs"><button data-tab="design" class="on">Design</button><button data-tab="trajectory">Trajectory</button><button data-tab="sim">Simulation</button><button data-tab="rtl">RTL</button><button data-tab="memory">Memory</button><button id="close-insp" class="x" title="Close">×</button></nav>
+          <nav class="tabs"><button data-tab="design" class="on">Design</button><button data-tab="trajectory">Trajectory</button><button data-tab="sim">Simulation</button><button data-tab="rtl">RTL</button><button data-tab="memory">Memory</button><button data-tab="agent" id="tab-agent" hidden>Agent</button><button id="close-insp" class="x" title="Close">×</button></nav>
           <div class="pane" id="pane-design"></div>
           <div class="pane" id="pane-trajectory" hidden></div>
           <div class="pane" id="pane-sim" hidden></div>
           <div class="pane" id="pane-rtl" hidden><pre id="rtl" class="code"></pre></div>
           <div class="pane" id="pane-memory" hidden></div>
+          <div class="pane" id="pane-agent" hidden></div>
         </aside>
       </div>
     </section>

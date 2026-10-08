@@ -231,3 +231,12 @@ dialog .frow { margin-bottom: 12px; }
 dialog .iters { display: flex; flex-wrap: wrap; gap: 6px; }
 dialog .iters button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+/* Agent tab: the harness's view of a run */
+.agent-steps-list { margin: 6px 0 10px; font-size: 12.5px; }
+.agent-steps-list .note { color: var(--text-2); margin: 6px 0 4px; }
+.agent-steps-list .call { margin: 3px 0 3px 4px; display: flex; gap: 8px; align-items: baseline; }
+.agent-steps-list .call .n { font: 11px var(--mono); color: var(--muted); min-width: 14px; text-align: right; }
+.agent-steps-list .call code { font: 12px var(--mono); color: var(--text); } .agent-steps-list .call .args { font: 11px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-steps-list .call.x code { color: var(--bad, #e5484d); }
+.agent-reply { white-space: pre-wrap; font-size: 13px; color: var(--text); border-left: 2px solid var(--border); padding-left: 10px; }
