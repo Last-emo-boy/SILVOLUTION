@@ -749,7 +749,7 @@ class Handler(BaseHTTPRequestHandler):
                          "created": v["created"], "subject": v.get("subject", ""), "parent": v.get("parent"), "thread": v.get("thread"),
                          "best": (v.get("summary") or {}).get("best"), "iterations": sum(1 for e in v["events"] if e["kind"] == "result")}
                         for j, v in _jobs.items() if want is None or (v.get("thread") or "") == want]
-            rows.sort(key=lambda r: r["last"], reverse=True)
+            rows.sort(key=lambda r: r["created"], reverse=True)
             return self._json(200, rows)
         if len(parts) >= 2 and parts[0] == "jobs":
             job_id = parts[1]

@@ -23,4 +23,11 @@ ssh "$HOST" 'set -e
   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --force-recreate
   sleep 3
   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml ps
-  curl -fsS http://127.0.0.1:8765/health && echo'
+  curl -fsS http://127.0.0.1:8765/health && echo
+  # every read-only endpoint the chat, the worktable and the agent tools depend on must answer
+  tok=$(grep ^SA_TOKEN= /opt/silicon-agent/.env | cut -d= -f2-)
+  for p in /api/jobs "/api/jobs?thread=" /api/threads /api/schema /api/specs /api/memory /api/bench "/api/pareto?design=fir&backend=ecp5" /api/calibration / /work; do
+    code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $tok" "http://127.0.0.1:8765$p")
+    [ "$code" = 200 ] || { echo "smoke: GET $p -> HTTP $code" >&2; fail=1; }
+  done
+  [ -z "${fail:-}" ] && echo "smoke: ok" || exit 1'
