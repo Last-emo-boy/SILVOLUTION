@@ -283,9 +283,19 @@ registry entry in `designs.py` + a prompt block in `prompts.py`.
 
 ## Trust and delivery
 
-- **Benchmark + regression** (`python -m silicon_agent.bench run --tag nightly`): 11 fixed cases over three
+- **Benchmark + regression** (`python -m silicon_agent.bench run --tag nightly`): 14 fixed cases over six
   designs and four devices, each with an expectation (feasible, rounds to first feasible). Submitted as
-  ordinary jobs, scored, written to `bench/<tag>-<ts>.json`; `bench show` tabulates the last reports.
+  ordinary jobs, scored, written to `bench/<tag>-<ts>.json`; `bench show` tabulates the last reports and
+  `compare()` flags any case that got worse than the previous report. `deploy/nightly.sh` runs the
+  open-source cases from cron on the EDA host (03:17) and exposes the result at `GET /api/bench`.
+- **Formal checks** (`GET /api/jobs/<id>/formal[?depth=20]`, `formal.py`): SymbiYosys bounded model
+  checking. *Equivalence*: a miter instantiates the RTL that was measured and a fresh emit of the same IR,
+  drives both with the same free inputs and asserts every output agrees cycle by cycle -- the guard for
+  generator refactors. *Properties*: no `out_valid` in reset, defined outputs after reset, no handshake
+  retraction. Positive and negative controls (a corrupted copy fails) are part of the check.
+- **Functional coverage**: every cocotb bench reports named bins (back-to-back, gaps, stalls, extreme
+  operands, frame restarts...) as `sim_coverage`; the chat shows the bins hit, so "simulation passed" says
+  what was exercised.
 - **Multi-seed Fmax**: the open-source backends place-and-route every design with 3 seeds (`SA_SEEDS`) and
   report the median; the spread (typically ±3-5 %) is shown next to Fmax and given to the planner, so a
   near-miss is not decided by one placement roll.
@@ -298,14 +308,23 @@ registry entry in `designs.py` + a prompt block in `prompts.py`.
   constraints; drawn in the worktable's Trajectory tab and given to the chat so "what is the best achievable"
   is answered with measured numbers.
 - **Delivery package** (`GET /api/jobs/<id>/package`): RTL, an AXI4-Stream wrapper with output FIFO
-  (verified under random back-pressure), the self-checking vector testbench, tool reports, the trajectory and
-  a README. "Download package (zip)" in the chat result card and the worktable menu.
+  (verified under random back-pressure; an AXI4-Lite coefficient port when the FIR has `coef_port`), the
+  self-checking vector testbench, tool reports, the trajectory, a README, and a board project:
+  `project/create_vivado.tcl` + `constraints.xdc` for the AMD parts, `build_oss.sh` for the open-source
+  devices. "Download package (zip)" in the chat result card and the worktable menu.
 
 ## Platform: adding a design or a device
 
-A **composite design** (see `chain.py`) is a design whose IR holds a list of stage IRs; its emitter
-instantiates the stages' generated modules with FIFOs between them, `locked["stages"]` is merged per
-stage, and the planner edits each stage's knobs. The same pattern fits any valid/ready pipeline.
+Designs: `matmul`, `fir` (optionally with a runtime-writable coefficient port), `conv2d`, `cordic`
+(rotate/vector, unrolled or folded, bit-exact golden), `fft` (radix-2 SDF, 16..4096 points, scale or grow,
+BRAM delay lines, bit-reversal reorder; cycle-exact fixed-point golden), `fir_chain` and the generic
+`graph`. Devices: ECP5, Spartan-7 and Artix-7 (Vivado), iCE40 UP5K, Gowin GW1NR-9, GateMate CCGM1A1.
+
+A **composite design** (see `chain.py`, `graph.py`) is a design whose IR holds a list of node IRs; its
+emitter instantiates the nodes' generated modules (renamed `n<i>_*`) with FIFOs and width adapters between
+them, `locked["stages"|"nodes"]` is merged per node, and the planner edits each node's knobs. `graph`
+accepts any chain of fir / conv2d / cordic / fft nodes, so "filter then CORDIC" is one task; the FIFO must
+cover the upstream node's latency because nodes have no back-pressure input (the graph gates the source).
 
 A **design** is one module (see `fir.py`, `conv.py`): a frozen IR dataclass with `validate()`,
 `to_dict()/from_dict()`, `digest()`; an `emit(ir, backend)` that returns SystemVerilog with the
@@ -335,12 +354,16 @@ silicon_agent/ir.py        matmul IR, constraints, metrics
 silicon_agent/emit.py      matmul IR → SystemVerilog (backend-aware multiplier)
 silicon_agent/fir.py       FIR IR + emitter (transposed / folded, symmetric sharing)
 silicon_agent/conv.py      2-D convolution IR + emitter (BRAM/LUT line buffers, row-serial or parallel, adder tree)
+silicon_agent/cordic.py    CORDIC IR + emitter (rotate/vector, unroll/fold, bit-exact golden)
+silicon_agent/fft.py       radix-2 SDF FFT IR + emitter + cycle-exact fixed-point golden
 silicon_agent/chain.py     composite: cascaded FIR stages with inter-stage FIFOs
+silicon_agent/graph.py     composite: generic chain of fir/conv2d/cordic/fft nodes with FIFOs and width adapters
+silicon_agent/formal.py    SymbiYosys bounded equivalence (miter) + stream properties
 silicon_agent/bench.py     benchmark set + regression runner
 silicon_agent/deliver.py   AXI4-Stream wrappers + delivery zip
 silicon_agent/pareto.py    cross-run Pareto front
 silicon_agent/designs.py   design registry
-silicon_agent/backends/    device plugins: ecp5, xc7s50 (Vivado), ice40, gowin; _common.py shared helpers
+silicon_agent/backends/    device plugins: ecp5, xc7s50 + xc7a35t (Vivado), ice40, gowin, gatemate; _common.py shared helpers
 silicon_agent/prompts.py   per-design planner knowledge with measured device facts (+ generic facts from the registry)
 silicon_agent/eda.py       behavioral simulation + cached evaluate() over the backend registry
 silicon_agent/loop.py      generic optimization loop
@@ -348,8 +371,8 @@ silicon_agent/nl.py        natural language → spec; narration; Q&A about a run
 silicon_agent/server.py    HTTP job server + threads + static web UI, token or gateway-HMAC auth
 silicon_agent/web/         chat (index.html, chat.js, chat.css) and worktable (work.html, app.js, form.js, app.css) — no build step
 silicon_agent/llm.py       DeepSeek client
-silicon_agent/tb/          cocotb testbenches, golden models, MULT18X18D sim model
+silicon_agent/tb/          cocotb testbenches, golden models, coverage bins, primitive sim models (MULT18X18D, BRAM, Gowin MULT)
 specs/                     task specs
-deploy/                    compose.yml, push.sh, sluice-route.json, sluice-add-route.sh
+deploy/                    compose.yml, push.sh, nightly.sh (cron regression), sluice-route.json, sluice-add-route.sh
 setup.sh  run.sh           local toolchain install / local entry point
 ```
