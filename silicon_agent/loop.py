@@ -202,6 +202,8 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             }
             history.append(entry)
             (out / f"iter_{it:02d}.json").write_text(json.dumps(entry, indent=2))
+            if m.fits and m.sim_passed:
+                screen.record(design.kind, backend, ir.to_dict(), asdict(m))
             v = entry["violations"]
             print(f"     fmax={m.fmax_mhz:.1f} lut={m.lut} dsp={m.dsp} ff={m.ff} sim={'ok' if m.sim_passed else 'FAIL'} "
                   f"{'FEASIBLE' if not v else 'violations: ' + '; '.join(v)}  ({entry['eda_seconds']}s)", flush=True)

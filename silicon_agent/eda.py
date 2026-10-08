@@ -26,7 +26,7 @@ ROOT = Path(os.environ.get("SA_ROOT", Path(__file__).resolve().parent.parent))
 TOOLS = Path(os.environ.get("SA_TOOLS", ROOT / "tools" / "oss-cad-suite"))
 TB_DIR = Path(__file__).resolve().parent / "tb"
 CACHE = ROOT / "cache"
-CACHE_VERSION = "3"  # bump when report parsing changes; invalidates cached metrics
+CACHE_VERSION = "4"  # bump when report parsing changes; invalidates cached metrics
 
 BACKENDS = {
     "ecp5": {
@@ -96,6 +96,7 @@ def synth_pnr_ecp5(work: Path, fmax_target: float, top: str) -> dict:
         f"read_slang --top {top} {rtl} {TOOLS / 'share' / 'yosys' / 'lattice' / 'cells_bb_ecp5.v'}\n"
         f"synth_ecp5 -top {top} -json {out / 'synth.json'}\n"
         f"tee -o {out / 'stat.json'} stat -json\n"
+        f"write_verilog -noattr -norename {out / 'post_synth.v'}\n"
     )
     p = run(["yosys", "-q", "-s", str(ys)], out, out / "yosys.log")
     if p.returncode != 0:
@@ -181,6 +182,61 @@ def summarize_critical_path_ecp5(paths: list[dict]) -> list[dict]:
         e["logic_ns"] = round(e["logic_ns"], 2)
         e["route_ns"] = round(e["route_ns"], 2)
     return [{"total_ns": round(total, 2)}] + entries
+
+
+# ---------------------------------------------------------------- ECP5: post-synthesis functional sim (iverilog)
+def _ecp5_sim_lib() -> Path:
+    """yosys's ecp5/cells_sim.v includes cells_ff.vh twice; preprocess once and drop duplicate
+    modules. Cached next to the tools."""
+    lib = CACHE / "ecp5_cells_flat.v"
+    if lib.exists():
+        return lib
+    d = TOOLS / "share" / "yosys" / "ecp5"
+    flat = subprocess.run(["iverilog", "-g2012", "-E", "-I", str(d), "-o", "/dev/stdout", str(d / "cells_sim.v")],
+                          capture_output=True, text=True, env=tool_env()).stdout
+    out, seen, skip = [], set(), False
+    for line in flat.splitlines():
+        m = re.match(r"\s*module\s+(\w+)", line)
+        if m:
+            skip = m.group(1) in seen
+            seen.add(m.group(1))
+        if not skip:
+            out.append(line)
+        if re.match(r"\s*endmodule", line):
+            skip = False
+    CACHE.mkdir(exist_ok=True)
+    lib.write_text("\n".join(out) + "\n")
+    return lib
+
+
+def netlist_sims_ecp5(d: Design, arch, work: Path, fmax_target: float, on_stage=None) -> dict:
+    """Stage 2 only: the yosys-mapped netlist (LUT4/CCU2C/TRELLIS_FF/MULT18X18D) against the same vectors.
+    nextpnr's routed output uses its own cell parameterization with no simulation model and no SDF, so
+    the post-implementation stages are not available on this backend."""
+    out = work / "pnr"
+    sim = work / "nsim"
+    sim.mkdir(parents=True, exist_ok=True)
+    stim, exp = d.vectors(arch)
+    (sim / "stim.hex").write_text("\n".join(stim) + "\n")
+    (sim / "exp.hex").write_text("\n".join(exp) + "\n")
+    period = 1000.0 / fmax_target
+    (sim / "tb.sv").write_text(d.tb(arch, period))
+    net = out / "post_synth.v"
+    label = "Post-synthesis functional"
+    if not net.exists():
+        return {"post_synth_func": {"passed": None, "label": label, "period_ns": period, "log": "netlist not produced"}}
+    log = sim / "post_synth_func.log"
+    srcs = [str(sim / "tb.sv"), str(net), str(_ecp5_sim_lib())] + [str(TB_DIR / f) for f in d.extra_sim_sources]
+    with log.open("w") as f:
+        c = subprocess.run(["iverilog", "-g2012", "-o", "ps.vvp", *srcs], cwd=sim, env=tool_env(), stdout=f, stderr=subprocess.STDOUT, text=True, timeout=600)
+        r = subprocess.run(["vvp", "ps.vvp"], cwd=sim, env=tool_env(), stdout=f, stderr=subprocess.STDOUT, text=True, timeout=1800) if c.returncode == 0 else None
+    text = log.read_text()
+    passed = c.returncode == 0 and r is not None and "RESULT PASS" in text
+    tail = "\n".join(l for l in text.splitlines() if re.search(r"RESULT|MISMATCH|COUNT|error", l))[-1500:]
+    res = {"post_synth_func": {"passed": passed, "label": label, "period_ns": round(period, 3), "log": tail}}
+    if on_stage:
+        on_stage("post_synth_func", res["post_synth_func"])
+    return res
 
 
 # ---------------------------------------------------------------- XC7S50: Vivado
@@ -415,8 +471,11 @@ def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str =
     else:
         r = SYNTH[backend](work, fmax_target, d.top)
         stages = {}
-        if backend == "xc7s50" and r.get("fits") and d.vectors is not None:
-            stages = netlist_sims(d, arch, work, fmax_target, on_stage=on_stage)
+        if r.get("fits") and d.vectors is not None:
+            if backend == "xc7s50":
+                stages = netlist_sims(d, arch, work, fmax_target, on_stage=on_stage)
+            elif backend == "ecp5":
+                stages = netlist_sims_ecp5(d, arch, work, fmax_target, on_stage=on_stage)
         m = Metrics(**r, sim_passed=True, sim_log=sim_log, sim_stages=stages)
     cached.write_text(json.dumps(asdict(m)))
     (work / "metrics.json").write_text(json.dumps(asdict(m), indent=2))

@@ -1,0 +1,7 @@
+{"t": 1791440550.54866, "features": [1.0, 5.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0], "estimate": {"fmax_mhz": 220, "lut": 1, "dsp": 44}, "measured": {"fmax_mhz": 495.54, "lut": 1, "dsp": 45}}
+{"t": 1791440550.548784, "features": [1.0, 5.0, 1.0, 1.0, 0.95, 1.0, 1.0, 0], "estimate": {"fmax_mhz": 200, "lut": 344, "dsp": 16}, "measured": {"fmax_mhz": 163.05, "lut": 567, "dsp": 16}}
+{"t": 1791440550.548823, "features": [1.0, 5.0, 1.0, 1.0, 0.95, 1.0, 0.0, 0], "estimate": {"fmax_mhz": 200, "lut": 344, "dsp": 8}, "measured": {"fmax_mhz": 150.04, "lut": 1185, "dsp": 8}}
+{"t": 1791440550.548856, "features": [1.0, 5.0, 2.0, 1.0, 0.95, 1.0, 1.0, 0], "estimate": {"fmax_mhz": 200, "lut": 268, "dsp": 8}, "measured": {"fmax_mhz": 236.57, "lut": 360, "dsp": 8}}
+{"t": 1791440550.548888, "features": [1.0, 5.0, 3.0, 1.0, 0.95, 1.0, 1.0, 0], "estimate": {"fmax_mhz": 160, "lut": 230, "dsp": 4}, "measured": {"fmax_mhz": 225.53, "lut": 265, "dsp": 4}}
+{"t": 1791440550.5489202, "features": [1.0, 5.0, 2.0, 1.0, 0.95, 1.0, 1.0, 0], "estimate": {"fmax_mhz": 200, "lut": 268, "dsp": 8}, "measured": {"fmax_mhz": 152.07, "lut": 325, "dsp": 8}}
+{"t": 1791440550.5489511, "features": [1.0, 5.0, 3.0, 0.0, 0.925, 1.0, 1.0, 0], "estimate": {"fmax_mhz": 200, "lut": 394, "dsp": 8}, "measured": {"fmax_mhz": 259.07, "lut": 324, "dsp": 8}}

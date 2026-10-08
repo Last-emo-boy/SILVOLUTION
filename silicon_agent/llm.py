@@ -5,6 +5,7 @@ Key resolution: DEEPSEEK_API_KEY env var, then macOS Keychain (service 'deepseek
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -12,6 +13,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 MODEL = os.environ.get("SA_MODEL", "deepseek-flash")
@@ -46,6 +48,7 @@ EFFORT = os.environ.get("SA_EFFORT", "high")  # deepseek reasoning_effort for th
 
 
 MAX_TOKENS = int(os.environ.get("SA_MAX_TOKENS", "131072"))  # model allows up to 393216
+LLM_CACHE = Path(os.environ.get("SA_ROOT", Path(__file__).resolve().parent.parent)) / "cache" / "llm"
 
 
 def chat_json(system: str, user: str, max_tokens: int | None = None, retries: int = 3) -> dict:
@@ -54,6 +57,11 @@ def chat_json(system: str, user: str, max_tokens: int | None = None, retries: in
     budget thinking returns finish_reason=length with empty content; on that we step
     the reasoning effort down (high -> low) rather than just retrying the same call."""
     max_tokens = max_tokens or MAX_TOKENS
+    # replies are deterministic enough for our purpose and a resumed run must replay the same plan
+    key = hashlib.sha256(f"{MODEL}\n{system}\n{user}".encode()).hexdigest()[:20]
+    hit = LLM_CACHE / f"{key}.json"
+    if hit.exists():
+        return json.loads(hit.read_text())
     efforts = [EFFORT, EFFORT, "low"]
     last_err: Exception | None = None
     for attempt in range(retries):
@@ -76,7 +84,10 @@ def chat_json(system: str, user: str, max_tokens: int | None = None, retries: in
             text = choice["message"].get("content") or ""
             if not text.strip():
                 raise ValueError(f"empty content (finish_reason={choice.get('finish_reason')}, usage={r.get('usage')})")
-            return _extract_json(text)
+            parsed = _extract_json(text)
+            LLM_CACHE.mkdir(parents=True, exist_ok=True)
+            hit.write_text(json.dumps(parsed))
+            return parsed
         except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError) as e:
             last_err = e
             print(f"     llm attempt {attempt + 1}/{retries} (effort={body['reasoning_effort']}) failed: {e}", flush=True)
