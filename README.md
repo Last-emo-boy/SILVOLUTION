@@ -6,8 +6,9 @@ until it meets the requirements, then hands you the Verilog. Real EDA tools are
 the ground truth; nothing is estimated.
 
 Designs: `matmul` (systolic INT matrix multiply), `fir` (fixed-coefficient FIR), `conv2d`
-(streaming K×K convolution with BRAM line buffers). Devices: Lattice ECP5, AMD Spartan-7
-(Vivado), Lattice iCE40 UP5K, Gowin GW1NR-9 — each a plugin under `silicon_agent/backends/`.
+(streaming K×K convolution with BRAM line buffers), `fir_chain` (a cascade of FIR stages with
+FIFOs between them — the first composite datapath). Devices: Lattice ECP5, AMD Spartan-7 (Vivado),
+Lattice iCE40 UP5K, Gowin GW1NR-9 — each a plugin under `silicon_agent/backends/`.
 
 ```
 laptop                              EDA host (netcup)
@@ -302,6 +303,10 @@ registry entry in `designs.py` + a prompt block in `prompts.py`.
 
 ## Platform: adding a design or a device
 
+A **composite design** (see `chain.py`) is a design whose IR holds a list of stage IRs; its emitter
+instantiates the stages' generated modules with FIFOs between them, `locked["stages"]` is merged per
+stage, and the planner edits each stage's knobs. The same pattern fits any valid/ready pipeline.
+
 A **design** is one module (see `fir.py`, `conv.py`): a frozen IR dataclass with `validate()`,
 `to_dict()/from_dict()`, `digest()`; an `emit(ir, backend)` that returns SystemVerilog with the
 valid/ready streaming interface; a cocotb test with a Python golden model under `tb/`; a vector
@@ -330,6 +335,10 @@ silicon_agent/ir.py        matmul IR, constraints, metrics
 silicon_agent/emit.py      matmul IR → SystemVerilog (backend-aware multiplier)
 silicon_agent/fir.py       FIR IR + emitter (transposed / folded, symmetric sharing)
 silicon_agent/conv.py      2-D convolution IR + emitter (BRAM/LUT line buffers, row-serial or parallel, adder tree)
+silicon_agent/chain.py     composite: cascaded FIR stages with inter-stage FIFOs
+silicon_agent/bench.py     benchmark set + regression runner
+silicon_agent/deliver.py   AXI4-Stream wrappers + delivery zip
+silicon_agent/pareto.py    cross-run Pareto front
 silicon_agent/designs.py   design registry
 silicon_agent/backends/    device plugins: ecp5, xc7s50 (Vivado), ice40, gowin; _common.py shared helpers
 silicon_agent/prompts.py   per-design planner knowledge with measured device facts (+ generic facts from the registry)
