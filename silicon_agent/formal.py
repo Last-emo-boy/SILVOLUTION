@@ -83,8 +83,17 @@ setundef -zero -init
     return {"ok": ok, "depth": k, "log": tail, "seconds": round(time.time() - t0, 1), "dir": str(work)}
 
 
+def _depth(d: Design, ir, k: int) -> int:
+    """The bound must reach past the pipeline: a check that ends before the first valid output proves nothing."""
+    try:
+        return max(k, int(d.latency(ir)) + 8)
+    except Exception:
+        return k
+
+
 def equivalence(d: Design, ir, rtl_a: str, rtl_b: str, work: Path, k: int = 24) -> dict:
     """Bounded sequential equivalence of two RTL texts for `d` (same IR): identical free inputs, outputs must match."""
+    k = _depth(d, ir, k)
     ports = _ports(rtl_a, d.top, work, d.extra_sim_sources)
     ins = [(t, n) for dd, t, n in ports if dd == "input"]
     outs = [(t, n) for dd, t, n in ports if dd == "output"]
@@ -94,7 +103,12 @@ def equivalence(d: Design, ir, rtl_a: str, rtl_b: str, work: Path, k: int = 24) 
     free_ports = "".join(f", input wire {t.replace('logic', '').strip()} {n}" for t, n in ins if n not in ("clk", "rst"))
     oa = "\n".join(f"    {t} {n}_a, {n}_b;" for t, n in outs)
     conn = lambda sfx: ", ".join([".clk(clk)", ".rst(rst)"] + [f".{n}({n})" for _, n in ins if n not in ("clk", "rst")] + [f".{n}({n}_{sfx})" for _, n in outs])
-    checks = "\n".join(f"        if (!rst && cyc > 2) assert ({n}_a == {n}_b);" for _, n in outs)
+    # data outputs are compared only while the stream says they are valid: before the first transfer they are whatever
+    # uninitialized pipeline/FIFO state the solver chose, which smtbmc leaves symbolic for memories
+    valid = next((n for _, n in outs if n == "out_valid"), None)
+    def guard(n):
+        return f"if (!rst && cyc > 2 && {valid}_a) " if (valid and n.startswith("out_") and n not in ("out_valid", "out_first", "out_last")) else "if (!rst && cyc > 2) "
+    checks = "\n".join(f"        {guard(n)}assert ({n}_a == {n}_b);" for _, n in outs)
     miter = f"""// miter: two generators, one stimulus
 module miter(input wire clk{free_ports});
     logic rst; logic [7:0] cyc = 0;
@@ -118,6 +132,7 @@ endmodule
 def properties(d: Design, ir, rtl: str, work: Path, k: int = 24) -> dict:
     """Stream-protocol properties on one core: outputs never X after reset; out_valid low during reset;
     in_ready does not drop while in_valid is held high without a transfer (no handshake retraction)."""
+    k = _depth(d, ir, k)
     ports = _ports(rtl, d.top, work, d.extra_sim_sources)
     ins = [(t, n) for dd, t, n in ports if dd == "input"]
     outs = [(t, n) for dd, t, n in ports if dd == "output"]
