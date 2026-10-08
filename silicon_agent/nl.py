@@ -56,6 +56,7 @@ Spec shape:
   "design": "matmul" | "fir",
   "backend": "ecp5" | "xc7s50",
   "locked": {<task-defining fields>},
+  "planner": <string or null>   (only when the user names a planner model to compare, e.g. "deepseek-reasoner"; otherwise null)
   "constraints": {"fmax_mhz": <number>, "max_dsp": <number or null>, "max_lut": <number or null>, "max_power_mw": <number or null, Vivado devices only>,
                   "objective": [<ordered subset of maximize_throughput, minimize_dsp, minimize_lut, maximize_fmax, minimize_latency, minimize_power>]},
   "initial_ir": {<a deliberately naive starting point so the agent has something to improve; matmul: pe_rows/pe_cols sized
@@ -147,6 +148,8 @@ def interpret(message: str, context: dict | None = None) -> dict:
     out_spec = {"task": spec.get("task") or message[:60], "design": design, "backend": backend, "locked": locked,
                 "constraints": cons, "initial_ir": {k: v for k, v in ir.to_dict().items() if k != "coefs"}}
     out_spec["task"] = (base["task"] if base and not spec.get("task") else out_spec["task"])
+    if isinstance(spec.get("planner"), str) and spec["planner"].strip():
+        out_spec["planner"] = spec["planner"].strip()
     alts = [a for a in (r.get("alternatives") or []) if isinstance(a, dict) and a.get("request")][:2]
     return {"spec": out_spec, "fork": bool(r.get("fork")) and bool(base), "summary": r.get("summary", ""),
             "assumptions": r.get("assumptions") or [], "questions": r.get("questions") or [], "alternatives": alts, "errors": errs, "lang": _lang(message)}

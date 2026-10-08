@@ -51,14 +51,16 @@ MAX_TOKENS = int(os.environ.get("SA_MAX_TOKENS", "131072"))  # model allows up t
 LLM_CACHE = Path(os.environ.get("SA_ROOT", Path(__file__).resolve().parent.parent)) / "cache" / "llm"
 
 
-def chat_json(system: str, user: str, max_tokens: int | None = None, retries: int = 3) -> dict:
+def chat_json(system: str, user: str, max_tokens: int | None = None, retries: int = 3, model: str | None = None) -> dict:
     """One chat turn, JSON-object response, returned parsed. Retries on transport
     errors and on empty/unparseable content. A reasoning model that spends the whole
     budget thinking returns finish_reason=length with empty content; on that we step
-    the reasoning effort down (high -> low) rather than just retrying the same call."""
+    the reasoning effort down (high -> low) rather than just retrying the same call.
+    `model` overrides the default planner model (planner A/B: the same task run under several models)."""
     max_tokens = max_tokens or MAX_TOKENS
+    model = model or MODEL
     # replies are deterministic enough for our purpose and a resumed run must replay the same plan
-    key = hashlib.sha256(f"{MODEL}\n{system}\n{user}".encode()).hexdigest()[:20]
+    key = hashlib.sha256(f"{model}\n{system}\n{user}".encode()).hexdigest()[:20]
     hit = LLM_CACHE / f"{key}.json"
     if hit.exists():
         return json.loads(hit.read_text())
@@ -66,7 +68,7 @@ def chat_json(system: str, user: str, max_tokens: int | None = None, retries: in
     last_err: Exception | None = None
     for attempt in range(retries):
         body = {
-            "model": MODEL,
+            "model": model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "response_format": {"type": "json_object"},
             "max_tokens": max_tokens,

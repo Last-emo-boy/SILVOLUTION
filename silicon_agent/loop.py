@@ -194,6 +194,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
     system = build_system(design, backend)
     emit = on_event or (lambda ev: None)
     locked = dict(spec.get("locked", {}))  # task-level fields the planner may not change
+    planner_model = spec.get("planner") or None   # planner A/B: which LLM proposes; default from the environment
     init = merge_locked(spec.get("initial_ir", {}), locked)
     ir = IR.from_dict(init)
     # task data that is part of the design identity but never a planner knob (FIR coefficients)
@@ -327,7 +328,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 + f"Current best feasible: {json.dumps(ir_view(IR.from_dict(best['ir']), locked)) if best else 'none'}\n"
                 f"Propose iteration {it + 1}.")
         try:
-            reply = llm.chat_json(system, user)
+            reply = llm.chat_json(system, user, model=planner_model)
         except RuntimeError as e:
             # planner unavailable: keep what we have rather than losing the run
             print(f"     planner failed: {e}", flush=True)
@@ -378,7 +379,8 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             emit({"kind": "rescreen", "iteration": it + 1, "verdicts": [{"ir": ir_view(IR.from_dict(r["ir"]), locked), "est_violations": r["est_violations"]} for r in ranked]})
             try:
                 reply2 = llm.chat_json(system, user + "\n\n## Screening verdicts on your candidates (closed-form estimates, not EDA)\n" + verdicts +
-                                       "\nEvery candidate is estimated to violate a constraint. Propose up to three different candidates that the estimates would accept, or keep one if you believe the estimate is wrong and say why.")
+                                       "\nEvery candidate is estimated to violate a constraint. Propose up to three different candidates that the estimates would accept, or keep one if you believe the estimate is wrong and say why.",
+                                       model=planner_model)
                 reply2["_rescreened"] = True
                 cands2 = [c2 for c2 in (reply2.get("candidates") or []) if isinstance(c2, dict) and isinstance(c2.get("ir"), dict)][:3]
                 if cands2:

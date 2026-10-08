@@ -120,12 +120,15 @@ def _req(server: str, token: str, method: str, path: str, body=None, retries: in
             time.sleep(10)
 
 
-def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str, reuse: str | None = None) -> dict:
+def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str, reuse: str | None = None,
+             planner: str | None = None) -> dict:
     """Submit through the job server (so it serializes with everything else and shows in the UI), wait, score."""
     spec = json.loads(json.dumps(spec))
     spec["task"] = f"[{tag}] {spec['task']}"
     if no_memory:
         spec["no_memory"] = True
+    if planner:
+        spec["planner"] = planner
     t0 = time.time()
     jid = reuse or _req(server, token, "POST", "/jobs", {"spec": spec, "max_iter": max_iter})["id"]
     while True:
@@ -156,13 +159,13 @@ def cmd_run(a) -> int:
     existing = {j["task"]: j["id"] for j in _req(server, token, "GET", "/jobs")} if a.reuse else {}
     for name, spec, expect in cases:
         print(f"== {name} ({spec['design']}/{spec['backend']})", flush=True)
-        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"))
+        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"), a.planner)
         rows.append(r)
         b = r["best"]
         print(f"   {'OK ' if r['ok'] else 'REG'} feasible={r['feasible']} first@{r['first_feasible']} rounds={r['rounds']} "
               f"{(f'{b['fmax_mhz']:.1f} MHz {b['lut']} LUT {b['dsp']} DSP thr={b['throughput']}' if b else '-')} eda={r['eda_seconds']}s wall={r['wall_seconds']}s job={r['job']}"
               + (f"  ERROR {str(r['error'])[:160]}" if r["error"] else ""), flush=True)
-    rep = {"tag": a.tag, "t": time.time(), "max_iter": a.max_iter, "no_memory": a.no_memory, "cases": rows,
+    rep = {"tag": a.tag, "t": time.time(), "max_iter": a.max_iter, "no_memory": a.no_memory, "planner": a.planner, "cases": rows,
            "summary": {"n": len(rows), "ok": sum(r["ok"] for r in rows), "feasible": sum(r["feasible"] for r in rows),
                        "mean_first_feasible": round(sum(r["first_feasible"] or a.max_iter + 1 for r in rows) / max(len(rows), 1), 2),
                        "eda_seconds": round(sum(r["eda_seconds"] for r in rows), 1)}}
@@ -245,6 +248,7 @@ def main(argv: list[str]) -> int:
     r = sub.add_parser("run"); r.add_argument("--only"); r.add_argument("--max-iter", type=int, default=6); r.add_argument("--tag", default="bench"); r.add_argument("--no-memory", action="store_true")
     r.add_argument("--server"); r.add_argument("--token"); r.add_argument("--out", help="report directory (default SA_ROOT/bench)")
     r.add_argument("--reuse", action="store_true", help="attach to jobs with the same [tag] task already on the server instead of resubmitting")
+    r.add_argument("--planner", help="planner model for every case (A/B: run the suite once per model with distinct --tag)")
     s = sub.add_parser("show"); s.add_argument("--last", type=int, default=5); s.add_argument("--dir")
     sub.add_parser("cases")
     a = ap.parse_args(argv)
