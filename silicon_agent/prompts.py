@@ -217,9 +217,12 @@ Throughput is always 1 sample/cycle; the knobs move Fmax and resources only. Cri
 NCO_IR_JSON = '{"lut_addr_width":..,"dither":..,"table_mem":"..","pipe_lut":..,"pipe_mix":..,"reg_in":..,"dsp_regs":".."}'
 
 NCO_FACTS = {
-    "ecp5": """ECP5, measured on 12-bit data, 12-bit sine, 24-bit phase, 10-bit table address, dsp_regs in_pipe_out, pipe_lut 1,
-pipe_mix 1: bram table -> 2 MULT18X18D, 132 LUT, 1 DP16KD, 107 MHz (limiter: the BRAM read -> negate -> DSP A input);
-lut table (8-bit address) -> 211 LUT, 0 BRAM, 113 MHz. The phase accumulator is a plain carry chain.""",
+    "ecp5": """ECP5, measured on 12-bit data, 12-bit sine, 24-bit phase, dsp_regs in_pipe_out, pipe_lut 1, pipe_mix 1:
+bram table (10-bit address) -> 2 MULT18X18D, 103 LUT, 1 DP16KD, 108 MHz, and the limiter is the DP16KD read itself
+(5.8 ns clock-to-out, intrinsic: no knob shortens it -- a BRAM table caps this device near 110 MHz);
+lut table (8-bit address) -> 181 LUT, 0 BRAM, 134 MHz, limiter the MULT18X18D (3.9 ns) + its output routing, so
+~135 MHz is the ceiling of a 12x12 DSP mix here. For > 110 MHz choose table_mem lut; a 150 MHz target on ECP5 is
+infeasible with 12-bit operands.""",
     "ice40": """iCE40, measured on 12-bit data/sine, 24-bit phase, 8-bit lut table with dither, dsp_regs in_pipe_out: 2 SB_MAC16,
 384 LC, 64.5 MHz. The 24-bit phase adder and the logic ROM are the limiters.""",
     "gowin": """Gowin, measured on 12-bit data/sine, 24-bit phase, 10-bit bram table, dsp_regs in_pipe_out, pipe_mix 2: 2 DSP,

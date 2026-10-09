@@ -238,21 +238,22 @@ def emit_nco(a: NcoArch, backend: str = "ecp5") -> str:
         s_raw <= SINE[s_addr]; c_raw <= SINE[c_addr];
         s_neg2 <= s_neg; c_neg2 <= c_neg; v2 <= v1 & ~rst; x2 <= x1;
     end
-    logic signed [SW-1:0] s_v, c_v;
-    assign s_v = s_neg2 ? -s_raw : s_raw;
-    assign c_v = c_neg2 ? -c_raw : c_raw;
-
-    // ---- optional registers after the table ----
-    logic signed [SW-1:0] s_l, c_l; logic signed [DW-1:0] x_l; logic v_l;
-{chain("s_l", "s_v", lut_stages, f"signed [SW-1:0]")}
-{chain("c_l", "c_v", lut_stages, f"signed [SW-1:0]")}
+    // the table read has its own stage (the BRAM/ROM output register); the quadrant sign is a conditional negate
+    // (one carry chain) on the read value, Q = x * (-sin) so the negation is on the sine, never on the product.
+    // pipe_lut registers follow the negate: with pipe_lut >= 1 the negate and the DSP input are in different cycles.
+    logic signed [SW-1:0] s_n, c_n;
+    assign s_n = s_neg2 ? s_raw : -s_raw;     // -sin for the Q path
+    assign c_n = c_neg2 ? -c_raw : c_raw;
+    logic signed [SW-1:0] s_m, c_m; logic signed [DW-1:0] x_l; logic v_l;
+{chain("s_m", "s_n", lut_stages, f"signed [SW-1:0]")}
+{chain("c_m", "c_n", lut_stages, f"signed [SW-1:0]")}
 {chain("x_l", "x2", lut_stages, f"signed [DW-1:0]")}
 {chain("v_l", "v2", lut_stages)}
 
-    // ---- complex mixer: I = x*cos, Q = -x*sin ----
+    // ---- complex mixer: I = x*cos, Q = x*(-sin) ----
     logic signed [DW+SW-1:0] pi_c, pq_c;
-    assign pi_c = x_l * c_l;
-    assign pq_c = -(x_l * s_l);
+    assign pi_c = x_l * c_m;
+    assign pq_c = x_l * s_m;
     logic signed [DW+SW-1:0] pi_m, pq_m; logic v_m;
 {chain("pi_m", "pi_c", mix_stages, f"signed [DW+SW-1:0]")}
 {chain("pq_m", "pq_c", mix_stages, f"signed [DW+SW-1:0]")}

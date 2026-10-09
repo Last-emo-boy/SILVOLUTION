@@ -152,7 +152,9 @@ def estimate_nco(ir: dict, backend: str) -> dict:
     depth = 1 << (aw - 2)
     lut = pw * 1.5 + sw * 4 + (depth * sw / 16 if ir.get("table_mem") == "lut" else 40) + 60
     dsp = 2
-    fmax = (190 if ir.get("dsp_regs", "none") != "none" else 120) - 1.2 * max(pw - 24, 0) + 10 * ir.get("pipe_lut", 0) + 5 * ir.get("pipe_mix", 0)
+    fmax = (135 if ir.get("dsp_regs", "none") != "none" else 95) - 1.2 * max(pw - 24, 0) + 5 * min(ir.get("pipe_lut", 0), 1) + 3 * min(ir.get("pipe_mix", 0), 1)
+    if ir.get("table_mem") == "bram":
+        fmax = min(fmax, 110)   # the block RAM read is the floor of the cycle on ECP5-class devices
     if _style(backend) == "vivado":
         fmax *= 1.6
         lut *= 0.6
