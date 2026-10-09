@@ -82,6 +82,7 @@ TOOLS = [
     {"name": "sa_pareto", "description": "Every measured point of one generator on one device, the Pareto front, the best under optional constraints.", "inputSchema": {"type": "object", "properties": {"design": {"type": "string"}, "backend": {"type": "string"}, "fmax_mhz": {"type": "number"}, "max_dsp": {"type": "integer"}, "max_lut": {"type": "integer"}}, "required": ["design", "backend"]}},
     {"name": "sa_job_file", "description": "Read a run artifact: 'rtl' (best design's SystemVerilog), summary.json, iter_NN.json, llm_NN.json, events.jsonl, formal/report.json.", "inputSchema": {"type": "object", "properties": {"job": {"type": "string"}, "path": {"type": "string"}, "max_bytes": {"type": "integer"}}, "required": ["job", "path"]}},
     {"name": "sa_formal", "description": "SymbiYosys bounded check of a finished run: equivalence of the measured RTL vs a fresh emit + stream properties. Runs in the background; call again until status is done.", "inputSchema": {"type": "object", "properties": {"job": {"type": "string"}, "depth": {"type": "integer"}}, "required": ["job"]}},
+    {"name": "sa_mutation", "description": "Mutation score of a finished run's testbench (24 injected RTL bugs; killed/total; survivors listed). Background: call again until done.", "inputSchema": {"type": "object", "properties": {"job": {"type": "string"}}, "required": ["job"]}},
     {"name": "sa_package_url", "description": "URL of the delivery package (zip: RTL, AXI-Stream wrapper, testbench, reports, trajectory; GDS on sky130) of a finished run.", "inputSchema": {"type": "object", "properties": {"job": {"type": "string"}}, "required": ["job"]}},
     {"name": "sa_rtl_upload", "description": "Bring your own RTL: files ({name: text}), top module, a self-checking SV bench printing RESULT PASS/FAIL, and the parameters the planner may tune ({NAME: {default, min, max | choices, hint}}). Returns design id rtl:<id>.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "top": {"type": "string"}, "files": {"type": "object"}, "tb": {"type": "string"}, "params": {"type": "object"}, "port_widths": {"type": "object"}, "latency": {"type": "string"}, "throughput": {"type": "string"}, "throughput_unit": {"type": "string"}, "description": {"type": "string"}}, "required": ["top", "files", "tb", "params"]}},
     {"name": "sa_rtl_list", "description": "RTL bundles uploaded so far.", "inputSchema": {"type": "object", "properties": {}}},
@@ -136,6 +137,8 @@ def call(name: str, a: dict):
         return {"text": t[:cap] + (f"\n...[truncated {len(t) - cap} bytes]" if len(t) > cap else ""), "bytes": len(t)}
     if name == "sa_formal":
         return api("GET", f"/jobs/{a['job']}/formal?depth={a.get('depth', 16)}")
+    if name == "sa_mutation":
+        return api("GET", f"/jobs/{a['job']}/mutation")
     if name == "sa_package_url":
         return {"url": f"{SERVER}/api/jobs/{a['job']}/package", "note": "GET with the bearer token; a zip"}
     if name == "sa_rtl_upload":

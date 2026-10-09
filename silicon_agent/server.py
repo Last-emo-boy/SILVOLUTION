@@ -9,6 +9,7 @@ API
   GET  /api/jobs/<id>/package    zip: RTL + AXI-Stream wrapper + testbench/vectors + reports + trajectory + README
   GET  /api/jobs/<id>/axis       the AXI-Stream wrapper alone
   GET  /api/jobs/<id>/formal[?depth=20]  SymbiYosys: bounded equivalence of the measured RTL vs a fresh emit + stream properties
+  GET  /api/jobs/<id>/mutation   mutation score of the behavioral testbench on the best design (background, cached)
   GET  /api/specs                example specs shipped in specs/
   GET  /api/health
   POST /api/interpret            {"text": "...", "thread"?: id} -> spec + assumptions + alternatives (no run)
@@ -634,6 +635,48 @@ def _start_proposal(pid: str) -> None:
     t.start()
 
 
+_mutation_jobs: dict[str, threading.Thread] = {}
+
+
+def _mutation_start(job_id: str, job: dict) -> dict:
+    """Mutation score of the behavioral testbench on the best design: how many injected RTL bugs it catches. Cached per
+    RTL hash under results/<job>/mutation/report.json; {"status": "running"} while the mutants simulate."""
+    from . import mutate
+    from .designs import design_for
+    best = job["summary"]["best"]
+    d = design_for(job["spec"]); ir = d.ir_cls.from_dict(best["ir"]); backend = job["spec"].get("backend", "ecp5")
+    rtl = d.emit(ir, backend=backend)
+    h = hashlib.sha256(f"{backend}\n{rtl}".encode()).hexdigest()[:16]
+    work = RESULTS / job_id / "mutation"
+    rep = work / "report.json"
+    with _lock:
+        t = _mutation_jobs.get(job_id)
+        if t and t.is_alive():
+            return {"status": "running", "note": "mutants are simulating; call again in a minute"}
+        if rep.exists():
+            try:
+                prev = json.loads(rep.read_text())
+                if prev.get("rtl_hash") == h:
+                    return prev
+            except ValueError:
+                pass
+
+        def run():
+            out = {"status": "done", "rtl_hash": h, "started": time.time()}
+            try:
+                out.update(mutate.score(d, ir, rtl, work / "mutants", limit=24))
+            except Exception as e:
+                out["error"] = str(e)[:500]
+            out["finished"] = time.time()
+            work.mkdir(parents=True, exist_ok=True)
+            rep.write_text(json.dumps(out, indent=1))
+
+        t = threading.Thread(target=run, daemon=True)
+        _mutation_jobs[job_id] = t
+        t.start()
+    return {"status": "running", "note": "mutation scoring started; call again in a minute"}
+
+
 def _run_note(spec: dict, lang: str) -> str:
     c = spec.get("constraints", {})
     cons = f"≥{c.get('fmax_mhz')} MHz" + (f" · ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f" · ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "") + (f" · ≤{c['max_area_um2']} µm²" if c.get("max_area_um2") is not None else "")
@@ -1101,6 +1144,12 @@ class Handler(BaseHTTPRequestHandler):
                 k = int(parse_qs(u.query).get("depth", ["20"])[0])
                 fresh_req = "fresh" in parse_qs(u.query)
                 st = _formal_start(job_id, job, k, fresh_req)
+                return self._json(202 if st.get("status") == "running" else 200, st)
+            if len(parts) == 3 and parts[2] == "mutation":
+                best = (job.get("summary") or {}).get("best")
+                if not best:
+                    return self._json(404, {"error": "no feasible design yet"})
+                st = _mutation_start(job_id, job)
                 return self._json(202 if st.get("status") == "running" else 200, st)
             if len(parts) == 3 and parts[2] == "axis":
                 from . import deliver

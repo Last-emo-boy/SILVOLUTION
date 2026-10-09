@@ -324,6 +324,23 @@ export const siliconAgent = {
     })
 
     agnes.registerTool({
+      name: 'sa_mutation',
+      description: 'Mutation score of a finished run: 24 bugs are injected into the best design\'s RTL (operator swaps, flipped compares, stuck enables, off-by-one indices) and the behavioral testbench is run on each; killed/total is the verification strength, `survived` lists what the bench would miss. Runs in the background: call again until status is done.',
+      parameters: obj({ job: str({ maxLength: 64 }) }, ['job']),
+      meta: { ...readOnly, costHint: { wallMs: 60000 } },
+      async execute({ job }, tctx) {
+        try {
+          const deadline = Date.now() + 80_000
+          for (;;) {
+            const r = await api('GET', `/jobs/${encodeURIComponent(job)}/mutation`, undefined, tctx?.signal)
+            if (r.status !== 'running' || Date.now() >= deadline) return text(r)
+            await new Promise((ok) => setTimeout(ok, 5000))
+          }
+        } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
       name: 'sa_bench',
       description: 'Last nightly regression result of the benchmark suite (which cases converged, in how many rounds, and what regressed).',
       parameters: obj({}),
@@ -339,7 +356,7 @@ export const siliconAgent = {
       '1. Call sa_schema once to know the generators, devices and knobs. Then sa_interpret with the user\'s words to get a complete spec; show its assumptions. Numbers the user states are used exactly as given.',
       '2. If the request allows several architectures (different generator, device or fold), compare them with sa_estimate before running; the interpreter\'s `alternatives` are good candidates.',
       '3. Start with sa_run (pass the conversation `thread` when you have one), then follow it with sa_job (wait_seconds 90, repeated until the status is done or failed; a run takes 1-30 minutes). Report what the measurements say: what changed, measured Fmax/LUT/DSP, whether the constraints hold. Never invent numbers: everything comes from the tool results.',
-      '4. When it finishes, explain why it stopped (stop_reason or the budget), the final design, and one caveat if there is one (thin timing margin, low throughput, noisy seeds). Offer the next step: fork with tighter constraints, sa_formal, or the delivery package (the chat shows a download button on the result card; you cannot build or attach files yourself).',
+      '4. When it finishes, explain why it stopped (stop_reason or the budget), the final design, and one caveat if there is one (thin timing margin, low throughput, noisy seeds). Offer the next step: fork with tighter constraints, sa_formal / sa_mutation (how strong the verification is), or the delivery package (the chat shows a download button on the result card; you cannot build or attach files yourself).',
       '5. While a run is in flight, a user instruction about the design is an sa_steer; a question is answered from sa_job data.',
       '5b. "Sweep", "compare all", "how does X scale with Y", "Pareto": sa_sweep with the knob values -- it measures every point instead of searching, and the card shows the Pareto set. Keep sweeps small (<= 12 points on an FPGA, <= 4 on sky130).',
       '6. A follow-up that only asks about results you already have (critical path, why it stopped, numbers) is answered from your own tool records or one sa_job call: do not start another run, do not re-estimate, do not re-read artifacts you have read. Start a new run only when the user asks for a change, a retry, or a different design.',
