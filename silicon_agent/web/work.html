@@ -2,6 +2,7 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
+<script>document.documentElement.dataset.theme = localStorage.getItem("sa.theme") || "dark";</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>silicon-agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,7 +25,7 @@
     </nav>
     <div class="group">Runs</div>
     <ul id="runs" class="runs"></ul>
-    <div class="rail-foot"><a class="wb" href="/">▣ Chat</a><span id="who" class="mono muted"></span></div>
+    <div class="rail-foot"><a class="wb" href="/">▣ Chat</a><span class="foot-r"><button id="theme" class="ghost icon" title="Theme">◐</button><span id="who" class="mono muted"></span></span></div>
   </aside>
 
   <main class="main" id="main">

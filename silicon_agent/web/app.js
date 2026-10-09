@@ -663,3 +663,12 @@ async function renderMemoryView() {
     list.appendChild(grp);
   }
 }
+
+// theme: dark / light / auto, remembered in localStorage (the <html> attribute is set before paint by an inline script)
+(() => {
+  const order = ["dark", "light", "auto"], btn = document.getElementById("theme");
+  if (!btn) return;
+  const label = () => { const t = document.documentElement.dataset.theme || "dark"; btn.textContent = t === "dark" ? "◐" : t === "light" ? "☀" : "◑"; btn.title = `theme: ${t}`; };
+  btn.onclick = () => { const t = document.documentElement.dataset.theme || "dark"; const n = order[(order.indexOf(t) + 1) % order.length]; document.documentElement.dataset.theme = n; localStorage.setItem("sa.theme", n); label(); };
+  label();
+})();
