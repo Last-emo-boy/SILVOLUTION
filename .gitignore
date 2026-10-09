@@ -6,3 +6,4 @@ __pycache__/
 *.pyc
 sim_build/
 .env
+.claude/launch.json

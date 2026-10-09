@@ -1,9 +1,0 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "sa-local",
-      "url": "http://127.0.0.1:8799"
-    }
-  ]
-}
