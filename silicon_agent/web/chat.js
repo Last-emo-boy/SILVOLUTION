@@ -78,7 +78,7 @@ const trustCache = new Map();   // jid -> {stages, seeds, formal, mutation, runn
   const more = el(`<button class="more">${T.more} ▾</button>`);
   more.onclick = () => { const on = $("#examples .extra").hidden; document.querySelectorAll("#examples .extra").forEach((b) => { b.hidden = !on; }); more.textContent = on ? `${T.less} ▴` : `${T.more} ▾`; };
   $("#examples").appendChild(more);
-  try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
+  try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "未登录"; }
   try { const sc = await api("/schema"); DEV = Object.fromEntries(Object.entries(sc.backends).map(([k, v]) => [k, v])); BFACTS = sc.backend_facts; BSTAGES = Object.fromEntries(Object.entries(sc.backend_facts).map(([k, v]) => [k, v.sim_stages])); } catch {}
   // agent modes (the harness model slot behind the chat): a per-conversation switch next to the composer
   try { const h = await api("/health"); if (h.modes) { MODES = h.modes; defaultMode = h.default_mode || Object.keys(MODES)[0]; renderModes(); } llmBanner(h.llm); AGH_WEB = !!h.agh_web; if (h.agh_web) { const a = el(`<a class="wb agh" href="/agh/" target="_blank" title="${esc(T.aghTitle)}">⚙ AGH</a>`); $("#wb-link").insertAdjacentElement("afterend", a); } } catch {}

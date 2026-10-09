@@ -29,7 +29,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 
 // ---------------------------------------------------------------- boot
 (async function boot() {
-  try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
+  try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "未登录"; }
   try { AGH_WEB = !!(await api("/health")).agh_web; } catch {}
   const llmBanner = async () => { try { const st = (await api("/health")).llm; let b = $("#llm-banner"); if (!st || st.ok !== false) { if (b) b.remove(); return; } if (!b) { b = el(`<div id="llm-banner" class="banner"></div>`); $("#main").prepend(b); } b.textContent = `模型账户不可用（DeepSeek 返回 ${st.code || "?"}）：规划器暂停，已启动的运行照常跑完；不需要规划器的扫描和自带 RTL 检查仍可用${st.balance ? ` · 余额 ${st.balance}` : ""}`; } catch {} };
   llmBanner(); setInterval(llmBanner, 30000);
@@ -374,10 +374,10 @@ function renderSugs(last) {
   const ir = last.ir || {}, v = last.violations || [], sugs = [];
   if (v.some((x) => x.startsWith("fmax"))) sugs.push("聚焦时序：哪一个旋钮能去掉关键路径上的那一级？");
   if (v.some((x) => x.startsWith("dsp"))) sugs.push("先把 DSP 压下来，吞吐可以降");
-  if (v.some((x) => /simulation failed/.test(x))) sugs.push("a netlist sim failed: is this a real functional bug or a timing-sim artifact? explain");
+  if (v.some((x) => /simulation failed/.test(x))) sugs.push("网表仿真失败了：是真正的功能 bug 还是时序仿真的假象？解释一下");
   if (!v.length) sugs.push("停止前再探索一种结构");
   if ("acc_in_dsp" in ir) sugs.push("不要改 acc_in_dsp");
-  if ("fold" in ir) sugs.push("try the transposed form (fold=1)");
+  if ("fold" in ir) sugs.push("试一下转置型（fold=1）");
   sugs.push("用一句话解释上一轮的关键路径");
   for (const t of sugs.slice(0, 4)) { const b = el(`<button>${esc(t)}</button>`); b.onclick = () => { $("#steer").value = t; $("#steer").focus(); }; s.appendChild(b); }
 }
