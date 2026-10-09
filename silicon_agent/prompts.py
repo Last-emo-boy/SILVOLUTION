@@ -197,6 +197,35 @@ sum_tree is the first move, then acc_width.""",
 43.6 MHz; limiter is the registered 4-way sum (psum) -- the accumulator carry chain and the LUT4 adder tree.""",
 }
 
+NCO_WHAT = "an NCO/DDS with a complex mixer (phase accumulator, quarter-wave sine table, I = x*cos, Q = -x*sin): a digital down-converter front end"
+
+NCO_IR = """IR fields and legal ranges (data_width, phase_width, sin_width, out_width are fixed by the task):
+  lut_addr_width int 6..16   phase bits addressing the quarter-wave table (depth 2^(w-2) entries of sin_width bits);
+                             spur floor from phase truncation ~ -6*w dBc, table size doubles per bit
+  dither         bool        1-bit LFSR dither below the table address: trades a tiny noise floor rise for spur-free
+  table_mem      str in {"bram","lut"}  block RAM (one BRAM, address-register timing) or logic/LUT RAM (fast, LUTs)
+  pipe_lut       int 0..2    register stages after the table read (the BRAM read -> negate -> multiplier path)
+  pipe_mix       int 0..3    fabric register stages after the two mixer multipliers
+  reg_in         bool        register the input sample and FCW
+  dsp_regs       str in {"none","out","in_out","in_pipe_out"}  DSP-internal registers of the mixer multipliers
+
+Structure summary: phase accumulator (phase_width-bit adder: carry chain) -> table address/quadrant (1 stage) ->
+table read (1 stage) -> conditional negate -> two multipliers data_width x sin_width -> truncate to out_width.
+Throughput is always 1 sample/cycle; the knobs move Fmax and resources only. Critical paths: the phase adder
+(phase_width), the table read + negate into the DSP (pipe_lut), the DSP output (dsp_regs/pipe_mix)."""
+
+NCO_IR_JSON = '{"lut_addr_width":..,"dither":..,"table_mem":"..","pipe_lut":..,"pipe_mix":..,"reg_in":..,"dsp_regs":".."}'
+
+NCO_FACTS = {
+    "ecp5": """ECP5, measured on 12-bit data, 12-bit sine, 24-bit phase, 10-bit table address, dsp_regs in_pipe_out, pipe_lut 1,
+pipe_mix 1: bram table -> 2 MULT18X18D, 132 LUT, 1 DP16KD, 107 MHz (limiter: the BRAM read -> negate -> DSP A input);
+lut table (8-bit address) -> 211 LUT, 0 BRAM, 113 MHz. The phase accumulator is a plain carry chain.""",
+    "ice40": """iCE40, measured on 12-bit data/sine, 24-bit phase, 8-bit lut table with dither, dsp_regs in_pipe_out: 2 SB_MAC16,
+384 LC, 64.5 MHz. The 24-bit phase adder and the logic ROM are the limiters.""",
+    "gowin": """Gowin, measured on 12-bit data/sine, 24-bit phase, 10-bit bram table, dsp_regs in_pipe_out, pipe_mix 2: 2 DSP,
+114 LUT, 1 BSRAM, 195 MHz.""",
+}
+
 CORDIC_WHAT = "a fixed-point CORDIC engine (rotation: sin/cos; vectoring: magnitude/atan2) as a streaming pipeline or an iterative unit"
 
 CORDIC_IR = """IR fields and legal ranges:
@@ -263,9 +292,9 @@ BRAM (26 BSRAM). Do not retry a cmul=four shape that was reported as not fitting
 }
 
 
-GRAPH_WHAT = "a datapath: a chain of 2-6 heterogeneous stream nodes (fir, decim, conv2d, cordic, fft) connected by valid/ready FIFOs"
+GRAPH_WHAT = "a datapath: a chain of 2-6 heterogeneous stream nodes (fir, decim, nco, conv2d, cordic, fft) connected by valid/ready FIFOs"
 
-GRAPH_IR = """IR: {"nodes": [{"kind": "fir"|"decim"|"conv2d"|"cordic"|"fft", "ir": <that design's IR>}, ...], "fifo_depth": 4..64, "adapt": "truncate"|"round"|"saturate"}
+GRAPH_IR = """IR: {"nodes": [{"kind": "fir"|"decim"|"nco"|"conv2d"|"cordic"|"fft", "ir": <that design's IR>}, ...], "fifo_depth": 4..64, "adapt": "truncate"|"round"|"saturate"}
 The node kinds and each node's task-defining fields are fixed; you edit each node's architecture knobs (the same
 knobs those designs expose on their own: fold/symmetric/dsp_regs/... for fir, par_rows/tree_regs/line_mem for conv2d,
 unroll/fold/guard_bits for cordic, mul_regs/bf_regs/growth/delay_mem for fft), plus fifo_depth and adapt.
@@ -285,6 +314,7 @@ PROMPTS = {
     "matmul": {"what": MATMUL_WHAT, "ir": MATMUL_IR, "ir_json": MATMUL_IR_JSON, "facts": MATMUL_FACTS},
     "graph": {"what": GRAPH_WHAT, "ir": GRAPH_IR, "ir_json": GRAPH_IR_JSON, "facts": GRAPH_FACTS},
     "decim": {"what": DECIM_WHAT, "ir": DECIM_IR, "ir_json": DECIM_IR_JSON, "facts": DECIM_FACTS},
+    "nco": {"what": NCO_WHAT, "ir": NCO_IR, "ir_json": NCO_IR_JSON, "facts": NCO_FACTS},
     "cordic": {"what": CORDIC_WHAT, "ir": CORDIC_IR, "ir_json": CORDIC_IR_JSON, "facts": CORDIC_FACTS},
     "fft": {"what": FFT_WHAT, "ir": FFT_IR, "ir_json": FFT_IR_JSON, "facts": FFT_FACTS},
     "fir_chain": {"what": CHAIN_WHAT, "ir": CHAIN_IR, "ir_json": CHAIN_IR_JSON, "facts": CHAIN_FACTS},

@@ -28,7 +28,7 @@ def DESIGNS_REF():
     return DESIGNS
 
 
-KINDS = ("fir", "decim", "conv2d", "cordic", "fft")
+KINDS = ("fir", "decim", "nco", "conv2d", "cordic", "fft")
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,9 @@ def _io(kind: str, ir) -> dict:
         return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True}
     if kind == "decim":
         return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True, "decim": ir.decim}
+    if kind == "nco":
+        # in a chain the NCO's I output continues; its FCW is fixed to fs/8 (a graph has no side-band control ports)
+        return {"in": ("in_data", ir.data_width), "out": ("out_i", ir.out_width), "signed": True, "nco": True}
     if kind == "conv2d":
         return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True, "frame": ir.width}
     if kind == "cordic":
@@ -141,6 +144,10 @@ def emit_graph(a: GraphArch, backend: str = "ecp5") -> str:
             inst.append(f"    n{i}_{top} u_n{i} (.clk(clk), .rst(rst), .in_valid({src_v}), .in_data({src_d}), .in_ready({rdy}), .out_valid({ov}), .out_data({od}){extra});")
         elif kind == "decim":
             inst.append(f"    n{i}_{top} u_n{i} (.clk(clk), .rst(rst), .in_valid({src_v}), .in_data({src_d}), .in_ready({rdy}), .out_valid({ov}), .out_data({od}));")
+        elif kind == "nco":
+            pw = a.node_ir(i).phase_width
+            inst.append(f"    logic [{pw - 1}:0] n{i}_fcw; assign n{i}_fcw = {pw}'d1 << {pw - 3}; logic signed [{outw - 1}:0] n{i}_oq;")
+            inst.append(f"    n{i}_{top} u_n{i} (.clk(clk), .rst(rst), .in_valid({src_v}), .in_data({src_d}), .fcw(n{i}_fcw), .in_ready({rdy}), .out_valid({ov}), .out_i({od}), .out_q(n{i}_oq));")
         elif kind == "conv2d":
             W = io["frame"]
             inst.append(f"""    // frame_start for the conv node: every {W} accepted samples starts a new row... the node needs a frame start

@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from . import chain, conv, cordic, decim, fft, fir, graph, vectors
+from . import chain, conv, cordic, decim, fft, fir, graph, nco, vectors
 from .emit import drain_latency, emit_matmul, min_k_full_rate
 from .ir import MatmulArch, throughput_macs_per_cycle
 
@@ -72,6 +72,20 @@ DESIGNS: dict[str, Design] = {
         extra_sim_sources=("mult18x18d_sim.v",),
         vectors=vectors.decim_vectors,
         tb=lambda a, period: vectors.TB_DECIM.format(DW=a.data_width, AW=a.acc_width, period=period),
+    ),
+    "nco": Design(
+        kind="nco",
+        ir_cls=nco.NcoArch,
+        top="nco_top",
+        emit=nco.emit_nco,
+        test_module="test_nco",
+        sim_env=lambda a: {"SA_SAMPLES": "300"},
+        throughput=nco.throughput,
+        throughput_unit="samples/cycle",
+        latency=nco.latency_cycles,
+        extra_sim_sources=("mult18x18d_sim.v",),
+        vectors=vectors.nco_vectors,
+        tb=lambda a, period: vectors.TB_NCO.format(DW=a.data_width, PW=a.phase_width, OW=a.out_width, period=period),
     ),
     "conv2d": Design(
         kind="conv2d",

@@ -147,6 +147,20 @@ def estimate_decim(ir: dict, backend: str) -> dict:
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(1 / fold, 4)}
 
 
+def estimate_nco(ir: dict, backend: str) -> dict:
+    pw, sw, dw, aw = ir.get("phase_width", 32), ir.get("sin_width", 16), ir.get("data_width", 16), ir.get("lut_addr_width", 12)
+    depth = 1 << (aw - 2)
+    lut = pw * 1.5 + sw * 4 + (depth * sw / 16 if ir.get("table_mem") == "lut" else 40) + 60
+    dsp = 2
+    fmax = (190 if ir.get("dsp_regs", "none") != "none" else 120) - 1.2 * max(pw - 24, 0) + 10 * ir.get("pipe_lut", 0) + 5 * ir.get("pipe_mix", 0)
+    if _style(backend) == "vivado":
+        fmax *= 1.6
+        lut *= 0.6
+    else:
+        fmax *= _scale(backend)
+    return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": 1.0}
+
+
 def estimate_cordic(ir: dict, backend: str) -> dict:
     W = ir["width"] + ir.get("guard_bits", 2); N = ir["iterations"]; U = ir.get("unroll", 1); fold = ir.get("fold", 1)
     dsp = 1 if ir.get("scale_comp") else 0
@@ -192,7 +206,7 @@ def estimate_graph(ir: dict, backend: str) -> dict:
             "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
 
 
-ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft, "decim": estimate_decim}
+ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft, "decim": estimate_decim, "nco": estimate_nco}
 ESTIMATORS["graph"] = estimate_graph
 
 
@@ -232,6 +246,9 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
     elif design == "decim":
         f += [math.log2(ir["taps"]), math.log2(ir.get("decim", 4)), math.log2(ir.get("fold", 1)), ir["acc_width"] / 40,
               1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("sum_tree") else 0.0, ir.get("pipe_mul", 0)]
+    elif design == "nco":
+        f += [ir.get("phase_width", 32) / 32, ir.get("lut_addr_width", 12) / 12, 1.0 if ir.get("table_mem") == "lut" else 0.0, ir.get("pipe_lut", 0),
+              ir.get("pipe_mix", 0), 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("dither") else 0.0]
     elif design == "cordic":
         f += [ir["width"] / 16, ir["iterations"] / 16, math.log2(ir.get("unroll", 1) + 0.0) if ir.get("unroll", 1) > 0 else 0, 1.0 if ir.get("fold", 1) > 1 else 0.0,
               ir.get("guard_bits", 0) / 4, 1.0 if ir.get("scale_comp") else 0.0, 0.0]

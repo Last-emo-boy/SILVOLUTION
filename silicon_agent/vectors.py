@@ -176,6 +176,62 @@ def decim_vectors(ir, seed: int = 1, n_frames: int = 30) -> tuple[list[str], lis
 TB_DECIM = TB_FIR.replace("fir_top dut", "decim_top dut").replace("{COEF_TIE}", "").replace("repeat (300) @(posedge clk);", "repeat (400) @(posedge clk);")
 
 
+# ---------------------------------------------------------------- nco
+def nco_vectors(ir, seed: int = 1, n: int = 240) -> tuple[list[str], list[str]]:
+    from silicon_agent.nco import golden as nco_golden
+    DW, PW, OW = ir.data_width, ir.phase_width, ir.out_width
+    rng = random.Random(seed)
+    lo, hi = -(1 << (DW - 1)), (1 << (DW - 1)) - 1
+    fcws = [1 << (PW - 3)] * (n // 2) + [rng.randrange(0, 1 << PW) for _ in range(n - n // 2)]
+    xs = [hi, lo, 0] + [rng.randint(lo, hi) for _ in range(n - 3)]
+    outs = nco_golden(ir, xs, fcws)
+    mi, mo = (1 << DW) - 1, (1 << OW) - 1
+    stim = [f"{(1 if i % 7 == 0 else 0):x} {x & mi:0{max(1, (DW + 3) // 4)}x} {f:0{(PW + 3) // 4}x}" for i, (x, f) in enumerate(zip(xs, fcws))]
+    exp = [f"{((i & mo) << OW) | (q & mo):0{(2 * OW + 3) // 4}x}" for i, q in outs]
+    return stim, exp
+
+
+TB_NCO = """`timescale 1ns/1ps
+module tb;
+  parameter int DW = {DW}, PW = {PW}, OW = {OW};
+  parameter string STIM = "stim.hex", EXP = "exp.hex";
+  parameter real PERIOD = {period};
+  logic clk = 0, rst = 1, in_valid = 0;
+  logic [DW-1:0] in_data = 0; logic [PW-1:0] fcw = 0;
+  wire in_ready, out_valid; wire [OW-1:0] out_i, out_q;
+  nco_top dut(.clk, .rst, .in_valid, .in_data, .fcw, .in_ready, .out_valid, .out_i, .out_q);
+  always #(PERIOD/2) clk = ~clk;
+  int fd, n_exp, n_got, errors, code, gap; logic [DW-1:0] xv; logic [PW-1:0] fv;
+  logic [2*OW-1:0] expv [0:8191];
+  initial begin
+    fd = $fopen(EXP, "r"); n_exp = 0;
+    while (!$feof(fd)) begin code = $fscanf(fd, "%h\\n", expv[n_exp]); if (code == 1) n_exp++; end
+    $fclose(fd);
+  end
+  always @(posedge clk) begin #(PERIOD*0.75); if (out_valid && !rst) begin
+    if ({{out_i, out_q}} !== expv[n_got]) begin errors++; if (errors < 5) $display("MISMATCH sample %0d got %h exp %h at %t", n_got, {{out_i, out_q}}, expv[n_got], $time); end
+    n_got++;
+  end end
+  initial begin
+    n_got = 0; errors = 0;
+    repeat (3) @(posedge clk); #120; @(negedge clk); rst = 0;
+    fd = $fopen(STIM, "r");
+    while (!$feof(fd)) begin
+      code = $fscanf(fd, "%h %h %h\\n", gap, xv, fv);
+      if (code != 3) break;
+      if (gap) begin @(negedge clk); in_valid = 0; repeat (gap) @(negedge clk); end
+      @(negedge clk); in_valid = 1; in_data = xv; fcw = fv;
+    end
+    @(negedge clk); in_valid = 0;
+    repeat (100) @(posedge clk);
+    if (n_got != n_exp) begin errors++; $display("COUNT got %0d expected %0d", n_got, n_exp); end
+    $display("RESULT %s samples=%0d errors=%0d", errors ? "FAIL" : "PASS", n_got, errors);
+    $finish;
+  end
+endmodule
+"""
+
+
 # ---------------------------------------------------------------- conv2d
 def conv_vectors(ir, seed: int = 1, n_rows: int | None = None) -> tuple[list[str], list[str]]:
     K, W, DW, AW = ir.k, ir.width, ir.data_width, ir.acc_width

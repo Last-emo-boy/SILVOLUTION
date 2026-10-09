@@ -99,6 +99,29 @@ SCHEMAS = {
         "constraints_default": {"fmax_mhz": 150, "max_dsp": 8, "max_lut": 3000},
         "locked_default": {"taps": 32, "decim": 4, "data_width": 16, "coef_width": 16, "cutoff": 0.1},
     },
+    "nco": {
+        "title": "NCO / DDS with complex mixer (phase accumulator + quarter-wave sine table + I/Q multiply: a digital down-converter front end)",
+        "locked_candidates": ["data_width", "phase_width", "sin_width", "out_width"],
+        "fields": [
+            {"name": "data_width", "type": "choice", "choices": [8, 12, 16, 18], "hint": "input sample bits"},
+            {"name": "phase_width", "type": "int", "min": 16, "max": 48, "hint": "phase accumulator bits (frequency resolution fs/2^phase_width)"},
+            {"name": "sin_width", "type": "choice", "choices": [8, 10, 12, 14, 16, 18], "hint": "sine sample bits (~6 dB spur floor per bit)"},
+            {"name": "out_width", "type": "int", "min": 8, "max": 36, "hint": "I/Q output bits (top bits of the product)"},
+            {"name": "lut_addr_width", "type": "int", "min": 6, "max": 16, "hint": "bits of phase addressing the quarter-wave table (depth 2^(w-2)); phase-truncation spurs ~ -6*w dBc"},
+            {"name": "dither", "type": "bool", "hint": "1-bit LFSR phase dither below the table address (spreads truncation spurs)"},
+            {"name": "table_mem", "type": "choice", "choices": ["bram", "lut"], "hint": "sine table in block RAM or logic"},
+            {"name": "pipe_lut", "type": "int", "min": 0, "max": 2, "hint": "register stages after the table read"},
+            {"name": "pipe_mix", "type": "int", "min": 0, "max": 3, "hint": "fabric register stages after the mixer multipliers"},
+            {"name": "reg_in", "type": "bool", "hint": "register the input sample"},
+            {"name": "dsp_regs", "type": "choice", "choices": ["none", "out", "in_out", "in_pipe_out"], "hint": "DSP-internal registers of the mixer multipliers"},
+        ],
+        "presets": {
+            "bram table": {"data_width": 16, "phase_width": 32, "sin_width": 16, "out_width": 16, "lut_addr_width": 12, "dither": False, "table_mem": "bram", "pipe_lut": 1, "pipe_mix": 1, "reg_in": True, "dsp_regs": "in_pipe_out"},
+            "small lut table": {"data_width": 12, "phase_width": 24, "sin_width": 12, "out_width": 12, "lut_addr_width": 8, "dither": True, "table_mem": "lut", "pipe_lut": 0, "pipe_mix": 1, "reg_in": True, "dsp_regs": "none"},
+        },
+        "constraints_default": {"fmax_mhz": 150, "max_dsp": 2, "max_lut": 1000},
+        "locked_default": {"data_width": 16, "phase_width": 32, "sin_width": 16, "out_width": 16},
+    },
     "cordic": {
         "title": "CORDIC sin/cos (rotate) or magnitude/atan2 (vector)",
         "locked_candidates": ["mode", "width"],
@@ -138,7 +161,7 @@ SCHEMAS = {
         "locked_default": {"n": 256, "data_width": 16},
     },
     "graph": {
-        "title": "datapath graph: chain of fir / decim / conv2d / cordic / fft nodes with FIFOs",
+        "title": "datapath graph: chain of fir / decim / nco / conv2d / cordic / fft nodes with FIFOs",
         "locked_candidates": ["nodes"],
         "nested": "nodes",
         "fields": [

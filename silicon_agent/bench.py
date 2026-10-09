@@ -87,6 +87,27 @@ CASES: list[tuple[str, dict, dict]] = [
         "constraints": {"fmax_mhz": 200, "objective": ["maximize_throughput", "minimize_area"]},
         "initial_ir": {"acc_width": 29, "symmetric": True, "fold": 2, "pipe_mul": 1, "reg_in": True, "dsp_regs": "none", "sum_tree": True, "pipe_in": True}},
      {"feasible": True, "max_rounds": 3}),
+    ("decim-ecp5-120", {
+        "task": "32-tap decimate-by-4 FIR, ECP5, 120 MHz, 8 DSP", "design": "decim", "backend": "ecp5", "locked": {"taps": 32, "decim": 4, "data_width": 12, "coef_width": 12, "cutoff": 0.08},
+        "constraints": {"fmax_mhz": 120, "max_dsp": 8, "objective": ["maximize_throughput", "minimize_lut"]},
+        "initial_ir": {"acc_width": 30, "fold": 1, "pipe_mul": 1, "reg_in": True, "dsp_regs": "in_pipe_out", "sum_tree": False}},
+     {"feasible": True, "max_rounds": 4}),
+    ("nco-ecp5-150", {
+        "task": "NCO mixer, 12-bit, ECP5, 150 MHz", "design": "nco", "backend": "ecp5", "locked": {"data_width": 12, "phase_width": 24, "sin_width": 12, "out_width": 12},
+        "constraints": {"fmax_mhz": 150, "max_dsp": 2, "objective": ["maximize_fmax", "minimize_lut"]},
+        "initial_ir": {"lut_addr_width": 10, "dither": False, "table_mem": "bram", "pipe_lut": 0, "pipe_mix": 1, "reg_in": True, "dsp_regs": "none"}},
+     {"feasible": True, "max_rounds": 4}),
+    ("ddc-ecp5-100", {
+        # a digital down-converter as a graph: NCO -> decimate by 4 -> channel FIR
+        "task": "DDC: NCO mixer -> decimate by 4 -> 8-tap channel FIR, ECP5, 100 MHz", "design": "graph", "backend": "ecp5",
+        "locked": {"nodes": [{"kind": "nco", "ir": {"data_width": 12, "phase_width": 24, "sin_width": 12, "out_width": 12}},
+                             {"kind": "decim", "ir": {"taps": 16, "decim": 4, "data_width": 12, "coef_width": 12, "cutoff": 0.1}},
+                             {"kind": "fir", "ir": {"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.3}}]},
+        "constraints": {"fmax_mhz": 100, "max_dsp": 12, "objective": ["maximize_throughput", "minimize_lut"]},
+        "initial_ir": {"nodes": [{"kind": "nco", "ir": {"data_width": 12, "phase_width": 24, "sin_width": 12, "out_width": 12, "lut_addr_width": 10, "dither": False, "table_mem": "bram", "pipe_lut": 1, "pipe_mix": 1, "reg_in": True, "dsp_regs": "in_pipe_out"}},
+                                 {"kind": "decim", "ir": {"taps": 16, "decim": 4, "data_width": 12, "coef_width": 12, "cutoff": 0.1, "acc_width": 29, "fold": 1, "pipe_mul": 1, "reg_in": True, "dsp_regs": "in_pipe_out", "sum_tree": True}},
+                                 {"kind": "fir", "ir": {"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.3, "acc_width": 28, "symmetric": False, "fold": 1, "pipe_mul": 1, "reg_in": True, "dsp_regs": "in_pipe_out"}}], "fifo_depth": 16, "adapt": "truncate"}},
+     {"feasible": True, "max_rounds": 4}),
     ("cordic-ecp5-200", {
         "task": "16-bit sin/cos CORDIC, ECP5, 200 MHz", "design": "cordic", "backend": "ecp5", "locked": {"mode": "rotate", "width": 16},
         "constraints": {"fmax_mhz": 200, "max_lut": 3500, "objective": ["maximize_throughput", "minimize_lut"]},

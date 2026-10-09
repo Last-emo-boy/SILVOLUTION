@@ -10,7 +10,8 @@ from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, ReadOnly, ClockCycles, Timer
 from coverage import Coverage
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
 def to_signed(v: int, w: int) -> int:
