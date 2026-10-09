@@ -30,6 +30,20 @@ def api_key() -> str:
         raise SystemExit("no DeepSeek key: set DEEPSEEK_API_KEY or add a 'deepseek' item to the macOS Keychain")
 
 
+def balance() -> dict | None:
+    """DeepSeek's account balance (GET /user/balance): {"available": bool, "balance": "-1.15 CNY"}; None when the
+    endpoint is not reachable or the key is missing -- the caller must not read None as "out of credit"."""
+    try:
+        req = urllib.request.Request(f"{BASE_URL}/user/balance", headers={"Authorization": f"Bearer {api_key()}"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            r = json.load(resp)
+    except Exception:
+        return None
+    infos = r.get("balance_infos") or []
+    txt = ", ".join(f"{b.get('total_balance')} {b.get('currency')}" for b in infos) if infos else "?"
+    return {"available": bool(r.get("is_available")), "balance": txt}
+
+
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.S)
 
 

@@ -548,6 +548,23 @@ def _llm_ok() -> None:
         _llm_state.clear(); _llm_state["ok"] = True
 
 
+def _llm_probe() -> None:
+    """Every 10 minutes (and at start) ask the provider for the account balance, so the UI's warning is right after a
+    restart and goes away by itself once the account is topped up; a probe that fails to reach the provider changes
+    nothing (an outage is not an empty account)."""
+    from . import llm
+    while True:
+        b = llm.balance()
+        if b is not None:
+            if b["available"]:
+                _llm_ok()
+            else:
+                _llm_failed("HTTP 402 (balance probe)")
+            _llm_state["balance"] = b["balance"]
+            _llm_state["probed"] = time.time()
+        time.sleep(600)
+
+
 _formal_jobs: dict[str, threading.Thread] = {}
 
 
@@ -1808,6 +1825,7 @@ def main():
     _load_proposals()
     threading.Thread(target=_worker, daemon=True).start()
     threading.Thread(target=_resume_turns, daemon=True).start()
+    threading.Thread(target=_llm_probe, daemon=True).start()
     srv = ThreadingHTTPServer((host, port), Handler)
     print(f"silicon-agent server on http://{host}:{port}  root={ROOT}  backends={list(BACKENDS)} designs={list(DESIGNS)}  "
           f"jobs={len(_jobs)}  auth={'token' if TOKEN else ''}{'+gateway' if GATEWAY_KEY else ''}{'none' if not TOKEN and not GATEWAY_KEY else ''}", flush=True)

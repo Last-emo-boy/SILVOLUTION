@@ -27,7 +27,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 // ---------------------------------------------------------------- boot
 (async function boot() {
   try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
-  const llmBanner = async () => { try { const st = (await api("/health")).llm; let b = $("#llm-banner"); if (!st || st.ok !== false) { if (b) b.remove(); return; } if (!b) { b = el(`<div id="llm-banner" class="banner"></div>`); $("#main").prepend(b); } b.textContent = `model account unavailable (DeepSeek answered ${st.code || "?"}): the planner is paused, runs already started still finish; sweeps and BYO checks without a planner still work`; } catch {} };
+  const llmBanner = async () => { try { const st = (await api("/health")).llm; let b = $("#llm-banner"); if (!st || st.ok !== false) { if (b) b.remove(); return; } if (!b) { b = el(`<div id="llm-banner" class="banner"></div>`); $("#main").prepend(b); } b.textContent = `model account unavailable (DeepSeek answered ${st.code || "?"}): the planner is paused, runs already started still finish; sweeps and BYO checks without a planner still work${st.balance ? ` · balance ${st.balance}` : ""}`; } catch {} };
   llmBanner(); setInterval(llmBanner, 30000);
   specs = await api("/specs");
   try { BFACTS = (await api("/schema")).backend_facts; BSTAGES = Object.fromEntries(Object.entries(BFACTS).map(([k, v]) => [k, v.sim_stages])); } catch {}

@@ -169,7 +169,7 @@ function llmBanner(st) {
   let b = $("#llm-banner");
   if (!st || st.ok !== false) { if (b) b.remove(); return; }
   if (!b) { b = el(`<div id="llm-banner" class="banner"></div>`); $(".topbar").insertAdjacentElement("afterend", b); }
-  b.textContent = t("llmDown", st.code || "?"); b.title = T.llmDownTitle + (st.since ? ` · ${new Date(st.since * 1000).toLocaleString()}` : "");
+  b.textContent = t("llmDown", st.code || "?") + (st.balance ? ` · ${st.balance}` : ""); b.title = T.llmDownTitle + (st.since ? ` · ${new Date(st.since * 1000).toLocaleString()}` : "");
 }
 function renderModes() {
   const box = $("#modes");
