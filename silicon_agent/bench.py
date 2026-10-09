@@ -330,7 +330,8 @@ def cmd_show(a) -> int:
             if not c:
                 row += f"{'-':>22s}"
             elif c["best"]:
-                row += f"{('' if c['ok'] else '!') + f'@{c['first_feasible']} {c['best']['fmax_mhz']:.0f}MHz {c['best']['lut']}L {c['best']['dsp']}D':>22s}"
+                cell = ("" if c["ok"] else "!") + "@%s %.0fMHz %sL %sD" % (c["first_feasible"], c["best"]["fmax_mhz"], c["best"]["lut"], c["best"]["dsp"])
+                row += "%22s" % cell
             else:
                 row += f"{'! infeasible':>22s}"
         print(row)
