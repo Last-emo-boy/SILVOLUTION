@@ -80,7 +80,8 @@ def chat_json(system: str, user: str, max_tokens: int | None = None, retries: in
                 data=json.dumps(body).encode(),
                 headers={"Authorization": f"Bearer {api_key()}", "Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=1800) as resp:
+            # a reasoning reply that takes longer than this is not worth waiting for: the retry drops the effort
+            with urllib.request.urlopen(req, timeout=int(os.environ.get("SA_LLM_TIMEOUT", "480"))) as resp:
                 r = json.load(resp)
             choice = r["choices"][0]
             text = choice["message"].get("content") or ""
