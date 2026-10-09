@@ -358,18 +358,51 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             dup = cand_ir.digest(backend) in seen
             norm.append({"ir": cand_ir.to_dict(), "why": str(cnd.get("why", "")), "invalid": errs, "duplicate": dup})
         legal = [n for n in norm if not n["invalid"] and not n["duplicate"]]
+        # the surrogate (GP on the residual of the closed form over this design/device's measured points) fills the
+        # round with local moves around the incumbent when the planner brought fewer than three legal candidates
+        if best and len(legal) < 3 and not spec.get("no_surrogate"):
+            try:
+                from . import surrogate
+                from .schema import SCHEMAS
+                have = {json.dumps(n["ir"], sort_keys=True) for n in legal}
+                for x in surrogate.explore(design.kind, backend, best["ir"], locked, c, best, IR, seen, SCHEMAS.get(design.kind, {}), n=3 - len(legal)):
+                    if json.dumps(x["ir"], sort_keys=True) not in have:
+                        legal.append({"ir": x["ir"], "why": x["why"], "invalid": [], "duplicate": False, "surrogate": True})
+            except Exception as e:
+                print(f"     surrogate exploration skipped: {e}", flush=True)
         ranked = screen.screen(design.kind, backend, legal, c) if legal else []
+        if ranked and not spec.get("no_surrogate"):
+            # re-order by constrained expected improvement when the surrogate has data; the point estimate breaks ties
+            try:
+                from . import surrogate
+                scored = []
+                for r in ranked:
+                    acq = surrogate.acquisition(design.kind, backend, r["ir"], c, best, throughput=design.throughput(IR.from_dict(r["ir"])))
+                    r["acq"] = {k: acq[k] for k in ("score", "p_feasible", "pred")} if acq else None
+                    scored.append((-(acq["score"] if acq else 0.0), r["rank"], r))
+                if any(r["acq"] for r in ranked):
+                    # estimated-feasible candidates stay ahead of estimated-infeasible ones (the closed form is exact on
+                    # resources); within a group the acquisition decides
+                    scored.sort(key=lambda t: (bool(t[2]["est_violations"]), t[0], t[1]))
+                    ranked = [t[2] for t in scored]
+                    for i, r in enumerate(ranked):
+                        r["rank"] = i + 1
+            except Exception as e:
+                print(f"     surrogate ranking skipped: {e}", flush=True)
         chosen = ranked[0] if ranked else None
         action = f"{chosen['why']}" if chosen else "no legal candidate"
         print(f"     diagnosis: {diagnosis}", flush=True)
         for r in ranked:
             e = r["estimate"]
-            print(f"     candidate #{r['rank']}: {ir_view(IR.from_dict(r['ir']), locked)}  est fmax~{e['fmax_mhz']:.0f} lut~{e['lut']} dsp~{e['dsp']}  {r['est_violations'] or 'est-feasible'}  -- {r['why']}", flush=True)
+            acq = r.get("acq")
+            band = f"  surrogate fmax~{acq['pred']['fmax_mhz'][0]:.0f} [{acq['pred']['fmax_mhz'][1]:.0f}-{acq['pred']['fmax_mhz'][2]:.0f}] p_feasible {acq['p_feasible']:.2f}" if acq else ""
+            print(f"     candidate #{r['rank']}: {ir_view(IR.from_dict(r['ir']), locked)}  est fmax~{e['fmax_mhz']:.0f} lut~{e['lut']} dsp~{e['dsp']}  {r['est_violations'] or 'est-feasible'}{band}  -- {r['why']}", flush=True)
         for n in norm:
             if n["invalid"] or n["duplicate"]:
                 print(f"     rejected: {ir_view(IR.from_dict(n['ir']), locked)}  {'invalid: ' + '; '.join(n['invalid']) if n['invalid'] else 'duplicate'}", flush=True)
         emit({"kind": "plan", "iteration": it + 1, "diagnosis": diagnosis, "action": action,
-              "candidates": [{"ir": ir_view(IR.from_dict(r["ir"]), locked), "why": r["why"], "rank": r["rank"], "estimate": r["estimate"], "est_violations": r["est_violations"]} for r in ranked]
+              "candidates": [{"ir": ir_view(IR.from_dict(r["ir"]), locked), "why": r["why"], "rank": r["rank"], "estimate": r["estimate"], "est_violations": r["est_violations"],
+                              **({"surrogate": r["acq"]} if r.get("acq") else {}), **({"local": True} if r.get("surrogate") else {})} for r in ranked]
                             + [{"ir": ir_view(IR.from_dict(n["ir"]), locked), "why": n["why"], "rejected": "invalid: " + "; ".join(n["invalid"]) if n["invalid"] else "duplicate"} for n in norm if n["invalid"] or n["duplicate"]],
               "next_ir": ir_view(IR.from_dict(chosen["ir"]), locked) if chosen else None, "stop": False})
         if not chosen:

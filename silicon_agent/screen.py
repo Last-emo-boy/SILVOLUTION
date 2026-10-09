@@ -207,7 +207,8 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
               1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0), 1.0 if ir.get("reg_in") else 0.0, math.log2(max(ir["pe_rows"], 1))]
     elif design == "fir":
         f += [math.log2(ir["taps"]), math.log2(ir.get("fold", 1)), 1.0 if ir.get("symmetric") else 0.0, ir["acc_width"] / 40,
-              1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0)]
+              1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0),
+              1.0 if (ir.get("fold", 1) > 1 and ir.get("sum_tree")) else 0.0, 1.0 if (ir.get("fold", 1) > 1 and ir.get("pipe_in")) else 0.0]
     elif design == "cordic":
         f += [ir["width"] / 16, ir["iterations"] / 16, math.log2(ir.get("unroll", 1) + 0.0) if ir.get("unroll", 1) > 0 else 0, 1.0 if ir.get("fold", 1) > 1 else 0.0,
               ir.get("guard_bits", 0) / 4, 1.0 if ir.get("scale_comp") else 0.0, 0.0]
@@ -243,10 +244,19 @@ def record(design: str, backend: str, ir: dict, measured: dict) -> None:
 
 
 def _load_obs(design: str, backend: str) -> list[dict]:
+    """Observations with their feature vectors brought to the current length (features added later read as 0 for
+    older records, which is what the knob's absence meant then)."""
     p = OBS_DIR / f"obs_{design}_{backend}.jsonl"
     if not p.exists():
         return []
-    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+    obs = [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+    if not obs:
+        return obs
+    n = max(len(o["features"]) for o in obs)
+    for o in obs:
+        if len(o["features"]) < n:
+            o["features"] = o["features"] + [0.0] * (n - len(o["features"]))
+    return obs
 
 
 def _solve(X: list[list[float]], y: list[float], lam: float) -> list[float]:
