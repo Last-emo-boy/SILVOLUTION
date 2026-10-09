@@ -99,6 +99,7 @@ export const siliconAgent = {
         plans: plans.map((p) => ({ iteration: p.iteration, diagnosis: p.diagnosis, action: p.action, stop: p.stop ?? false, stop_reason: p.stop_reason })),
         best: best ? { iteration: best.iteration, ir: best.ir, metrics: { fmax_mhz: best.metrics?.fmax_mhz, lut: best.metrics?.lut, dsp: best.metrics?.dsp, bram: best.metrics?.bram }, throughput: best.throughput } : null,
         stop_reason: j.summary?.stop_reason ?? null,
+        ...(j.summary?.sweep ? { sweep: j.summary.sweep } : {}),
         error: j.error ? String(j.error).slice(0, 600) : undefined,
       }
     }
@@ -140,6 +141,16 @@ export const siliconAgent = {
       meta: starts,
       async execute({ spec, max_iter, thread, parent }, tctx) {
         try { return text(await api('POST', '/jobs', { spec, max_iter: max_iter ?? 8, thread, parent }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
+      name: 'sa_sweep',
+      description: 'Design-space sweep: measure every point of the product of the given knob values (e.g. {"fold":[1,2,4],"sum_tree":[false,true]}) on the real device, no planner -- the result is a table with the Pareto-optimal points marked (the chat shows it as a card). Same spec shape as sa_run; the sweep knobs override initial_ir. Returns the job id; follow with sa_job (its iterations are the points).',
+      parameters: obj({ spec: any(), sweep: any(), thread: str({ maxLength: 64 }) }, ['spec', 'sweep']),
+      meta: starts,
+      async execute({ spec, sweep, thread }, tctx) {
+        try { return text(await api('POST', '/jobs', { spec: { ...spec, sweep }, max_iter: 1, thread }, tctx?.signal)) } catch (e) { return fail(e) }
       },
     })
 
@@ -330,6 +341,7 @@ export const siliconAgent = {
       '3. Start with sa_run (pass the conversation `thread` when you have one), then follow it with sa_job (wait_seconds 90, repeated until the status is done or failed; a run takes 1-30 minutes). Report what the measurements say: what changed, measured Fmax/LUT/DSP, whether the constraints hold. Never invent numbers: everything comes from the tool results.',
       '4. When it finishes, explain why it stopped (stop_reason or the budget), the final design, and one caveat if there is one (thin timing margin, low throughput, noisy seeds). Offer the next step: fork with tighter constraints, sa_formal, or the delivery package (the chat shows a download button on the result card; you cannot build or attach files yourself).',
       '5. While a run is in flight, a user instruction about the design is an sa_steer; a question is answered from sa_job data.',
+      '5b. "Sweep", "compare all", "how does X scale with Y", "Pareto": sa_sweep with the knob values -- it measures every point instead of searching, and the card shows the Pareto set. Keep sweeps small (<= 12 points on an FPGA, <= 4 on sky130).',
       '6. A follow-up that only asks about results you already have (critical path, why it stopped, numbers) is answered from your own tool records or one sa_job call: do not start another run, do not re-estimate, do not re-read artifacts you have read. Start a new run only when the user asks for a change, a retry, or a different design.',
       '7. The user may bring their own RTL (they paste SystemVerilog, or describe a block that no generator covers but they have code for). Then: ask for (or write from what they pasted) a self-checking bench that prints RESULT PASS/FAIL, decide with them which parameters the planner may move, call sa_rtl_upload, and run the spec with design "rtl:<id>" (locked {}, initial_ir = the parameter defaults). The ladder (behavioral sim, synthesis, P&R, netlist sims, formal properties) is the same; the planner tunes only the exposed parameters. sa_schema does not list rtl designs; sa_rtl_list does.',
       '8. Devices: the FPGAs plus `sky130` (OpenROAD ASIC standard cells, 2-10 min per flow): no DSP/LUT there -- the numbers are cells, area in um2 (max_area_um2 is the budget, minimize_area the objective) and the STA critical path through fa_1/ha_1 adder cells.',

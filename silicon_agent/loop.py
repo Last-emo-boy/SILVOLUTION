@@ -257,6 +257,11 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
 
     siblings: list[dict] = []  # extra screened candidates to evaluate alongside the chosen one this round
 
+    if spec.get("sweep"):
+        # design-space sweep: no planner; every point of the product of the listed knob values is measured (n_par at
+        # a time), the summary's best is the pick under the objective; the trajectory is the whole grid
+        return _sweep(spec, design, IR, c, backend, locked, init, out, run_id, evaluate_one, record, history, seen, n_par, emit, control)
+
     for it in range(1, max_iter + 1):
         errs = ir.validate()
         if errs:
@@ -450,6 +455,52 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                "throughput_unit": design.throughput_unit, "iterations": len(history), "best": best, "history": history}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     emit({"kind": "done", "best": best, "iterations": len(history), "throughput_unit": design.throughput_unit})
+    return summary
+
+
+def _sweep(spec, design, IR, c, backend, locked, init, out, run_id, evaluate_one, record, history, seen, n_par, emit, control) -> dict:
+    import itertools
+    sweep = {k: list(v) for k, v in spec["sweep"].items() if isinstance(v, (list, tuple)) and v}
+    keys = list(sweep)
+    grid = [dict(zip(keys, vals)) for vals in itertools.product(*(sweep[k] for k in keys))]
+    points = []
+    for g in grid:
+        try:
+            a = IR.from_dict(merge_locked({**init, **g}, locked))
+        except Exception as e:
+            emit({"kind": "note", "iteration": 0, "message": f"sweep point {g} rejected: {e}"})
+            continue
+        errs = a.validate()
+        if errs:
+            emit({"kind": "note", "iteration": 0, "message": f"sweep point {g} invalid: {'; '.join(errs)}"})
+            continue
+        if a.digest(backend) in seen:
+            continue
+        seen.add(a.digest(backend))
+        points.append((g, a))
+    emit({"kind": "plan", "iteration": 1, "diagnosis": f"design-space sweep over {keys}: {len(points)} points", "action": "measure every point", "candidates": [], "stop": False})
+    it = 0
+    for i in range(0, len(points), n_par):
+        if control is not None and control.should_stop():
+            break
+        batch = points[i:i + n_par]
+        it += 1
+        if len(batch) == 1:
+            record(evaluate_one(it, batch[0][1], f"sweep {batch[0][0]}", "", 0))
+        else:
+            with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                futs = [pool.submit(evaluate_one, it, a, f"sweep {g}", "", k) for k, (g, a) in enumerate(batch)]
+                for e in [f.result() for f in futs]:
+                    record(e)
+    best = pick_best(history, c)
+    # the sweep table: every point with its knob values, for the UI's Pareto view
+    table = [{"point": dict(zip(keys, [e["ir"].get(k) for k in keys])), "iteration": e["iteration"], "slot": e.get("slot", 0),
+              "fmax_mhz": e["metrics"]["fmax_mhz"], "lut": e["metrics"]["lut"], "dsp": e["metrics"]["dsp"], "area_um2": e["metrics"].get("area_um2"),
+              "throughput": e["throughput"], "feasible": not e["violations"]} for e in history]
+    summary = {"run_id": run_id, "spec": spec, "design": design.kind, "backend": backend, "throughput_unit": design.throughput_unit,
+               "iterations": len(history), "best": best, "history": history, "sweep": {"knobs": keys, "points": table}}
+    (out / "summary.json").write_text(json.dumps(summary, indent=2))
+    emit({"kind": "done", "best": best, "iterations": len(history), "throughput_unit": design.throughput_unit, "sweep": {"knobs": keys, "n": len(table)}})
     return summary
 
 

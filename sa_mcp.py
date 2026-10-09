@@ -65,6 +65,7 @@ def _summarize(j: dict) -> dict:
         "plans": [{"iteration": p.get("iteration"), "diagnosis": p.get("diagnosis"), "action": p.get("action"), "stop": p.get("stop", False), "stop_reason": p.get("stop_reason")} for p in plans],
         "best": {"iteration": best["iteration"], "ir": best["ir"], "metrics": {k: best["metrics"].get(k) for k in ("fmax_mhz", "lut", "dsp", "bram", "area_um2", "power_mw")}, "throughput": best.get("throughput")} if best else None,
         "error": (j.get("error") or "")[:600] or None,
+        **({"sweep": (j.get("summary") or {}).get("sweep")} if (j.get("summary") or {}).get("sweep") else {}),
     }
 
 
@@ -73,6 +74,7 @@ TOOLS = [
     {"name": "sa_interpret", "description": "Natural-language hardware request -> complete spec (design, device, locked task fields, constraints, objectives, initial IR) + assumptions + alternatives. Does not start a run.", "inputSchema": {"type": "object", "properties": {"request": {"type": "string"}, "thread": {"type": "string"}}, "required": ["request"]}},
     {"name": "sa_estimate", "description": "Closed-form + calibrated estimate (Fmax, LUT/cells, DSP, throughput) of one IR on one device, no EDA.", "inputSchema": {"type": "object", "properties": {"design": {"type": "string"}, "backend": {"type": "string"}, "ir": {"type": "object"}}, "required": ["design", "backend", "ir"]}},
     {"name": "sa_run", "description": "Start an autonomous optimization run from a spec (generate, simulate, synthesize, place-and-route, diagnose, iterate). Returns the job id; follow with sa_job.", "inputSchema": {"type": "object", "properties": {"spec": {"type": "object"}, "max_iter": {"type": "integer"}, "thread": {"type": "string"}}, "required": ["spec"]}},
+    {"name": "sa_sweep", "description": "Design-space sweep: measure every point of the product of the knob values (e.g. {\"fold\":[1,2,4]}) on the device, no planner; the run's summary carries the table with Pareto points.", "inputSchema": {"type": "object", "properties": {"spec": {"type": "object"}, "sweep": {"type": "object"}, "thread": {"type": "string"}}, "required": ["spec", "sweep"]}},
     {"name": "sa_job", "description": "Status and full trajectory of a run (per-iteration IR, measured numbers, violations, critical path, planner diagnosis, best design). wait_seconds > 0 blocks up to that long (max 300) while the run is going.", "inputSchema": {"type": "object", "properties": {"job": {"type": "string"}, "wait_seconds": {"type": "integer"}}, "required": ["job"]}},
     {"name": "sa_steer", "description": "Instruction for the running planner's next proposal.", "inputSchema": {"type": "object", "properties": {"job": {"type": "string"}, "message": {"type": "string"}}, "required": ["job", "message"]}},
     {"name": "sa_stop", "description": "Stop a run after its current iteration.", "inputSchema": {"type": "object", "properties": {"job": {"type": "string"}}, "required": ["job"]}},
@@ -98,6 +100,8 @@ def call(name: str, a: dict):
         return api("POST", "/estimate", {"design": a["design"], "backend": a["backend"], "ir": a["ir"]})
     if name == "sa_run":
         return api("POST", "/jobs", {"spec": a["spec"], "max_iter": a.get("max_iter", 8), "thread": a.get("thread")})
+    if name == "sa_sweep":
+        return api("POST", "/jobs", {"spec": {**a["spec"], "sweep": a["sweep"]}, "max_iter": 1, "thread": a.get("thread")})
     if name == "sa_job":
         deadline = time.time() + min(int(a.get("wait_seconds") or 0), 300)
         while True:
