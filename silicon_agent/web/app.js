@@ -34,6 +34,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   ext.initActions();
   $("#new-run").onclick = () => show("new");
   $("#open-memory").onclick = () => show("memory");
+  $("#open-bench").onclick = () => show("bench");
   $("#send").onclick = sendSteer;
   $("#steer").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendSteer(); });
   $("#steer").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px"; });
@@ -53,7 +54,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   await refreshJobs();
   setInterval(refreshJobs, 5000);
   const hash = location.hash.slice(1);
-  if (hash === "memory") show("memory"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
+  if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
   else if (hash && (!THREAD || jobs.some((j) => j.id === hash))) select(hash);
   else if (THREAD && jobs.length) select(jobs[0].id);
   else show("empty");
@@ -61,9 +62,10 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 
 function show(v) {
   view = v;
-  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare";
+  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare"; $("#bench").hidden = v !== "bench";
   if (v !== "run") { selected = null; clearTimeout(pollTimer); document.querySelectorAll("#runs li").forEach((li) => li.classList.remove("sel")); }
   if (v === "memory") { location.hash = "memory"; renderMemoryView(); }
+  if (v === "bench") { location.hash = "bench"; renderBenchView(); }
   if (v === "new") location.hash = "new";
 }
 function toggleInspector(force) {
@@ -545,6 +547,22 @@ function renderMemoryTab(rows) {
   if (!recalled.length && !learned.length) { p.appendChild(el(`<div class="muted">${spec.no_memory ? "memory disabled for this run (A/B)" : "nothing recalled or learned yet"}</div>`)); return; }
   if (learned.length) { const s = el(`<div class="sec"><h3>Learned in this run</h3></div>`); for (const l of learned) s.appendChild(lessonCard({ ...l, score: l.outcome === "helped" ? 1 : l.outcome === "hurt" ? -1.5 : 0 }, design, backend)); p.appendChild(s); }
   if (recalled.length) { const s = el(`<div class="sec"><h3>Recalled</h3></div>`); const ids = new Set(); for (const l of recalled) { if (ids.has(l.id)) continue; ids.add(l.id); s.appendChild(lessonCard(l, design, backend)); } p.appendChild(s); }
+}
+
+// the bench: one column per tag (latest report), one row per case; cells = first-feasible round + best point, red = outside expectation
+async function renderBenchView() {
+  const box = $("#bench-view"); box.innerHTML = `<div class="muted">loading…</div>`;
+  const b = await api("/bench");
+  const tags = Object.keys(b.by_tag || {}).sort((x, y) => (b.by_tag[y].t || 0) - (b.by_tag[x].t || 0));
+  box.innerHTML = "";
+  box.appendChild(el(`<div class="muted small-text" style="margin-bottom:10px">${esc(b.status || "no nightly yet")}</div>`));
+  if (!tags.length) { box.appendChild(el(`<div class="muted">no reports</div>`)); return; }
+  const cases = [...new Set(tags.flatMap((t) => Object.keys(b.by_tag[t].cases)))].sort();
+  const head = `<tr><th>case</th>${tags.map((t) => `<th>${esc(t)}<div class="muted small-text">${new Date((b.by_tag[t].t || 0) * 1000).toLocaleDateString()}${b.by_tag[t].planner ? ` · ${esc(b.by_tag[t].planner)}` : ""}${b.by_tag[t].agent ? " · via chat" : ""}</div></th>`).join("")}</tr>`;
+  const rows = cases.map((c) => `<tr><td class="mono">${esc(c)}</td>${tags.map((t) => { const r = b.by_tag[t].cases[c]; if (!r) return "<td class='muted'>–</td>"; const bb = r.best; return `<td class="${r.ok ? "" : "bad"}"><a href="#${esc(r.job || "")}">${r.ok ? "✓" : "✕"} @${r.first ?? "–"}</a>${bb ? `<div class="muted small-text">${fmt(bb.fmax_mhz)} MHz · ${bb.lut} ${bb.area_um2 ? "cells" : "LUT"} · ${bb.dsp} DSP</div>` : "<div class='muted small-text'>infeasible</div>"}</td>`; }).join("")}</tr>`).join("");
+  const sums = `<tr><th>summary</th>${tags.map((t) => { const s = b.by_tag[t].summary || {}; return `<th class="muted small-text">${s.ok ?? "?"}/${s.n ?? "?"} ok · first ${s.mean_first_feasible ?? "?"}${s.agent_usd != null ? ` · $${s.agent_usd}` : ""}</th>`; }).join("")}</tr>`;
+  box.appendChild(el(`<table class="bench"><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${sums}</tfoot></table>`));
+  box.querySelectorAll("a[href^='#']").forEach((a) => { a.onclick = (e) => { e.preventDefault(); const id = a.getAttribute("href").slice(1); if (id) { location.hash = id; select(id); } }; });
 }
 
 async function renderMemoryView() {

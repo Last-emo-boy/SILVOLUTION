@@ -240,3 +240,6 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
 .agent-steps-list .call code { font: 12px var(--mono); color: var(--text); } .agent-steps-list .call .args { font: 11px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-steps-list .call.x code { color: var(--bad, #e5484d); }
 .agent-reply { white-space: pre-wrap; font-size: 13px; color: var(--text); border-left: 2px solid var(--border); padding-left: 10px; }
+table.bench { border-collapse: collapse; font-size: 12.5px; }
+table.bench th, table.bench td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.bench td.bad { color: var(--bad, #e5484d); } table.bench a { color: inherit; text-decoration: none; }

@@ -19,6 +19,7 @@
     <ul id="runs" class="runs"></ul>
     <div class="rail-foot">
       <button id="open-memory" class="ghost small">◎ Memory <span id="mem-count" class="muted"></span></button>
+      <button id="open-bench" class="ghost small">▤ Bench</button>
       <span id="who" class="mono muted"></span>
     </div>
   </aside>
@@ -136,6 +137,10 @@
     <section id="memory" class="memview" hidden>
       <div class="bar"><h1>Design memory</h1><span class="muted small-text">lessons distilled from every planner move, scored by what happened when later runs followed them</span></div>
       <div id="memory-list" class="memlist"></div>
+    </section>
+    <section id="bench" class="memview" hidden>
+      <div class="bar"><h1>Bench</h1><span class="muted small-text">the regression suite: every case per tag (nightly = default planner; planner-pro = DeepSeek V4 Pro; agent = driven through the chat; knob / newgen = manual)</span></div>
+      <div id="bench-view" class="memlist"></div>
     </section>
   </main>
 </div>
