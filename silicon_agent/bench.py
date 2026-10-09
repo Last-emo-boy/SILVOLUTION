@@ -202,12 +202,16 @@ def run_agent_case(server: str, token: str, name: str, spec: dict, tag: str) -> 
 
 
 def golden_point(server: str, token: str, spec: dict) -> dict | None:
-    """The best design the server has already measured for this case's generator / device under its constraints
-    (the cross-run Pareto store); None when nothing measured meets them yet."""
+    """The best design the server has already measured for this case (the cross-run Pareto store), among the points
+    whose locked task parameters match the case's -- a 16-tap FIR's point is no golden for a 32-tap case -- and
+    that meet its constraints, by its objective order; None when nothing measured qualifies yet."""
+    from . import pareto
     c = spec["constraints"]
-    q = "&".join(f"{k}={v}" for k, v in (("design", spec["design"]), ("backend", spec["backend"]), ("fmax_mhz", c.get("fmax_mhz")), ("max_dsp", c.get("max_dsp")), ("max_lut", c.get("max_lut"))) if v is not None)
-    r = _req(server, token, "GET", f"/pareto?{q}")
-    return r.get("best_under")
+    locked = spec.get("locked") or {}
+    r = _req(server, token, "GET", f"/pareto?design={spec['design']}&backend={spec['backend']}")
+    same = lambda a, b: abs(a - b) < 1e-9 if isinstance(a, float) or isinstance(b, float) else a == b
+    pts = [p for p in r.get("points", []) if all(k in (p.get("locked") or {}) and same(p["locked"][k], v) for k, v in locked.items())]
+    return pareto.best_under(pts, c.get("fmax_mhz"), c.get("max_dsp"), c.get("max_lut"), c.get("objective"))
 
 
 def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str, reuse: str | None = None,
@@ -233,6 +237,7 @@ def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_i
         ir = {k: v for k, v in g["ir"].items() if k not in (spec.get("locked") or {})}
         spec["initial_ir"] = ir
         spec["sweep"] = {k: [v] for k, v in ir.items()}
+        spec["fresh"] = True   # through the toolchain again, not the EDA cache: that is what the night checks
         spec["golden"] = {"job": g["job"], "iteration": g["iteration"], "fmax_mhz": g["fmax_mhz"], "lut": g["lut"], "dsp": g["dsp"]}
         max_iter = 1
     if agent and not reuse:

@@ -226,7 +226,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 emit({**e, "slot": slot} if slot else e)
         ev({"kind": "evaluating", "iteration": it, "ir": ir_view(ir_x, locked)})
         t0 = time.time()
-        m = evaluate(design, ir_x, c.fmax_mhz, ROOT / "runs", backend=backend,
+        m = evaluate(design, ir_x, c.fmax_mhz, ROOT / "runs", backend=backend, fresh=bool(spec.get("fresh")),
                      on_stage=lambda key, st: ev({"kind": "stage", "iteration": it, "stage": key, **{k: v for k, v in st.items() if k != "log"}}))
         entry = {
             "iteration": it, "slot": slot,

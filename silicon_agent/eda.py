@@ -109,14 +109,16 @@ def _simulate_sv_bench(d: Design, arch, rtl: Path, sim_dir: Path, timeout: int) 
 
 
 # ---------------------------------------------------------------- top-level evaluate
-def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str = "ecp5", on_stage=None) -> Metrics:
+def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str = "ecp5", on_stage=None, fresh: bool = False) -> Metrics:
+    """`fresh` skips the cache read (the result is still cached): a regression run wants the toolchain and the
+    simulation models exercised again, not yesterday's numbers."""
     b = _REG[backend]
     rtl_text = d.emit(arch, backend=backend)
     h = hashlib.sha256(f"{backend}\n{rtl_text}".encode()).hexdigest()[:16]
     cache_key = hashlib.sha256(f"{CACHE_VERSION}\n{backend}\n{rtl_text}".encode()).hexdigest()[:16]
     CACHE.mkdir(exist_ok=True)
     cached = CACHE / f"{cache_key}.json"
-    if cached.exists():
+    if cached.exists() and not fresh:
         return Metrics(**json.loads(cached.read_text()))
 
     work = runs_dir / h

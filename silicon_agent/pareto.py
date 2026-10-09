@@ -53,5 +53,6 @@ def best_under(pts: list[dict], fmax_mhz: float | None = None, max_dsp: int | No
     if not ok:
         return None
     obj = objective or ["maximize_throughput", "minimize_lut"]
-    key = lambda p: tuple({"maximize_throughput": -p["throughput"], "maximize_fmax": -p["fmax_mhz"], "minimize_lut": p["lut"], "minimize_dsp": p["dsp"], "minimize_latency": p.get("latency_cycles") or 0}[o] for o in obj)
+    # minimize_area (sky130) ranks by cells, the same column lut carries on the ASIC backend; an unknown objective is ignored
+    key = lambda p: tuple({"maximize_throughput": -p["throughput"], "maximize_fmax": -p["fmax_mhz"], "minimize_lut": p["lut"], "minimize_area": p["lut"], "minimize_dsp": p["dsp"], "minimize_latency": p.get("latency_cycles") or 0}.get(o, 0) for o in obj)
     return min(ok, key=key)
