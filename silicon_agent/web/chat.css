@@ -172,6 +172,9 @@ button:disabled { opacity: .45; cursor: default; }
 .iter .nums { font: 11.5px var(--mono); color: var(--text-2); margin-top: 2px; } .iter .nums b { color: var(--text); font-weight: 500; }
 .iter .nums .v { color: var(--good); } .iter .nums .x { color: var(--bad); }
 .iter .why { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.iter.skip .what { font-style: italic; }
+.iter .why.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.iter .why:not(.clamp)[title] { cursor: pointer; }
 .iter .user { border-left: 2px solid var(--good); padding: 2px 8px; margin: 4px 0; color: var(--text-2); font-size: 12.5px; }
 
 /* simulation ladder */

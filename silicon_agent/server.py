@@ -76,7 +76,15 @@ RESULTS = ROOT / "results"
 THREADS = ROOT / "threads"
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 STATIC = Path(__file__).resolve().parent / "web"
-_STATIC_STAMP = hashlib.sha256(b"".join(sorted(f.read_bytes() for f in STATIC.glob("*") if f.is_file()))).hexdigest()[:10] if STATIC.exists() else "0"
+
+
+def _static_stamp() -> str:
+    """Build stamp of the UI files: the newest mtime among them, so a browser re-fetches after a deploy (and a
+    developer's edit shows on reload without a restart)."""
+    try:
+        return str(max(int(f.stat().st_mtime) for f in STATIC.glob("*") if f.is_file()))
+    except ValueError:
+        return "0"
 TOKEN = os.environ.get("SA_TOKEN", "")
 # Shared with sluice (GATEWAY_HMAC_KEY). When set, X-Auth-Subject is trusted only if
 # X-Auth-Sig = HMAC-SHA256(key, subject "\n" groups "\n" epoch_minute) for the current or
@@ -1213,7 +1221,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.suffix == ".html":
             # every /static/x.js|css reference carries the build stamp: a deploy never leaves a browser on stale UI
             # code while the pages and the API moved on (the stamped URLs are then cached for a long time)
-            data = re.sub(rb'(/static/[\w./-]+\.(?:js|css))"', lambda m: m.group(1) + f"?v={_STATIC_STAMP}".encode() + b'"', data)
+            stamp = _static_stamp()
+            data = re.sub(rb'(/static/[\w./-]+\.(?:js|css))"', lambda m: m.group(1) + f"?v={stamp}".encode() + b'"', data)
         self.send_response(200)
         self.send_header("Content-Type", MIME.get(path.suffix, "application/octet-stream"))
         self.send_header("Content-Length", str(len(data)))
