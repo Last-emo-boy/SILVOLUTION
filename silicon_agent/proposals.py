@@ -263,6 +263,9 @@ try:
     from silicon_agent.designs import DESIGNS
     from silicon_agent import eda
     from silicon_agent.backends._common import tool_env
+    if design not in DESIGNS:
+        out["error"] = f"design {design!r} is not registered in the working copy's silicon_agent/designs.py (have {list(DESIGNS)})"
+        print(json.dumps(out)); sys.exit(0)
     d = DESIGNS[design]
     a = d.ir_cls.from_dict(ir)
     out["validate"] = a.validate()

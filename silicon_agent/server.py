@@ -1645,9 +1645,11 @@ class Handler(BaseHTTPRequestHandler):
             tid = str(body.get("thread", ""))
             if tid not in _threads or not _visible(_threads[tid], sub):
                 return self._json(404, {"error": "no such thread"})
-            design = body.get("design"); backend = body.get("backend", "ecp5")
-            if design not in DESIGNS or backend not in BACKENDS:
-                return self._json(400, {"error": f"design/backend: have {list(DESIGNS)} / {list(BACKENDS)}"})
+            design = str(body.get("design", "")); backend = body.get("backend", "ecp5")
+            # the design is looked up in the working copy's registry (a new kind the author is adding lives only
+            # there); the server only vets the name's shape and the device
+            if not re.match(r"^[a-z][a-z0-9_]{0,31}$", design) or backend not in BACKENDS:
+                return self._json(400, {"error": f"design: a generator name (existing: {list(DESIGNS)}; a new kind by its name) / backend: {list(BACKENDS)}"})
             tree = Path(_author_tree(tid)) / "b"
             return self._json(200, P.quick_check(tree, design, backend, body.get("ir") or {}))
         if len(parts) == 3 and parts[0] == "proposals" and parts[2] == "merge":

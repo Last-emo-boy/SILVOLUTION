@@ -299,7 +299,7 @@ export const siliconAgent = {
 
     agnes.registerTool({
       name: 'sa_check',
-      description: 'Author inner loop: on this conversation\'s working copy (b/), emit one IR of a design, validate it, elaborate the RTL with iverilog and run the behavioral cocotb testbench; returns validate() errors, the RTL head, the elaboration log and the simulation verdict. Use it after every edit, before sa_propose. The toolchain lives on the job server, not in your shell.',
+      description: 'Author inner loop: on this conversation\'s working copy (b/), emit one IR of a design, validate it, elaborate the RTL with iverilog and run the behavioral cocotb testbench; returns validate() errors, the RTL head, the elaboration log and the simulation verdict. Use it after every edit, before sa_propose. A new design kind works as soon as your b/ copy registers it in designs.py. The toolchain lives on the job server, not in your shell.',
       parameters: obj({ thread: str({ maxLength: 64 }), design: str(), backend: str(), ir: any() }, ['thread', 'design', 'ir']),
       meta: { ...readOnly, costHint: { wallMs: 60000 } },
       async execute({ thread, design, backend, ir }, tctx) {
