@@ -638,12 +638,56 @@ def _proposal_view(pid: str) -> dict:
             "ab": pr.get("ab"), "merged": pr.get("merged")}
 
 
+def _independent_reference(pid: str, pr: dict, kind: str) -> str:
+    """Ask a separate AGH session (no tools beyond reading, no sight of the diff) for `reference(ir, xs)`: a plain-Python
+    model of the block from its description. The IR field list is taken from the diff's schema entry when present."""
+    from . import agh
+    import re as _re
+    diff = pr["diff"]
+    # the schema fields the proposal declares for the kind, if any (a hint list, not the generator)
+    m = _re.search(rf'"{kind}":\s*\{{.*?"fields":\s*\[(.*?)\n\s*\]', diff, _re.S)
+    fields = _re.findall(r'"name":\s*"(\w+)".*?"hint":\s*"([^"]*)"', m.group(1)) if m else []
+    desc = (f"Block: {pr.get('title', '')}\n\n{pr.get('rationale', '')}\n\n" +
+            ("IR fields:\n" + "\n".join(f"  {n}: {h}" for n, h in fields) + "\n" if fields else "") +
+            f"Example IRs: {json.dumps([x['ir'] for x in (pr.get('irs') or []) if x.get('design') == kind][:2])}")
+    prompt = (f"[silicon-agent reference · proposal {pid} · answer in English]\n"
+              "You are writing an INDEPENDENT reference model of a hardware block, from its description only, for a verification gate. "
+              "Do not call any tool. Reply with ONLY a Python code block defining `def reference(ir: dict, xs: list[int]) -> list[int]` "
+              "(standard library only). `xs` are the signed input samples in arrival order; return the signed output samples in order, "
+              "exactly as fixed-point hardware would produce them (integer arithmetic, the same widths/truncation/saturation the description implies; "
+              "one output per M inputs for a rate-changing block). Samples before the stream are zero. Be literal about the definition; "
+              "do not optimise.\n\n" + desc)
+    c = agh.client()
+    sid = c.new_session(agh.workspace(), preset=os.environ.get("SA_AGH_PRESET") or None, session_key=f"sa-reference-{pid}")
+    try:
+        c.set_model(sid, "deepseek", "deepseek-v4-pro", "high")
+    except agh.AghError:
+        pass
+    r = c.prompt(sid, prompt, timeout=900)
+    code = _re.search(r"```(?:python)?\s*\n(.*?)```", r.get("full_text") or r.get("text") or "", _re.S)
+    if not code or "def reference" not in code.group(1):
+        raise RuntimeError("no reference() in the reply")
+    return code.group(1)
+
+
 def _start_proposal(pid: str) -> None:
     from . import proposals as P
     pr = _proposals[pid]
 
     def run():
         try:
+            new_kinds = [d for d in pr["designs"] if d not in DESIGNS]
+            if new_kinds and not pr.get("reference"):
+                # an independent reference: a fresh agent session that never saw the generator writes the model from the
+                # proposal's own description of the block (title + rationale + IR fields), so agreement between the two is
+                # evidence rather than an echo
+                try:
+                    pr["reference"] = _independent_reference(pid, pr, new_kinds[0])
+                    pr["reference_by"] = "independent session"
+                    with _lock:
+                        _save_proposal(pid)
+                except Exception as e:
+                    print(f"proposal {pid}: independent reference failed: {e}", flush=True)
             rep = P.gate(pr["diff"], PROPOSALS / pid / "gate", designs=pr["designs"], irs=pr.get("irs") or [], timeout=5400, reference=pr.get("reference"))
         except Exception as e:
             rep = {"ok": False, "steps": [], "log": f"gate crashed: {e}"}
