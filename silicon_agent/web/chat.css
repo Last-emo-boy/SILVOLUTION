@@ -294,3 +294,4 @@ table.tour td.nm { font-family: var(--mono); font-size: 11.5px; color: var(--tex
 table.tour td.op { width: 24px; text-align: right; } table.tour td.op a { text-decoration: none; color: var(--muted); } table.tour td.op a:hover { color: var(--text); }
 table.tour tr.lead td.lb { color: var(--good); font-weight: 500; }
 table.tour .x { color: var(--bad); }
+.rail-foot .wb.agh { margin-left: 10px; color: var(--muted); } .rail-foot .wb.agh:hover { color: var(--text); }

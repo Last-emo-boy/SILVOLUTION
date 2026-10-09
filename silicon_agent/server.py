@@ -13,6 +13,7 @@ API
   GET  /api/jobs/<id>/trust      verification state of the best design at a glance (sim ladder, seeds, cached formal / mutation; starts nothing)
   GET  /api/specs                example specs shipped in specs/
   GET  /api/health
+  /agh/                          the Agnes Harness web workbench (every session, tool records, approvals), proxied from the agh container; operator (token) or SA_AGH_WEB_GROUP
   POST /api/interpret            {"text": "...", "thread"?: id} -> spec + assumptions + alternatives (no run)
   POST /api/estimate             {"spec"} or {"design","backend","ir"} -> screening estimate, no EDA
   POST /api/jobs/<id>/steer      {"message": "..."}  -> read by the planner before its next proposal
@@ -59,6 +60,7 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -1260,8 +1262,132 @@ MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=ut
         ".log": "text/plain; charset=utf-8"}
 
 
+# ---------------------------------------------------------------- the harness's web workbench, proxied
+# AGH's own web UI (every session's transcript, tool records, approvals, provider settings) runs inside the agh
+# container, bound to 127.0.0.1:4177 and pinned to that origin (the harness refuses any other Host/Origin, by
+# design). Here it is reachable as /agh/ behind the same SSO gate as the chat: the job server opens a plain TCP
+# connection to the agh container, rewrites Host/Origin to the loopback origin the harness expects, and pipes
+# both directions -- for ordinary requests and for the websocket upgrade alike. The browser sees one origin
+# (silicon.w33d.xyz), so the page's relative asset / websocket URLs land here again. Operator-only by default
+# (the workbench exposes every conversation); SA_AGH_WEB_GROUP widens it to an SSO group.
+AGH_WEB = os.environ.get("SA_AGH_WEB", "")                       # host:port of the agh container's web launcher, e.g. agh:4177
+AGH_WEB_ORIGIN = os.environ.get("SA_AGH_WEB_ORIGIN", "http://127.0.0.1:4177")
+AGH_WEB_GROUP = os.environ.get("SA_AGH_WEB_GROUP", "")           # SSO group allowed besides the operator token
+
+
+def _agh_web_allowed(sub: str | None, groups: str) -> bool:
+    if not AGH_WEB or sub is None:
+        return False
+    if sub == "cli" or SHARED:
+        return True
+    return bool(AGH_WEB_GROUP) and AGH_WEB_GROUP in [g.strip() for g in groups.split(",") if g.strip()]
+
+
+def _pipe(a, b) -> None:
+    """Copy bytes a -> b until either side closes (one direction of a tunnel)."""
+    try:
+        while True:
+            chunk = a.recv(65536)
+            if not chunk:
+                break
+            b.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        try:
+            b.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "silicon-agent/0.3"
+
+    def _agh_proxy(self) -> None:
+        """Forward this request to the harness web launcher with the loopback Host/Origin it insists on."""
+        import socket as _socket
+        from urllib.parse import urlsplit as _urlsplit
+        host, port = AGH_WEB.rsplit(":", 1)
+        loop = _urlsplit(AGH_WEB_ORIGIN)
+        path = self.path[len("/agh"):] or "/"
+        # headers: Host and Origin rewritten; hop-by-hop and the gateway's identity headers dropped; the
+        # websocket handshake headers pass through untouched
+        drop = {"host", "origin", "x-auth-subject", "x-auth-sig", "x-auth-groups", "authorization", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip", "cookie"}
+        lines = [f"{self.command} {path} HTTP/1.1", f"Host: {loop.netloc}"]
+        if "origin" in self.headers:
+            lines.append(f"Origin: {AGH_WEB_ORIGIN}")
+        if "referer" in self.headers:
+            lines.append(f"Referer: {AGH_WEB_ORIGIN}/")
+        for k, v in self.headers.items():
+            if k.lower() in drop or k.lower() == "referer":
+                continue
+            lines.append(f"{k}: {v}")
+        upgrade = self.headers.get("Upgrade", "").lower() == "websocket"
+        if not upgrade:
+            lines.append("Connection: close")
+        n = int(self.headers.get("Content-Length", "0") or 0)
+        body = self.rfile.read(n) if n else b""
+        try:
+            up = _socket.create_connection((host, int(port)), timeout=30)
+        except OSError as e:
+            return self._json(502, {"error": f"harness web unreachable: {e}"})
+        try:
+            up.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body)
+            if upgrade:
+                # tunnel: after the 101 both sides speak websocket frames; copy bytes until either closes
+                up.settimeout(None)
+                self.connection.settimeout(None)
+                t = threading.Thread(target=_pipe, args=(up, self.connection), daemon=True)
+                t.start()
+                _pipe(self.connection, up)
+                t.join()
+                self.close_connection = True
+                return
+            # plain response: relay status line, headers and body as they come; the page's absolute loopback
+            # references (CSP connect-src, redirects) are rewritten to this origin's /agh/ prefix
+            up.settimeout(60)
+            f = up.makefile("rb")
+            status = f.readline()
+            if not status:
+                return self._json(502, {"error": "harness web: empty response"})
+            hdrs = []
+            while True:
+                ln = f.readline()
+                if ln in (b"\r\n", b"\n", b""):
+                    break
+                hdrs.append(ln.rstrip(b"\r\n"))
+            data = f.read()
+            hdr = {}
+            for h in hdrs:
+                k, _, v = h.partition(b":")
+                hdr.setdefault(k.strip().lower().decode("latin-1"), []).append(v.strip().decode("latin-1"))
+            ctype = (hdr.get("content-type") or [""])[0]
+            if any(t in ctype for t in ("text/html", "javascript", "text/css", "application/json")):
+                txt = data.decode("utf-8", "replace")
+                txt = txt.replace(AGH_WEB_ORIGIN.replace("http://", "ws://"), f"{'wss' if self.headers.get('X-Forwarded-Proto', 'http') == 'https' else 'ws'}://{self.headers.get('Host', '')}/agh")
+                txt = txt.replace(AGH_WEB_ORIGIN, "/agh")
+                data = txt.encode("utf-8")
+            code = int(status.split()[1]) if len(status.split()) > 1 else 502
+            self.send_response(code)
+            for k, vs in hdr.items():
+                if k in ("content-length", "connection", "transfer-encoding", "content-security-policy", "keep-alive"):
+                    continue
+                for v in vs:
+                    if k == "location":
+                        v = v.replace(AGH_WEB_ORIGIN, "/agh")
+                    self.send_header(k, v)
+            csp = (hdr.get("content-security-policy") or [""])[0]
+            if csp:
+                # the harness pins connect-src to its loopback ws origin; through the proxy the page connects back here
+                self.send_header("Content-Security-Policy", csp.replace(AGH_WEB_ORIGIN.replace("http://", "ws://"), "'self' ws: wss:").replace(AGH_WEB_ORIGIN, "'self'"))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        finally:
+            try:
+                up.close()
+            except OSError:
+                pass
 
     # -- auth --
     def _subject(self) -> str | None:
@@ -1308,7 +1434,23 @@ class Handler(BaseHTTPRequestHandler):
         super().log_message(fmt, *args)
 
     # -- routing --
+    def _maybe_agh(self) -> bool:
+        p = urlsplit(self.path).path
+        if p != "/agh" and not p.startswith("/agh/"):
+            return False
+        if p == "/agh":
+            self.send_response(302); self.send_header("Location", "/agh/"); self.end_headers()
+            return True
+        sub = self._subject()
+        if not _agh_web_allowed(sub, self.headers.get("X-Auth-Groups", "")):
+            self._json(403 if sub else 401, {"error": "the harness workbench is operator-only" if sub else "unauthorized"})
+            return True
+        self._agh_proxy()
+        return True
+
     def do_GET(self):
+        if self._maybe_agh():
+            return
         u = urlsplit(self.path)
         path = u.path
         if path.startswith("/api/"):
@@ -1317,6 +1459,7 @@ class Handler(BaseHTTPRequestHandler):
             from . import agh
             return self._json(200, {"ok": True, "backends": list(BACKENDS), "designs": list(DESIGNS),
                                     "queued": _queue.qsize(), "jobs": len(_jobs), "runtime": "agh" if agh.enabled() else "builtin", "llm": dict(_llm_state),
+                                    "agh_web": bool(AGH_WEB) and _agh_web_allowed(self._subject(), self.headers.get("X-Auth-Groups", "")),
                                     **({"modes": {k: v["model"] + (f" · thinking {v['thinking']}" if v["thinking"] != "off" else "") for k, v in agh.MODES.items()},
                                         "default_mode": agh.DEFAULT_MODE} if agh.enabled() else {})})
         # static UI (public: sluice gates it before it reaches us)
@@ -1663,6 +1806,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if self._maybe_agh():
+            return
         sub = self._subject()
         if sub is None:
             return self._json(401, {"error": "unauthorized"})
@@ -2082,7 +2227,25 @@ class Handler(BaseHTTPRequestHandler):
             _thread_note_job(thread, job_id, f"Started in the worktable: {spec.get('task', '')} ({spec.get('design', 'matmul')} on {spec.get('backend', 'ecp5')}, {cons}).", False)
         self._json(202, {"id": job_id})
 
+    def do_PUT(self):
+        if not self._maybe_agh():
+            self._json(405, {"error": "method not allowed"})
+
+    def do_PATCH(self):
+        if not self._maybe_agh():
+            self._json(405, {"error": "method not allowed"})
+
+    def do_OPTIONS(self):
+        if not self._maybe_agh():
+            self._json(405, {"error": "method not allowed"})
+
+    def do_HEAD(self):
+        if not self._maybe_agh():
+            self._json(405, {"error": "method not allowed"})
+
     def do_DELETE(self):
+        if self._maybe_agh():
+            return
         sub = self._subject()
         if sub is None:
             return self._json(401, {"error": "unauthorized"})

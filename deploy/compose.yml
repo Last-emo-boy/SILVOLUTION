@@ -34,6 +34,9 @@ services:
       SA_ASIC_QUEUE: /srv/sa/asic/queue      # the orfs service's request queue (sky130 backend)
       SA_WEBHOOK: ${SA_WEBHOOK:-}            # optional: POSTed a run-finished JSON (Slack/Discord webhooks get a text line)
       SA_WORKERS: ${SA_WORKERS:-2}           # runs in flight at once (tournament variants overlap; the sky130 flow is serialized by the orfs runner anyway)
+      SA_AGH_WEB: agh:4177                   # the harness's web workbench inside the agh container (relay -> loopback launcher), proxied at /agh/
+      SA_AGH_WEB_ORIGIN: http://127.0.0.1:4178  # the origin the launcher is pinned to inside its container
+      SA_AGH_WEB_GROUP: ${SA_AGH_WEB_GROUP:-}
       SA_PUBLIC_URL: ${SA_PUBLIC_URL:-https://silicon.w33d.xyz}
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"

@@ -41,6 +41,28 @@ rm -f "$AGH_HOME/data/daemon/owner.json" "$AGH_HOME/data/daemon/agnesd.sock" 2>/
   (cd /opt/silicon-agent/app && AGH_REPO=/opt/agnes-harness node --import /opt/agnes-harness/node_modules/tsx/dist/loader.mjs deploy/agh-provision.mjs "$AGH_DIST") \
     || echo "agh: provisioning failed" >&2
 ) &
+# the harness's own web workbench (sessions, tool records, approvals, provider settings) rides on the daemon's
+# local-web capability: the daemon listens for the browser on a loopback websocket and the `serve` launcher
+# (started below) serves the pages on 127.0.0.1:4178 inside this container; a relay on :4177 exposes it to the compose
+# network. The job server proxies it to the
+# sluice route /agh/ (SSO-gated), rewriting Host/Origin to the loopback origin both sides insist on.
+AGH_WEB_ORIGIN="${AGNES_WEB_ORIGIN:-http://127.0.0.1:4178}"
+(
+  for _ in $(seq 1 180); do
+    [ -S "$AGH_HOME/data/daemon/agnesd.sock" ] && break
+    sleep 1
+  done
+  sleep 5
+  cd /opt/silicon-agent/app
+  # the launcher binds the loopback only (its origin contract); the relay exposes it on the compose network
+  AGH_WEB_RELAY_LISTEN=0.0.0.0:4177 AGH_WEB_RELAY_TARGET=127.0.0.1:4178 node /opt/silicon-agent/app/deploy/agh-web-relay.mjs &
+  while true; do
+    AGNES_WEB_ORIGIN="$AGH_WEB_ORIGIN" node "$AGH_DIST/agnes.mjs" serve --profile "$AGNES_PROFILE" --data-dir "$AGH_HOME/data" --cwd /opt/silicon-agent/app \
+      || echo "agh: web serve exited ($?), restarting in 10 s" >&2
+    sleep 10
+  done
+) &
 # workspace = the app checkout: `file:./agh-plugin` resolves there, and sessions run in a read-only tree
 cd /opt/silicon-agent/app
-exec node "$AGH_DIST/daemon.mjs" --profile "$AGNES_PROFILE" --workspace /opt/silicon-agent/app --data-dir "$AGH_HOME/data"
+exec node "$AGH_DIST/daemon.mjs" --profile "$AGNES_PROFILE" --workspace /opt/silicon-agent/app --data-dir "$AGH_HOME/data" \
+  --web-addr 127.0.0.1:0 --web-origin "$AGH_WEB_ORIGIN"
