@@ -932,12 +932,13 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
 
 
 def _author_tree(tid: str) -> str:
-    """The scratch copy of the package an author session edits: made once per conversation, under SA_ROOT so the
-    AGH worker (another container sharing /srv/sa) can read and write it. A git repo, so `git diff` yields the
-    proposal; the base commit is the deployed code."""
+    """The scratch copies of the package an author session edits: made once per conversation, under SA_ROOT so the
+    AGH worker (another container sharing /srv/sa) can read and write them. a/ is the deployed code, b/ the agent's
+    working copy; `diff -ruN a b` is the proposal. Never recreated while the directory exists (the agent's work lives
+    there across turns and restarts)."""
     from . import proposals as P
     root = ROOT / "author" / tid
-    if not (root / "silicon_agent").exists():
+    if not (root / "b" / "silicon_agent").exists():
         # `a/` is the deployed code, untouched; the author edits `b/`. No git in the containers, so the proposal is
         # `diff -ruN a b` (the gate applies it with patch -p1, so the a/ b/ prefixes are exactly right)
         P.scratch_copy(root / "a"); P.scratch_copy(root / "b")
