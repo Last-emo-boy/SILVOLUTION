@@ -18,6 +18,7 @@ const STAGES = [["behavioral", "behavioral"], ["post_synth_func", "post-synth"],
 // /work?thread=<id> scopes the worktable to one conversation: only its runs are listed, and every
 // run created here (new, fork, re-run) is bound to it. Without ?thread it is the global view.
 const THREAD = new URLSearchParams(location.search).get("thread");
+const PROJECT = new URLSearchParams(location.search).get("project");   // a project's runs across its conversations
 let jobs = [], selected = null, detail = null, seen = 0, pollTimer = null, specs = [];
 let view = "empty";
 const state = { get jobs() { return jobs; }, get detail() { return detail; }, get selected() { return selected; }, cmpA: null, cmpB: null, thread: THREAD };
@@ -36,6 +37,9 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   ext.initActions();
   $("#new-run").onclick = () => show("new");
   $("#open-memory").onclick = () => show("memory");
+  const navOn = () => document.querySelectorAll(".navlist .nav").forEach((b) => b.classList.toggle("on", b.id === `open-${view}`));
+  document.querySelectorAll(".navlist .nav").forEach((b) => b.addEventListener("click", () => setTimeout(navOn, 0)));
+  $("#runs").addEventListener("click", () => setTimeout(navOn, 0));
   $("#open-bench").onclick = () => show("bench");
   $("#open-proposals").onclick = () => show("proposals");
   $("#open-catalog").onclick = () => show("catalog");
@@ -49,6 +53,13 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   $("#t-rail").onclick = () => { const sh = $(".shell"); if (window.innerWidth <= 800) sh.classList.toggle("rail-shown"); else sh.classList.toggle("rail-hidden"); };
   document.querySelectorAll(".tabs button[data-tab]").forEach((b) => { b.onclick = () => switchTab(b.dataset.tab); });
   refreshMemCount();
+  if (PROJECT && !THREAD) {
+    try {
+      const p = await api(`/projects/${PROJECT}`);
+      $(".rail-head .brand").innerHTML = `<a class="back" href="/#project/${esc(PROJECT)}" title="Back to the project">‹</a> <span class="logo">▣</span> <span class="tt" title="${esc(p.name)}">${esc(p.name)}</span>`;
+      document.title = `${p.name} · worktable`;
+    } catch { $(".rail-head .brand").insertAdjacentHTML("beforeend", ` <span class="muted">(project not found)</span>`); }
+  }
   if (THREAD) {
     try {
       const th = await api(`/threads/${THREAD}`); threadData = th;
@@ -61,7 +72,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   const hash = location.hash.slice(1);
   if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "proposals" || hash.startsWith("proposals/")) show("proposals"); else if (hash === "catalog") show("catalog"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
   else if (hash && (!THREAD || jobs.some((j) => j.id === hash))) select(hash);
-  else if (THREAD && jobs.length) select(jobs[0].id);
+  else if ((THREAD || PROJECT) && jobs.length) select(jobs[0].id);
   else show("empty");
 })();
 
@@ -90,7 +101,7 @@ async function refreshMemCount() {
 
 // ---------------------------------------------------------------- rail
 async function refreshJobs() {
-  jobs = await api(`/jobs?thread=${encodeURIComponent(THREAD || "")}`);  // "" = runs that belong to no conversation
+  jobs = await api(PROJECT && !THREAD ? `/jobs?project=${encodeURIComponent(PROJECT)}` : `/jobs?thread=${encodeURIComponent(THREAD || "")}`);  // thread "" = runs that belong to no conversation
   const ul = $("#runs"); ul.innerHTML = "";
   for (const j of jobs) {
     const b = j.best?.metrics;

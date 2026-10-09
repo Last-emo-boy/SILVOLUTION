@@ -21,7 +21,7 @@ L.zh = {
   placeholder: "描述你要的硬件，或者对当前结果提要求…", hint: "⏎ 发送 · ⇧⏎ 换行", stop: "■ 停止", thinking: "思考中", newChat: "新对话",
   spec: "理解的规格", progress: "运行中", traj: "轨迹", result: "结果", noResult: "未找到可行设计", iter: "第 {n} 轮", iters: "{n} 轮", feasible: "{n} 轮可行",
   planning: "规划下一轮", sim: "行为级仿真", synth: "综合", pnr: "布局布线", queued: "排队中", stopped: "已停止", error: "出错",
-  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", covTitle: "行为级仿真覆盖的场景（次数）", formal: "形式验证", formalTitle: "SymbiYosys：实测 RTL 与当前生成器输出的有界等价 + 流协议属性", formalRunning: "验证中…", queued: "排队中，等这一轮结束后发送", exportTitle: "导出这个对话为 Markdown（规格、每轮结果、最佳设计、提案）", mutation: "变异分数", mutationTitle: "往 RTL 注入 24 处错误（加减互换、比较翻转、使能卡死…），看行为级测试台能抓住多少：验证强度", mutationRunning: "注入中…", survived: "漏网的变异", sweep: "设计空间扫描", points: "个点", paretoPts: "个 Pareto 最优", point: "旋钮", paretoNote: "在 {a} 与 {b} 上无其他可行点同时更优", attach: "附加 RTL 文件（.sv / .v）：用你自己的设计跑同一条阶梯", tooBig: "文件超过 400 KB", attachLead: "这是我自己的 RTL，请用同一条阶梯（仿真、综合、布局布线、形式验证）评估并优化它暴露的参数。", failedCalls: "{n} 次失败", modeFast: "快", modeDeep: "深思", modeAuthor: "改生成器", proposal: "生成器改动提案", gating: "门禁中…", gatePassed: "门禁通过", gateFailed: "门禁未通过", gateSteps: ["发射 + 展开所有预设", "行为级仿真", "形式等价（未改动的 IR）", "测试台变异分数"], abRun: "A/B 实测", merged: "已合并", viewDiff: "查看 diff", lines: "行", modeTitle: "智能体模式（下一轮生效）：", pendingMode: "新对话将以此模式开始", agentSteps: "智能体过程 · {n} 次工具调用", usage: "{calls} 次模型调用 · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness 账本：这一轮的模型调用、输入/输出 token（含缓存命中）、估算费用与用时", sessUsage: "本会话 {turns} 轮 · {tok} tokens · {usd}", sessUsageTitle: "本会话累计（Agnes Harness 账本）· 当前上下文 {ctx} tokens", today: "今天", earlier: "更早", agentAt: "智能体 ·", runs: "次运行", resumed: "重启后续接", resumedTitle: "服务器重启打断了上一轮，智能体根据自己的记录继续", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续", llmDown: "模型账户不可用（DeepSeek 返回 {n}）：对话与规划器暂停，已启动的运行照常出结果。充值后再发一条消息即恢复。", llmDownTitle: "服务器上次调用模型时收到的状态；下一次成功的调用会清除这条提示", search: "搜索对话：标题、你的提问、设计、器件", noMatch: "没有匹配的对话", trust: "验证", trustTitle: "这个设计经过了哪些验证：行为级仿真、网表仿真、多种子布局布线、形式验证、变异测试", notRun: "未跑", seeds: "{n} 粒种子", spread: "离散 {n}%", netlist: "网表仿真", tBehav: "行为级",
+  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", covTitle: "行为级仿真覆盖的场景（次数）", formal: "形式验证", formalTitle: "SymbiYosys：实测 RTL 与当前生成器输出的有界等价 + 流协议属性", formalRunning: "验证中…", queued: "排队中，等这一轮结束后发送", exportTitle: "导出这个对话为 Markdown（规格、每轮结果、最佳设计、提案）", mutation: "变异分数", mutationTitle: "往 RTL 注入 24 处错误（加减互换、比较翻转、使能卡死…），看行为级测试台能抓住多少：验证强度", mutationRunning: "注入中…", survived: "漏网的变异", sweep: "设计空间扫描", points: "个点", paretoPts: "个 Pareto 最优", point: "旋钮", paretoNote: "在 {a} 与 {b} 上无其他可行点同时更优", attach: "附加 RTL 文件（.sv / .v）：用你自己的设计跑同一条阶梯", tooBig: "文件超过 400 KB", attachLead: "这是我自己的 RTL，请用同一条阶梯（仿真、综合、布局布线、形式验证）评估并优化它暴露的参数。", failedCalls: "{n} 次失败", modeFast: "快", modeDeep: "深思", modeAuthor: "改生成器", proposal: "生成器改动提案", gating: "门禁中…", gatePassed: "门禁通过", gateFailed: "门禁未通过", gateSteps: ["发射 + 展开所有预设", "行为级仿真", "形式等价（未改动的 IR）", "测试台变异分数"], abRun: "A/B 实测", merged: "已合并", viewDiff: "查看 diff", lines: "行", modeTitle: "智能体模式（下一轮生效）：", pendingMode: "新对话将以此模式开始", agentSteps: "智能体过程 · {n} 次工具调用", usage: "{calls} 次模型调用 · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness 账本：这一轮的模型调用、输入/输出 token（含缓存命中）、估算费用与用时", sessUsage: "本会话 {turns} 轮 · {tok} tokens · {usd}", sessUsageTitle: "本会话累计（Agnes Harness 账本）· 当前上下文 {ctx} tokens", today: "今天", earlier: "更早", agentAt: "智能体 ·", runs: "次运行", resumed: "重启后续接", resumedTitle: "服务器重启打断了上一轮，智能体根据自己的记录继续", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续", llmDown: "模型账户不可用（DeepSeek 返回 {n}）：对话与规划器暂停，已启动的运行照常出结果。充值后再发一条消息即恢复。", llmDownTitle: "服务器上次调用模型时收到的状态；下一次成功的调用会清除这条提示", search: "搜索对话：标题、你的提问、设计、器件", noMatch: "没有匹配的对话", projects: "专案", convs: "对话", newProject: "新建专案", newProjectPrompt: "专案名称（例如：板卡 A 的 DSP 前端）：", projectIns: "专案说明 · 这个专案里每个对话都从这些约定开始（器件、时钟、接口、偏好……）", projectInsPh: "例如：所有设计都跑在 ECP5 LFE5U-25F 上，系统时钟 100 MHz，AXI-Stream 接口，优先用 BRAM，DSP 不超过 24 个。", saved: "已保存", saving: "保存中…", inProject: "这个专案里的对话", newInProject: "＋ 在此专案新建对话", noThreads: "还没有对话。在下面输入第一句话，它就会归到这个专案。", renameProject: "重命名专案：", delProject: "删除这个专案？里面的对话会保留为独立对话。", moveTo: "移到专案", moveOut: "移出专案", standalone: "独立对话", menuExport: "导出 Markdown", menuWorktable: "打开 worktable", menuRename: "重命名", menuDelete: "删除对话", menuRenameP: "重命名专案", menuDeleteP: "删除专案", workbench: "工作台", helloInProject: "新对话将归入专案", convCount: "{n} 个对话", runCount: "{n} 次运行", trust: "验证", trustTitle: "这个设计经过了哪些验证：行为级仿真、网表仿真、多种子布局布线、形式验证、变异测试", notRun: "未跑", seeds: "{n} 粒种子", spread: "离散 {n}%", netlist: "网表仿真", tBehav: "行为级",
   stages: ["行为级仿真", "综合后功能", "综合后时序", "实现后功能", "实现后时序"], signoff: "实现后时序仿真通过",
   design: "设计", backend: "器件", constraints: "约束", objective: "目标", locked: "固定参数", start: "起点", closest: "最接近",
   secs: "秒", critical: "关键路径", startFrom: "从起点设计开始。", fork: "基于上一次的最佳设计继续。",
@@ -36,7 +36,7 @@ L.en = {
   placeholder: "Describe the hardware you want, or ask for changes to the current result…", hint: "⏎ send · ⇧⏎ newline", stop: "■ Stop", thinking: "Thinking", newChat: "New chat",
   spec: "Understood spec", progress: "Running", traj: "Trajectory", result: "Result", noResult: "No feasible design", iter: "iteration {n}", iters: "{n} iterations", feasible: "{n} feasible",
   planning: "planning", sim: "behavioral sim", synth: "synthesis", pnr: "place & route", queued: "queued", stopped: "stopped", error: "error",
-  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", covTitle: "scenarios the behavioral testbench exercised (hit counts)", formal: "Formal check", formalTitle: "SymbiYosys: bounded equivalence of the measured RTL vs the current generator + stream properties", formalRunning: "checking…", queued: "queued · sent when this turn ends", exportTitle: "export this conversation as Markdown (specs, every iteration, best design, proposals)", mutation: "Mutation score", mutationTitle: "inject 24 bugs into the RTL (add/sub swaps, flipped compares, stuck enables ...) and count how many the behavioral bench catches: the strength of the verification", mutationRunning: "mutating…", survived: "survived", sweep: "Design-space sweep", points: "points", paretoPts: "Pareto-optimal", point: "knobs", paretoNote: "no other feasible point is at least as good on both {a} and {b}", attach: "Attach RTL (.sv / .v): run your own design through the same ladder", tooBig: "file over 400 KB", attachLead: "This is my own RTL. Run it through the same ladder (simulation, synthesis, place-and-route, formal) and tune the parameters it exposes.", failedCalls: "{n} failed", modeFast: "fast", modeDeep: "deep", modeAuthor: "author", proposal: "Generator change proposal", gating: "gating…", gatePassed: "gate passed", gateFailed: "gate failed", gateSteps: ["emit + elaborate every preset", "behavioral simulation", "formal equivalence (unchanged IRs)", "testbench mutation score"], abRun: "measured A/B", merged: "merged", viewDiff: "View diff", lines: "lines", modeTitle: "agent mode (from the next turn): ", pendingMode: "a new conversation starts in this mode", agentSteps: "Agent steps · {n} tool calls", usage: "{calls} model calls · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness ledger: this turn's model calls, input/output tokens (cache hits included), estimated cost and wall time", sessUsage: "{turns} turns · {tok} tokens · {usd}", sessUsageTitle: "this conversation so far (Agnes Harness ledger) · context {ctx} tokens", today: "Today", earlier: "Earlier", agentAt: "agent ·", runs: "runs", resumed: "resumed", resumedTitle: "a server restart cut the previous turn short; the agent continued from its own records", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here", llmDown: "The model account is unavailable (DeepSeek answered {n}): chat and planner are paused; runs already started still finish. Top up, then send a message to resume.", llmDownTitle: "the status the server got from its last model call; the next successful call clears this", search: "Search conversations: title, your requests, design, device", noMatch: "no matching conversation", trust: "Verified by", trustTitle: "what this design has been through: behavioral simulation, netlist simulation, multi-seed place-and-route, formal check, mutation test", notRun: "not run", seeds: "{n} seeds", spread: "spread {n}%", netlist: "netlist sim", tBehav: "behavioral",
+  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", covTitle: "scenarios the behavioral testbench exercised (hit counts)", formal: "Formal check", formalTitle: "SymbiYosys: bounded equivalence of the measured RTL vs the current generator + stream properties", formalRunning: "checking…", queued: "queued · sent when this turn ends", exportTitle: "export this conversation as Markdown (specs, every iteration, best design, proposals)", mutation: "Mutation score", mutationTitle: "inject 24 bugs into the RTL (add/sub swaps, flipped compares, stuck enables ...) and count how many the behavioral bench catches: the strength of the verification", mutationRunning: "mutating…", survived: "survived", sweep: "Design-space sweep", points: "points", paretoPts: "Pareto-optimal", point: "knobs", paretoNote: "no other feasible point is at least as good on both {a} and {b}", attach: "Attach RTL (.sv / .v): run your own design through the same ladder", tooBig: "file over 400 KB", attachLead: "This is my own RTL. Run it through the same ladder (simulation, synthesis, place-and-route, formal) and tune the parameters it exposes.", failedCalls: "{n} failed", modeFast: "fast", modeDeep: "deep", modeAuthor: "author", proposal: "Generator change proposal", gating: "gating…", gatePassed: "gate passed", gateFailed: "gate failed", gateSteps: ["emit + elaborate every preset", "behavioral simulation", "formal equivalence (unchanged IRs)", "testbench mutation score"], abRun: "measured A/B", merged: "merged", viewDiff: "View diff", lines: "lines", modeTitle: "agent mode (from the next turn): ", pendingMode: "a new conversation starts in this mode", agentSteps: "Agent steps · {n} tool calls", usage: "{calls} model calls · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness ledger: this turn's model calls, input/output tokens (cache hits included), estimated cost and wall time", sessUsage: "{turns} turns · {tok} tokens · {usd}", sessUsageTitle: "this conversation so far (Agnes Harness ledger) · context {ctx} tokens", today: "Today", earlier: "Earlier", agentAt: "agent ·", runs: "runs", resumed: "resumed", resumedTitle: "a server restart cut the previous turn short; the agent continued from its own records", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here", llmDown: "The model account is unavailable (DeepSeek answered {n}): chat and planner are paused; runs already started still finish. Top up, then send a message to resume.", llmDownTitle: "the status the server got from its last model call; the next successful call clears this", search: "Search conversations: title, your requests, design, device", noMatch: "no matching conversation", projects: "Projects", convs: "Conversations", newProject: "New project", newProjectPrompt: "Project name (e.g. DSP front end for board A):", projectIns: "Project instructions · every conversation in this project starts from them (device, clock, interfaces, preferences ...)", projectInsPh: "e.g. Every design targets the ECP5 LFE5U-25F, 100 MHz system clock, AXI-Stream interfaces, prefer BRAM, at most 24 DSPs.", saved: "saved", saving: "saving…", inProject: "Conversations in this project", newInProject: "＋ New conversation here", noThreads: "No conversations yet. Type the first request below and it will be filed here.", renameProject: "Rename project:", delProject: "Delete this project? Its conversations stay as standalone conversations.", moveTo: "Move to project", moveOut: "Remove from project", standalone: "Standalone", menuExport: "Export Markdown", menuWorktable: "Open worktable", menuRename: "Rename", menuDelete: "Delete conversation", menuRenameP: "Rename project", menuDeleteP: "Delete project", workbench: "Workbench", helloInProject: "This conversation will be filed under", convCount: "{n} conversations", runCount: "{n} runs", trust: "Verified by", trustTitle: "what this design has been through: behavioral simulation, netlist simulation, multi-seed place-and-route, formal check, mutation test", notRun: "not run", seeds: "{n} seeds", spread: "spread {n}%", netlist: "netlist sim", tBehav: "behavioral",
   stages: ["behavioral", "post-synth func", "post-synth timing", "post-impl func", "post-impl timing"], signoff: "post-implementation timing sim passed",
   design: "design", backend: "device", constraints: "constraints", objective: "objective", locked: "locked", start: "start", closest: "closest",
   secs: "s", critical: "critical path", startFrom: "Start from the initial design.", fork: "Continue from the previous best design.",
@@ -58,6 +58,8 @@ const stagesOf = (backend) => BSTAGES[backend] || ["behavioral"];
 
 // ---------------------------------------------------------------- state
 let threads = [], tid = null, thread = null, timer = null;
+let projects = [], pid = null;                       // the project page shown, or the project a new conversation goes into
+const collapsed = new Set(JSON.parse(localStorage.getItem("sa.collapsed") || "[]"));
 const jobs = {};                 // job id -> {events, seen, status, summary, error, spec, max_iter}
 const open = new Set();          // "<job>:<card>" of expanded cards
 const rtlShown = new Set();
@@ -76,7 +78,14 @@ const trustCache = new Map();   // jid -> {stages, seeds, formal, mutation, runn
   // agent modes (the harness model slot behind the chat): a per-conversation switch next to the composer
   try { const h = await api("/health"); if (h.modes) { MODES = h.modes; defaultMode = h.default_mode || Object.keys(MODES)[0]; renderModes(); } llmBanner(h.llm); } catch {}
   setInterval(async () => { try { llmBanner((await api("/health")).llm); } catch {} }, 30000);
-  $("#new-chat").onclick = () => openThread(null);
+  $("#new-chat").onclick = () => openThread(null, thread?.project ?? pid);   // a new conversation stays in the project you are in
+  $("#wb-label").textContent = T.workbench;
+  $("#more").onclick = (e) => { e.stopPropagation(); topMenu($("#more")); };
+  $("#p-ins-label").textContent = T.projectIns; $("#p-ins").placeholder = T.projectInsPh; $("#p-threads-label").textContent = T.inProject; $("#p-new").textContent = T.newInProject;
+  $("#p-new").onclick = () => openThread(null, pid);
+  $("#p-name").onchange = async () => { const name = $("#p-name").value.trim(); if (!name || !pid) return; await post(`/projects/${pid}`, { name }); await refreshThreads(); renderCrumbs(); };
+  $("#p-ins").oninput = () => { $("#p-ins-state").textContent = T.saving; clearTimeout(insTimer); insTimer = setTimeout(saveInstructions, 800); };
+  $("#p-ins").onblur = () => { clearTimeout(insTimer); saveInstructions(); };
   $("#send").onclick = () => send();
   $("#input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
   $("#input").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px"; });
@@ -102,17 +111,16 @@ const trustCache = new Map();   // jid -> {stages, seeds, formal, mutation, runn
   };
   await refreshThreads();
   setInterval(refreshThreads, 6000);
-  const h = location.hash.slice(1);
-  if (h) openThread(h);
-  window.addEventListener("hashchange", () => { const id = location.hash.slice(1) || null; if (id !== tid) openThread(id); });
+  route();
+  window.addEventListener("hashchange", route);
   const sb = $("#thread-search"); sb.placeholder = T.search; sb.title = T.search;
   sb.oninput = () => { threadQuery = sb.value; renderThreads(); };
-  sb.onkeydown = (e) => { if (e.key === "Escape") { sb.value = ""; threadQuery = ""; renderThreads(); sb.blur(); } if (e.key === "Enter") { const first = $("#threads li[data-id]"); if (first) openThread(first.dataset.id); } };
+  sb.onkeydown = (e) => { if (e.key === "Escape") { sb.value = ""; threadQuery = ""; renderThreads(); sb.blur(); } if (e.key === "Enter") { const first = $("#rail-list .row.thread"); if (first) openThread(first.dataset.id); } };
   document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); sb.focus(); sb.select(); } });
   $("#input").focus();
 })();
 
-// ---------------------------------------------------------------- rail
+// ---------------------------------------------------------------- rail: projects (folders with standing instructions) and standalone conversations
 let threadQuery = "";
 function threadMatches(th, q) {
   if (!q) return true;
@@ -120,47 +128,166 @@ function threadMatches(th, q) {
   return q.split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
 }
 async function refreshThreads() {
-  threads = await api("/threads");
+  [threads, projects] = await Promise.all([api("/threads"), api("/projects")]);
   renderThreads();
 }
+function threadRow(th) {
+  const b = th.best?.metrics;
+  const m = th.busy ? (th.agent ? `${T.agentAt} ${th.agent}` : T.thinking)
+    : th.status === "done" && b ? `${fmt(b.fmax_mhz, 0)} MHz · ${b.area_um2 != null ? `${b.lut} cells` : `${b.dsp} DSP`}${th.n_runs > 1 ? ` · ${th.n_runs} ${T.runs}` : ""}`
+    : th.status ? ({ running: T.progress, queued: T.queued, failed: T.noResult, error: T.error, interrupted: T.stopped }[th.status] || th.status) : "";
+  const dev = th.backend ? `<span class="dev">${esc(th.backend)}</span>` : "";
+  const li = el(`<div class="row thread ${th.id === tid ? "sel" : ""}" data-id="${esc(th.id)}" title="${esc(th.title)}"><span class="dot ${th.busy ? "busy" : th.status || ""}"></span><div class="tx"><div class="t">${esc(th.title)}</div><div class="m">${dev}${esc(m)}</div></div><button class="dots" title="…">⋯</button></div>`);
+  li.onclick = () => openThread(th.id);
+  li.querySelector(".dots").onclick = (e) => { e.stopPropagation(); threadMenu(th, e.currentTarget); };
+  return li;
+}
 function renderThreads() {
-  const ul = $("#threads"); ul.innerHTML = "";
+  const box = $("#rail-list"); box.innerHTML = "";
   const q = threadQuery.trim().toLowerCase();
   const shown = threads.filter((th) => threadMatches(th, q));
-  if (q && !shown.length) { ul.appendChild(el(`<li class="group">${esc(T.noMatch)}</li>`)); return; }
-  // grouped by recency: today / earlier (the list is already newest first); a search flattens the groups
+  if (q) {
+    // a search flattens everything into one list
+    if (!shown.length) { box.appendChild(el(`<div class="group">${esc(T.noMatch)}</div>`)); return; }
+    box.appendChild(el(`<div class="group">${shown.length} / ${threads.length}</div>`));
+    for (const th of shown) box.appendChild(threadRow(th));
+    return;
+  }
+  // projects: a folder each, collapsible, its conversations inside
+  const head = el(`<div class="group projects"><span>${esc(T.projects)}</span><button class="ghost mini" title="${esc(T.newProject)}">＋</button></div>`);
+  head.querySelector("button").onclick = newProject;
+  box.appendChild(head);
+  for (const p of projects) {
+    const open = !collapsed.has(p.id);
+    const ths = shown.filter((th) => th.project === p.id);
+    const f = el(`<div class="folder ${open ? "open" : ""}"><div class="row proj ${pid === p.id && !tid ? "sel" : ""}" data-pid="${esc(p.id)}"><span class="chev">${open ? "▾" : "▸"}</span><span class="pname">${esc(p.name)}</span><span class="cnt">${p.busy ? '<i class="busy"></i>' : ""}${ths.length}</span><button class="dots" title="…">⋯</button></div><div class="items"></div></div>`);
+    const row = f.querySelector(".row");
+    row.onclick = () => openProject(p.id);
+    row.querySelector(".chev").onclick = (e) => { e.stopPropagation(); if (collapsed.has(p.id)) collapsed.delete(p.id); else collapsed.add(p.id); localStorage.setItem("sa.collapsed", JSON.stringify([...collapsed])); renderThreads(); };
+    row.querySelector(".dots").onclick = (e) => { e.stopPropagation(); projectMenu(p, e.currentTarget); };
+    const items = f.querySelector(".items");
+    if (open) for (const th of ths) items.appendChild(threadRow(th));
+    box.appendChild(f);
+  }
+  // standalone conversations, by recency
+  const loose = shown.filter((th) => !th.project || !projects.some((p) => p.id === th.project));
+  if (loose.length || !projects.length) box.appendChild(el(`<div class="group">${esc(T.convs)}</div>`));
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
   let group = null;
-  for (const th of shown) {
-    const g = q ? `${shown.length} / ${threads.length}` : (th.last || th.created) * 1000 >= dayStart.getTime() ? T.today : T.earlier;
-    if (g !== group) { group = g; ul.appendChild(el(`<li class="group">${esc(g)}</li>`)); }
-    const b = th.best?.metrics;
-    const m = th.busy ? (th.agent ? `${T.agentAt} ${th.agent}` : T.thinking)
-      : th.status === "done" && b ? `${fmt(b.fmax_mhz, 0)} MHz · ${b.dsp} DSP${th.n_runs > 1 ? ` · ${th.n_runs} ${T.runs}` : ""}`
-      : th.status ? ({ running: T.progress, queued: T.queued, failed: T.noResult, error: T.error, interrupted: T.stopped }[th.status] || th.status) : "";
-    const dev = th.backend ? `<span class="dev">${esc(th.backend)}</span>` : "";
-    const li = el(`<li class="${th.id === tid ? "sel" : ""}" data-id="${esc(th.id)}" title="${esc(th.title)}"><span class="dot ${th.busy ? "busy" : th.status || ""}"></span><div><div class="t">${esc(th.title)}</div><div class="m">${dev}${esc(m)}</div></div><button class="x" title="${T.del}">×</button></li>`);
-    li.onclick = () => openThread(th.id);
-    li.querySelector(".t").ondblclick = async (e) => { e.stopPropagation(); const nt = prompt(T.rename, th.title); if (nt != null && nt.trim()) { await post(`/threads/${th.id}/title`, { title: nt.trim() }); refreshThreads(); if (th.id === tid) $("#title").textContent = nt.trim(); } };
-    li.querySelector(".x").onclick = async (e) => { e.stopPropagation(); if (!confirm(T.delConfirm)) return; try { await api(`/threads/${th.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; } if (th.id === tid) openThread(null); refreshThreads(); };
-    ul.appendChild(li);
+  for (const th of loose) {
+    const g = (th.last || th.created) * 1000 >= dayStart.getTime() ? T.today : T.earlier;
+    if (g !== group) { group = g; box.appendChild(el(`<div class="sub">${esc(g)}</div>`)); }
+    box.appendChild(threadRow(th));
   }
 }
 
-// ---------------------------------------------------------------- thread
-function openThread(id) {
+// one popup menu for everything: [{label, run, danger, head}]
+function showMenu(anchor, items) {
+  const m = $("#menu"); m.innerHTML = ""; m.hidden = false;
+  for (const it of items) {
+    if (it.head) { m.appendChild(el(`<div class="mh">${esc(it.head)}</div>`)); continue; }
+    const b = el(`<button class="${it.danger ? "danger" : ""} ${it.on ? "on" : ""}">${esc(it.label)}</button>`);
+    b.onclick = async (e) => { e.stopPropagation(); hideMenu(); await it.run(); };
+    m.appendChild(b);
+  }
+  const r = anchor.getBoundingClientRect();
+  m.style.top = `${Math.min(r.bottom + 4, window.innerHeight - m.offsetHeight - 8)}px`;
+  m.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - m.offsetWidth - 8))}px`;
+  setTimeout(() => document.addEventListener("click", hideMenu, { once: true }), 0);
+}
+function hideMenu() { $("#menu").hidden = true; }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideMenu(); });
+
+function moveItems(th) {
+  const items = projects.map((p) => ({ label: `→ ${p.name}`, on: th.project === p.id, run: async () => { await post(`/threads/${th.id}/project`, { project: p.id }); await refreshThreads(); if (th.id === tid && thread) { thread.project = p.id; renderCrumbs(); } } }));
+  if (th.project) items.push({ label: T.moveOut, run: async () => { await post(`/threads/${th.id}/project`, { project: null }); await refreshThreads(); if (th.id === tid && thread) { thread.project = null; renderCrumbs(); } } });
+  return items.length ? [{ head: T.moveTo }, ...items] : [];
+}
+function threadMenu(th, anchor) {
+  showMenu(anchor, [
+    { label: T.menuRename, run: async () => { const nt = prompt(T.rename, th.title); if (nt != null && nt.trim()) { await post(`/threads/${th.id}/title`, { title: nt.trim() }); await refreshThreads(); if (th.id === tid && thread) { thread.title = nt.trim(); renderCrumbs(); } } } },
+    { label: T.menuExport, run: () => { location.href = `/api/threads/${encodeURIComponent(th.id)}/export.md`; } },
+    { label: T.menuWorktable, run: () => window.open(`/work?thread=${encodeURIComponent(th.id)}`, "_blank") },
+    ...moveItems(th),
+    { label: T.menuDelete, danger: true, run: async () => { if (!confirm(T.delConfirm)) return; try { await api(`/threads/${th.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); return; } if (th.id === tid) openThread(null, th.project); await refreshThreads(); } },
+  ]);
+}
+function projectMenu(p, anchor) {
+  showMenu(anchor, [
+    { label: T.newInProject.replace(/^＋ /, ""), run: () => openThread(null, p.id) },
+    { label: T.menuRenameP, run: async () => { const nt = prompt(T.renameProject, p.name); if (nt != null && nt.trim()) { await post(`/projects/${p.id}`, { name: nt.trim() }); await refreshThreads(); renderCrumbs(); if (pid === p.id && !tid) $("#p-name").value = nt.trim(); } } },
+    { label: T.menuWorktable, run: () => window.open(`/work?project=${encodeURIComponent(p.id)}`, "_blank") },
+    { label: T.menuDeleteP, danger: true, run: async () => { if (!confirm(T.delProject)) return; await api(`/projects/${p.id}`, { method: "DELETE" }); if (pid === p.id) pid = null; await refreshThreads(); if (!tid) openThread(null, null); } },
+  ]);
+}
+function topMenu(anchor) {
+  if (tid && thread) return threadMenu({ id: tid, title: thread.title || "", project: thread.project || null }, anchor);
+  const p = projects.find((x) => x.id === pid);
+  if (p) return projectMenu(p, anchor);
+}
+async function newProject() {
+  const name = prompt(T.newProjectPrompt, "");
+  if (!name || !name.trim()) return;
+  const p = await post("/projects", { name: name.trim() });
+  await refreshThreads();
+  openProject(p.id);
+}
+
+// ---------------------------------------------------------------- views: a conversation, a project page, or a blank page (optionally inside a project)
+function route() {
+  const h = location.hash.slice(1);
+  if (h.startsWith("project/")) openProject(h.slice(8), true);
+  else if (h.startsWith("new/")) openThread(null, h.slice(4), true);
+  else if (h !== (tid || "")) openThread(h || null, h ? null : pid, true);
+}
+function openThread(id, project = null, fromHash = false) {
   clearTimeout(timer);
-  tid = id; thread = null; open.clear(); rtlShown.clear();
+  tid = id; thread = null; pid = id ? null : (project || null); open.clear(); rtlShown.clear();
   if (!id) setLang((navigator.language || "").toLowerCase().startsWith("zh"));
-  location.hash = id || "";
-  $("#msgs").innerHTML = ""; $("#hello").hidden = !!id; $("#title").textContent = ""; $("#stop").hidden = true; $("#wt-link").hidden = !id; $("#export-link").hidden = !id;
+  if (!fromHash) location.hash = id || (pid ? `new/${pid}` : "");
+  $("#msgs").innerHTML = ""; $("#hello").hidden = !!id; $("#project").hidden = true; $("#stop").hidden = true; $("#more").hidden = !id;
+  const hp = $("#hello-project"), p = projects.find((x) => x.id === pid);
+  hp.hidden = !p; if (p) hp.innerHTML = `<span class="muted">${esc(T.helloInProject)}</span> <b>▣ ${esc(p.name)}</b>${p.instructions ? `<div class="pins-preview">${esc(p.instructions.slice(0, 400))}</div>` : ""}`;
   pendingMode = null; if (MODES) renderModes();
-  document.querySelectorAll("#threads li").forEach((li) => li.classList.toggle("sel", li.dataset.id === id));
+  renderCrumbs();
+  document.querySelectorAll("#rail-list .row").forEach((r) => r.classList.toggle("sel", r.dataset.id === id));
   // on a phone the rail is a drawer: picking a conversation closes it
-  $(".shell").classList.remove("rail-shown");
   $(".shell").classList.remove("rail-shown");
   if (id) poll();
   $("#input").focus();
+}
+let insTimer = null;
+async function openProject(id, fromHash = false) {
+  clearTimeout(timer);
+  tid = null; thread = null; pid = id; open.clear(); rtlShown.clear();
+  if (!fromHash) location.hash = `project/${id}`;
+  let p;
+  try { p = await api(`/projects/${id}`); } catch { openThread(null, null); return; }
+  $("#msgs").innerHTML = ""; $("#hello").hidden = true; $("#project").hidden = false; $("#stop").hidden = true; $("#more").hidden = false;
+  $("#p-name").value = p.name; $("#p-ins").value = p.instructions || ""; $("#p-ins-state").textContent = "";
+  $("#p-stats").textContent = `${t("convCount", p.n_threads)} · ${t("runCount", p.threads.reduce((a, x) => a + (x.n_runs || 0), 0))}`;
+  const list = $("#p-threads"); list.innerHTML = "";
+  if (!p.threads.length) list.appendChild(el(`<div class="muted small">${esc(T.noThreads)}</div>`));
+  for (const th of p.threads) {
+    const b = th.best?.metrics;
+    const m = th.busy ? T.thinking : th.status === "done" && b ? `${fmt(b.fmax_mhz, 0)} MHz · ${b.area_um2 != null ? `${b.lut} cells` : `${b.lut} LUT · ${b.dsp} DSP`}` : th.status ? ({ running: T.progress, queued: T.queued, failed: T.noResult, error: T.error, interrupted: T.stopped }[th.status] || th.status) : "";
+    const row = el(`<div class="pth"><span class="dot ${th.busy ? "busy" : th.status || ""}"></span><div class="tx"><div class="t">${esc(th.title)}</div><div class="m">${th.design ? `<span class="dev">${esc(th.design)} · ${esc(th.backend)}</span>` : ""}${esc(m)}</div></div><span class="when muted">${new Date(th.last * 1000).toLocaleDateString()}</span></div>`);
+    row.onclick = () => openThread(th.id);
+    list.appendChild(row);
+  }
+  renderCrumbs();
+  document.querySelectorAll("#rail-list .row").forEach((r) => r.classList.toggle("sel", r.dataset.pid === id));
+  $(".shell").classList.remove("rail-shown");
+}
+async function saveInstructions() {
+  if (!pid || $("#project").hidden) return;
+  try { await post(`/projects/${pid}`, { instructions: $("#p-ins").value }); $("#p-ins-state").textContent = T.saved; } catch (e) { $("#p-ins-state").textContent = e.message; }
+}
+function renderCrumbs() {
+  const c = $("#crumbs"); c.innerHTML = "";
+  const p = projects.find((x) => x.id === (thread?.project ?? pid));
+  if (p) { const a = el(`<a class="crumb proj">▣ ${esc(p.name)}</a>`); a.onclick = () => openProject(p.id); c.appendChild(a); }
+  if (tid) { if (p) c.appendChild(el(`<span class="sep">›</span>`)); c.appendChild(el(`<span class="crumb title">${esc(thread?.title || "")}</span>`)); }
 }
 
 let MODES = null, defaultMode = "fast", pendingMode = null;
@@ -217,7 +344,7 @@ async function send(text) {
   const ta = $("#input"), msg = (text ?? ta.value).trim();
   if (!msg) return;
   ta.value = ""; ta.style.height = "auto";
-  $("#hello").hidden = true;
+  $("#hello").hidden = true; $("#project").hidden = true;
   // optimistic echo; while the agent is mid-turn the message queues behind it instead
   if (!thread) thread = { id: tid, title: "", messages: [], jobs: {}, busy: true };
   if (thread.busy) (thread.queue = thread.queue || []).push({ text: msg, t: Date.now() / 1000 });
@@ -225,8 +352,8 @@ async function send(text) {
   render();
   $("#scroll").scrollTop = $("#scroll").scrollHeight;
   try {
-    const r = await post(`/threads/${tid || "new"}/chat`, { text: msg });
-    if (!tid) { tid = r.thread; location.hash = tid; if (pendingMode) { try { await post(`/threads/${tid}/mode`, { mode: pendingMode }); } catch {} pendingMode = null; } }
+    const r = await post(`/threads/${tid || "new"}/chat`, { text: msg, ...(pid && !tid ? { project: pid } : {}) });
+    if (!tid) { tid = r.thread; thread.id = tid; thread.project = pid; $("#project").hidden = true; $("#more").hidden = false; location.hash = tid; if (pendingMode) { try { await post(`/threads/${tid}/mode`, { mode: pendingMode }); } catch {} pendingMode = null; } }
     clearTimeout(timer); await poll(); refreshThreads();
   } catch (e) {
     thread.messages.push({ role: "assistant", kind: "text", text: e.message, t: Date.now() / 1000 }); thread.busy = false; render();
@@ -238,9 +365,7 @@ function render() {
   if (!thread) return;
   const first = thread.messages.find((m) => m.role === "user");
   if (first && hasHan(first.text) !== zh) { setLang(hasHan(first.text)); $("#msgs").innerHTML = ""; }
-  $("#title").textContent = thread.title || "";
-  $("#wt-link").href = `/work?thread=${encodeURIComponent(tid)}`;
-  $("#export-link").href = `/api/threads/${encodeURIComponent(tid)}/export.md`; $("#export-link").hidden = !tid; $("#export-link").title = T.exportTitle;
+  if ($("#crumbs .title")?.textContent !== (thread.title || "")) renderCrumbs();
   if (MODES && $("#modes").dataset.mode !== (thread.mode || "")) { $("#modes").dataset.mode = thread.mode || ""; renderModes(); }
   // the conversation's running cost, from the last turn's session totals
   const su = [...thread.messages].reverse().find((m) => m.usage?.session)?.usage.session;

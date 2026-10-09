@@ -228,6 +228,20 @@ the top bar says so before you type: the server probes the provider's balance at
 start and every 10 minutes (`/api/health` → `llm`). The UI follows the language
 of the conversation. `sa ask "…" [--thread id]` is the same from a shell.
 
+### Projects
+
+A **project** is a folder of conversations with standing instructions — the
+device, the clock, the interfaces, the limits of one board or product — so no
+request in it has to repeat them: the instructions go to the interpreter and the
+agent in front of every message (`[Project: …]` block). The rail shows projects as
+collapsible folders with their conversations inside, and standalone conversations
+below; a conversation moves between them from its ⋯ menu. A project page (click
+the folder) edits the name and instructions and lists its conversations with
+their last result; its worktable (`/work?project=<id>`) shows the runs of all of
+them. `sa projects` / `sa projects new <name> --instructions file` /
+`sa ask "…" --project <id>` from a shell; `GET/POST /api/projects`,
+`POST /api/threads/<id>/project` on the API.
+
 ## Worktable
 
 `/work?thread=<id>` is the engineer's view of **one conversation** (the "worktable ↗"

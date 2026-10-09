@@ -16,20 +16,36 @@
       <button id="new-chat" class="ghost icon" title="New chat">＋</button>
     </div>
     <div class="rail-search"><input id="thread-search" type="search" autocomplete="off" spellcheck="false"></div>
-    <ul id="threads" class="threads"></ul>
-    <div class="rail-foot"><span id="who" class="mono muted"></span></div>
+    <nav id="rail-list" class="rail-list"></nav>
+    <div class="rail-foot"><a id="wb-link" class="wb" href="/work" target="_blank">▦ <span id="wb-label">Workbench</span></a><span id="who" class="mono muted"></span></div>
   </aside>
 
   <div id="scrim" class="scrim"></div>
   <main class="main">
-    <div class="topbar"><button id="t-rail" class="ghost icon" title="Conversations">☰</button><span id="title" class="title"></span><span class="grow"></span><span id="sess-usage" class="sess-usage mono muted" hidden></span><a id="export-link" class="ghost small btnlink" href="#" hidden>↓ .md</a><a id="wt-link" class="ghost small btnlink" href="/work" target="_blank" hidden>worktable ↗</a><button id="stop" class="ghost small" hidden>■ 停止</button></div>
+    <div class="topbar">
+      <button id="t-rail" class="ghost icon" title="Conversations">☰</button>
+      <div id="crumbs" class="crumbs"></div>
+      <span class="grow"></span>
+      <span id="sess-usage" class="sess-usage mono muted" hidden></span>
+      <button id="stop" class="ghost small" hidden>■ 停止</button>
+      <button id="more" class="ghost icon" title="More" hidden>⋯</button>
+    </div>
     <div class="scroll" id="scroll">
       <div class="col">
         <div id="hello" class="hello">
+          <div id="hello-project" class="hello-project" hidden></div>
           <h1>你想要什么硬件？</h1>
           <p>用一句话描述。我会生成 Verilog，跑仿真、综合和布局布线，直到满足要求，然后把结果交给你。</p>
           <div class="examples" id="examples"></div>
         </div>
+        <section id="project" class="project" hidden>
+          <div class="phead"><span class="pglyph">▣</span><input id="p-name" class="pname" spellcheck="false"><span id="p-stats" class="muted small"></span></div>
+          <label class="plabel" id="p-ins-label"></label>
+          <textarea id="p-ins" class="pins" rows="3" spellcheck="false"></textarea>
+          <div id="p-ins-state" class="muted small"></div>
+          <div class="plist-head"><span id="p-threads-label"></span><button id="p-new" class="small"></button></div>
+          <div id="p-threads" class="plist"></div>
+        </section>
         <ol id="msgs" class="msgs"></ol>
       </div>
     </div>
@@ -42,6 +58,7 @@
     </div>
   </main>
 </div>
+<div id="menu" class="menu" hidden></div>
 <script type="module" src="/static/chat.js"></script>
 </body>
 </html>

@@ -25,7 +25,9 @@ API
   GET  /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]   every measured point, the Pareto front, best under constraints
   GET  /api/catalog              every (design, device) measured so far: verified points, fastest / smallest on the front, last run
   POST /api/memory/<d>/<b>/vote  {"id": ..., "vote": "up"|"down"}
-  GET  /api/threads              conversations (newest first)
+  GET  /api/projects[/<id>]      folders of conversations with standing instructions; POST /api/projects {name, instructions}, POST /api/projects/<id>, DELETE
+  POST /api/threads/<id>/project {"project": id | null}   file a conversation under a project / take it out
+  GET  /api/threads              conversations (newest first; each carries its project)
   GET  /api/threads/<id>         messages + the jobs they refer to
   POST /api/threads/<id>/chat    {"text": ...}  (id "new" opens a thread); interprets, then runs/forks/steers/answers
   POST /api/threads/<id>/title    {"title": ...}  rename
@@ -343,6 +345,47 @@ def _save_thread(tid: str) -> None:
     (THREADS / f"{tid}.json").write_text(json.dumps(_threads[tid], ensure_ascii=False, indent=1))
 
 
+# ---------------------------------------------------------------- projects: folders of conversations with standing instructions
+# A project groups the conversations of one piece of work (a board, a product, a customer) and carries instructions
+# every conversation in it starts from -- the device, the clock, the conventions -- so they need not be repeated.
+# A conversation may also stand alone (project null).
+PROJECTS = ROOT / "projects"
+_projects: dict[str, dict] = {}
+
+
+def _load_projects() -> None:
+    PROJECTS.mkdir(parents=True, exist_ok=True)
+    for f in sorted(PROJECTS.glob("*.json")):
+        try:
+            _projects[f.stem] = json.loads(f.read_text())
+        except ValueError:
+            print(f"projects: skipping unreadable {f.name}", flush=True)
+
+
+def _save_project(pid: str) -> None:
+    PROJECTS.mkdir(parents=True, exist_ok=True)
+    _write_atomic(PROJECTS / f"{pid}.json", json.dumps(_projects[pid], ensure_ascii=False, indent=1))
+
+
+def _project_view(pid: str) -> dict:
+    pr = _projects[pid]
+    ths = [t for t in _threads.values() if t.get("project") == pid]
+    last = max([pr.get("created", 0)] + [max([m.get("t", 0) for m in t["messages"]] + [t["created"]]) for t in ths])
+    return {"id": pid, "name": pr.get("name", ""), "instructions": pr.get("instructions", ""), "created": pr.get("created"), "subject": pr.get("subject", ""),
+            "n_threads": len(ths), "last": last, "busy": any(t.get("busy") for t in ths)}
+
+
+def _project_prompt(th: dict) -> str:
+    """The standing instructions of the conversation's project, as a block for the agent / interpreter; empty
+    when the conversation stands alone or the project has no instructions."""
+    pr = _projects.get(th.get("project") or "")
+    if not pr:
+        return ""
+    ins = (pr.get("instructions") or "").strip()
+    head = f"Project: {pr.get('name', '')}"
+    return head + (f"\nStanding instructions for every request in this project:\n{ins[:2500]}" if ins else "")
+
+
 SHARED = os.environ.get("SA_SHARED", "") == "1"  # 1: every login sees every conversation (single-team mode)
 
 
@@ -495,7 +538,8 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
             th["messages"].append({"role": "assistant", "kind": "text", "text": ans["text"], "job": ctx["job"], "t": time.time()})
             _save_thread(tid)
             return {"action": "answer", "job": ctx["job"]}
-    it = nl.interpret(text, ctx)
+    proj = _project_prompt(th)
+    it = nl.interpret(text, {**(ctx or {}), "project": proj} if proj else ctx)
     spec = it["spec"]
     if it["errors"]:
         th["messages"].append({"role": "assistant", "kind": "text", "text": ("我没法把这个变成合法的设计：" if lang == "zh" else "I could not turn that into a valid design: ") + "; ".join(it["errors"]), "t": time.time()})
@@ -811,7 +855,8 @@ def _mutation_start(job_id: str, job: dict) -> dict:
 
 def _export_md(tid: str) -> str:
     th = _threads[tid]
-    out = [f"# silicon-agent · {th.get('title') or tid}", "", f"_conversation {tid} · exported {time.strftime('%Y-%m-%d %H:%M')}_", ""]
+    pr = _projects.get(th.get("project") or "")
+    out = [f"# silicon-agent · {th.get('title') or tid}", "", f"_conversation {tid}" + (f" · project {pr['name']}" if pr else "") + f" · exported {time.strftime('%Y-%m-%d %H:%M')}_", ""]
     for m in th["messages"]:
         t = time.strftime("%H:%M", time.localtime(m.get("t", 0)))
         if m["role"] == "user":
@@ -1045,7 +1090,8 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     # the method itself is injected by the plugin's context hook (sessions keyed sa-thread-*); the bracketed line
     # only carries the thread id the tools need
     # the reply follows the language of this message (a thread opened in English may continue in Chinese)
-    prompt = f"[silicon-agent {'author' if author else 'chat'} · thread {tid} · answer in {'Chinese' if nl._lang(text) == 'zh' else 'English'}]\n{text}"
+    proj = _project_prompt(th)
+    prompt = f"[silicon-agent {'author' if author else 'chat'} · thread {tid} · answer in {'Chinese' if nl._lang(text) == 'zh' else 'English'}]\n" + (f"[{proj}]\n" if proj else "") + text
     r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
     # the harness's ledger for this turn (tokens, estimated cost, wall time): shown under the reply
     r["usage"] = c.usage(sid)
@@ -1186,6 +1232,27 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"name": f.stem, "task": s.get("task", ""), "design": s.get("design", "matmul"),
                             "backend": s.get("backend", "ecp5"), "spec": s})
             return self._json(200, out)
+        if path == "/projects":
+            with _lock:
+                rows = [_project_view(pid) for pid, pr in _projects.items() if _visible(pr, sub)]
+            rows.sort(key=lambda r: r["last"], reverse=True)
+            return self._json(200, rows)
+        if len(parts) == 2 and parts[0] == "projects":
+            with _lock:
+                pr = _projects.get(parts[1])
+                if not pr or not _visible(pr, sub):
+                    return self._json(404, {"error": "no such project"})
+                v = _project_view(parts[1])
+                # the project's conversations with their last run, for the project page
+                v["threads"] = []
+                for t in sorted((t for t in _threads.values() if t.get("project") == parts[1]), key=lambda t: -max([m.get("t", 0) for m in t["messages"]] + [t["created"]])):
+                    jid = (_thread_jobs(t["id"]) or [None])[-1]
+                    j = _jobs.get(jid) if jid else None
+                    v["threads"].append({"id": t["id"], "title": t.get("title") or (t["messages"][0]["text"][:60] if t["messages"] else "untitled"), "busy": bool(t.get("busy")),
+                                         "last": max([m.get("t", 0) for m in t["messages"]] + [t["created"]]), "n_runs": len(_thread_jobs(t["id"])),
+                                         "status": j["status"] if j else None, "best": (j.get("summary") or {}).get("best") if j else None,
+                                         "design": j["spec"].get("design") if j else None, "backend": j["spec"].get("backend") if j else None})
+            return self._json(200, v)
         if path == "/threads":
             with _lock:
                 rows = [{"id": t["id"], "title": t.get("title") or (t["messages"][0]["text"][:60] if t["messages"] else "untitled"),
@@ -1194,7 +1261,8 @@ class Handler(BaseHTTPRequestHandler):
                          "last": max([m.get("t", 0) for m in t["messages"]] + [t["created"]]),
                          "agent": (t.get("live") or [{}])[-1].get("name") if t.get("busy") and t.get("live") else None,
                          # what the rail's search box matches besides the title: the user's own words, bounded
-                         "text": " ".join(m.get("text", "") for m in t["messages"] if m.get("role") == "user")[:1500]}
+                         "text": " ".join(m.get("text", "") for m in t["messages"] if m.get("role") == "user")[:1500],
+                         "project": t.get("project")}
                         for t in _threads.values() if _visible(t, sub)]
             for r in rows:
                 j = _jobs.get(r["job"]) if r["job"] else None
@@ -1332,14 +1400,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, json.loads(rep.read_text()))
         if path == "/jobs":
             # ?thread=<id>: that conversation's runs; ?thread= (empty): runs bound to no conversation; absent: everything
+            # ?project=<id>: the runs of every conversation in that project
             q = parse_qs(u.query, keep_blank_values=True)
             want = q["thread"][0] if "thread" in q else None
+            proj = q["project"][0] if "project" in q else None
             with _lock:
+                in_proj = {t["id"] for t in _threads.values() if proj and t.get("project") == proj}
                 rows = [{"id": j, "status": v["status"], "task": v["spec"].get("task", ""),
                          "design": v["spec"].get("design", "matmul"), "backend": v["spec"].get("backend", "ecp5"),
                          "created": v["created"], "subject": v.get("subject", ""), "parent": v.get("parent"), "thread": v.get("thread"),
                          "best": (v.get("summary") or {}).get("best"), "iterations": sum(1 for e in v["events"] if e["kind"] == "result")}
-                        for j, v in _jobs.items() if want is None or (v.get("thread") or "") == want]
+                        for j, v in _jobs.items() if (proj and v.get("thread") in in_proj) or (not proj and (want is None or (v.get("thread") or "") == want))]
             rows.sort(key=lambda r: r["created"], reverse=True)
             return self._json(200, rows)
         if len(parts) >= 2 and parts[0] == "jobs":
@@ -1504,6 +1575,51 @@ class Handler(BaseHTTPRequestHandler):
                         j["stop_requested"] = True
                         stopped["jobs"].append(jid)
             return self._json(200, stopped)
+        if path == "/projects":
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            name = str(body.get("name", "")).strip()[:80]
+            if not name:
+                return self._json(400, {"error": "name"})
+            pid = time.strftime("%Y%m%d-%H%M%S") + "-j" + secrets.token_hex(2)
+            with _lock:
+                _projects[pid] = {"id": pid, "name": name, "instructions": str(body.get("instructions", ""))[:4000], "created": time.time(), "subject": sub}
+                _save_project(pid)
+                v = _project_view(pid)
+            return self._json(200, v)
+        if len(parts) == 2 and parts[0] == "projects":
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            with _lock:
+                pr = _projects.get(parts[1])
+                if not pr or not _visible(pr, sub):
+                    return self._json(404, {"error": "no such project"})
+                if "name" in body and str(body["name"]).strip():
+                    pr["name"] = str(body["name"]).strip()[:80]
+                if "instructions" in body:
+                    pr["instructions"] = str(body["instructions"])[:4000]
+                _save_project(parts[1])
+                v = _project_view(parts[1])
+            return self._json(200, v)
+        if len(parts) == 3 and parts[0] == "threads" and parts[2] == "project":
+            # file a conversation under a project (or take it out: project null)
+            th = _threads.get(parts[1])
+            if not th or not _visible(th, sub):
+                return self._json(404, {"error": "no such thread"})
+            try:
+                pid = json.loads(self.rfile.read(n) or b"{}").get("project")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            with _lock:
+                if pid is not None and (pid not in _projects or not _visible(_projects[pid], sub)):
+                    return self._json(404, {"error": "no such project"})
+                th["project"] = pid
+                _save_thread(parts[1])
+            return self._json(200, {"ok": True, "project": pid})
         if len(parts) == 3 and parts[0] == "threads" and parts[2] == "mode":
             # the agent mode of a conversation (fast / deep); takes effect from the next turn
             from . import agh
@@ -1547,6 +1663,10 @@ class Handler(BaseHTTPRequestHandler):
                 if tid in _threads and not _visible(_threads[tid], sub):
                     return self._json(404, {"error": "no such thread"})
                 th = _threads.setdefault(tid, {"id": tid, "title": "", "messages": [], "created": time.time(), "subject": sub})
+                # a new conversation may be opened inside a project
+                pid = body.get("project")
+                if parts[1] == "new" and pid and pid in _projects and _visible(_projects[pid], sub):
+                    th["project"] = pid
                 if th.get("busy"):
                     # the agent is mid-turn: the message waits its turn (the chat shows it as queued) and runs next
                     if len(th.get("queue") or []) >= 5:
@@ -1809,6 +1929,18 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/"):
             path = path[4:]
         parts = path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] == "projects":
+            with _lock:
+                pr = _projects.get(parts[1])
+                if not pr or not _visible(pr, sub):
+                    return self._json(404, {"error": "no such project"})
+                for t in _threads.values():
+                    if t.get("project") == parts[1]:
+                        t["project"] = None
+                        _save_thread(t["id"])
+                _projects.pop(parts[1], None)
+                (PROJECTS / f"{parts[1]}.json").unlink(missing_ok=True)
+            return self._json(200, {"ok": True})
         if len(parts) == 2 and parts[0] == "threads":
             th = _threads.get(parts[1])
             if not th or not _visible(th, sub):
@@ -1846,6 +1978,7 @@ def main():
     _load_rtl_bundles()
     _load_from_disk()
     _load_threads()
+    _load_projects()
     _load_proposals()
     threading.Thread(target=_worker, daemon=True).start()
     threading.Thread(target=_resume_turns, daemon=True).start()

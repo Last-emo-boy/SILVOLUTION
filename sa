@@ -3,6 +3,8 @@
 
     sa ask "a 32-tap lowpass FIR on Spartan-7 at 250 MS/s, few DSPs"   natural language -> run, streamed
     sa ask "make it faster" --thread <thread-id>                         refine / ask about an earlier run
+    sa ask "..." --project <project-id>                                  open the conversation inside a project
+    sa projects [new <name> [--instructions file]]                       folders of conversations with standing instructions
     sa submit specs/matmul_int8.json [--max-iter 8] [--backend ecp5|xc7s50]
     sa watch <job-id>
     sa list
@@ -124,9 +126,9 @@ def watch(job_id: str) -> int:
         time.sleep(3)
 
 
-def ask(text: str, thread: str | None) -> int:
+def ask(text: str, thread: str | None, project: str | None = None) -> int:
     before = len(req("GET", f"/threads/{thread}")["messages"]) if thread else 0
-    r = req("POST", f"/threads/{thread or 'new'}/chat", {"text": text})
+    r = req("POST", f"/threads/{thread or 'new'}/chat", {"text": text, **({"project": project} if project and not thread else {})})
     tid = r["thread"]
     print(f"thread {tid}", flush=True)
     shown, job_seen, job = before + 1, 0, None  # skip history and our own message
@@ -229,7 +231,8 @@ def print_proposal(p: dict, with_diff: bool) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="sa")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    k = sub.add_parser("ask"); k.add_argument("text"); k.add_argument("--thread")
+    k = sub.add_parser("ask"); k.add_argument("text"); k.add_argument("--thread"); k.add_argument("--project")
+    pj = sub.add_parser("projects"); pj.add_argument("verb", nargs="?", choices=["new"]); pj.add_argument("name", nargs="?"); pj.add_argument("--instructions", help="text file with the standing instructions")
     s = sub.add_parser("submit"); s.add_argument("spec"); s.add_argument("--max-iter", type=int, default=8)
     s.add_argument("--backend"); s.add_argument("--no-watch", action="store_true")
     sub.add_parser("list")
@@ -256,7 +259,17 @@ def main() -> int:
         print(json.dumps(req("GET", "/health")))
         return 0
     if a.cmd == "ask":
-        return ask(a.text, a.thread)
+        return ask(a.text, a.thread, a.project)
+    if a.cmd == "projects":
+        if a.verb == "new":
+            if not a.name:
+                sys.exit("sa projects new <name> [--instructions file]")
+            p = req("POST", "/projects", {"name": a.name, "instructions": open(a.instructions).read() if a.instructions else ""})
+            print(f"{p['id']}  {p['name']}")
+            return 0
+        for p in req("GET", "/projects"):
+            print(f"{p['id']}  {p['n_threads']:3d} conv  {p['name']}" + (f"  — {p['instructions'][:80]}" if p.get("instructions") else ""))
+        return 0
     if a.cmd == "list":
         for j in req("GET", "/jobs"):
             print(f"{j['id']}  {j['status']:8s}  {j.get('design', 'matmul'):6s} {j['backend']:7s}  {j['task']}")

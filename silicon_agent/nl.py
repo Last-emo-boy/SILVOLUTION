@@ -133,14 +133,16 @@ def _lang(text: str) -> str:
 
 def interpret(message: str, context: dict | None = None) -> dict:
     ctx = ""
-    if context:
-        ctx = ("\n\n## Current run (the user may be refining it)\n" + json.dumps({
+    if context and context.get("project"):
+        ctx += "\n\n## " + context["project"] + "\n(these apply to this request unless it says otherwise)"
+    if context and context.get("spec"):
+        ctx += ("\n\n## Current run (the user may be refining it)\n" + json.dumps({
             "spec": context.get("spec"), "status": context.get("status"),
             "best": context.get("best"), "last": context.get("last")}, ensure_ascii=False)[:4000])
     r = llm.chat_json(INTERPRET_SYSTEM.replace("@BACKENDS@", _backend_lines()), f"## Request\n{message}{ctx}")
     spec = r.get("spec") or {}
     # normalize + validate against the real schema; a fork inherits everything it does not mention
-    base = context["spec"] if (context and r.get("fork")) else None
+    base = context["spec"] if (context and context.get("spec") and r.get("fork")) else None
     design = spec.get("design") if spec.get("design") in DESIGNS else (base["design"] if base else "matmul")
     backend = spec.get("backend") if spec.get("backend") in BACKENDS else (base["backend"] if base else "xc7s50")
     if base and base["design"] != design:

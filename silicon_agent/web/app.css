@@ -26,6 +26,12 @@ button:disabled { opacity: .45; cursor: default; }
 .brand { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 4px; min-width: 0; } .brand .logo { color: var(--accent); margin-right: 4px; }
 .brand .back { color: var(--text-2); text-decoration: none; font-size: 18px; line-height: 1; padding: 0 4px; border-radius: 4px; } .brand .back:hover { background: var(--surface-2); color: var(--text); }
 .brand .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.navlist { display: flex; flex-direction: column; gap: 1px; padding: 0 8px 6px; }
+.navlist .nav { text-align: left; border: 0; border-radius: 7px; padding: 6px 10px; font-size: 12.5px; font-weight: 500; color: var(--text-2); }
+.navlist .nav:hover { background: var(--surface-2); color: var(--text); } .navlist .nav.on { background: var(--surface-2); color: var(--text); }
+.navlist .nav .muted { font: 10.5px var(--mono); margin-left: 4px; }
+.rail .group { font: 11px var(--mono); color: var(--muted); padding: 10px 18px 4px; text-transform: uppercase; letter-spacing: .04em; border-top: 1px solid var(--border); }
+.rail-foot .wb { font: 500 12px var(--font); color: var(--text-2); text-decoration: none; } .rail-foot .wb:hover { color: var(--text); }
 .runs { list-style: none; margin: 0; padding: 0 8px; overflow: auto; flex: 1; }
 .runs li { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
 .runs li:hover, .runs li.sel { background: var(--surface-2); }
@@ -44,6 +50,8 @@ button:disabled { opacity: .45; cursor: default; }
 
 /* ---------- bar ---------- */
 .bar { height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.memview .bar { height: auto; min-height: 44px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 10px 16px; }
+.memview .bar h1 { margin: 0; font-size: 15px; font-weight: 600; } .memview .bar .small-text { line-height: 1.45; max-width: 90ch; }
 .bar-l, .bar-r { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .bar h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pill { font: 11px var(--mono); padding: 2px 8px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }

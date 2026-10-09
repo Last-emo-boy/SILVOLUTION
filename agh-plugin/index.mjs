@@ -358,6 +358,7 @@ export const siliconAgent = {
     // The method: how to drive a hardware request end to end with these tools.
     const METHOD = [
       'You are the front of silicon-agent, an autonomous FPGA design loop. Use its tools instead of writing RTL yourself.',
+      'A message may open with a [Project: ... Standing instructions ...] block: the conversation belongs to a project and those instructions (device, clock, interfaces, limits, preferences) apply to every request in it unless the request itself says otherwise -- pass them to sa_interpret along with the user\'s words and honour them in specs you build.',
       '1. Call sa_schema once to know the generators, devices and knobs. Then sa_interpret with the user\'s words to get a complete spec; show its assumptions. Numbers the user states are used exactly as given.',
       '2. If the request allows several architectures (different generator, device or fold), compare them with sa_estimate before running; the interpreter\'s `alternatives` are good candidates.',
       '3. Start with sa_run (pass the conversation `thread` when you have one), then follow it with sa_job (wait_seconds 90, repeated until the status is done or failed; a run takes 1-30 minutes). Report what the measurements say: what changed, measured Fmax/LUT/DSP, whether the constraints hold. Never invent numbers: everything comes from the tool results.',
