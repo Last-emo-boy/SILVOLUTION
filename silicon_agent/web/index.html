@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <script>document.documentElement.dataset.theme = localStorage.getItem("sa.theme") || "dark";</script>
@@ -14,22 +14,22 @@
   <aside class="rail" id="rail">
     <div class="rail-head">
       <span class="brand"><span class="logo">▣</span> silicon-agent</span>
-      <button id="new-chat" class="ghost icon" title="New chat">＋</button>
+      <button id="new-chat" class="ghost icon" title="新对话">＋</button>
     </div>
     <div class="rail-search"><input id="thread-search" type="search" autocomplete="off" spellcheck="false"></div>
     <nav id="rail-list" class="rail-list"></nav>
-    <div class="rail-foot"><a id="wb-link" class="wb" href="/work" target="_blank">▦ <span id="wb-label">Workbench</span></a><span class="foot-r"><button id="theme" class="ghost icon" title="Theme">◐</button><span id="who" class="mono muted"></span></span></div>
+    <div class="rail-foot"><a id="wb-link" class="wb" href="/work" target="_blank">▦ <span id="wb-label">Workbench</span></a><span class="foot-r"><button id="theme" class="ghost icon" title="主题">◐</button><span id="who" class="mono muted"></span></span></div>
   </aside>
 
   <div id="scrim" class="scrim"></div>
   <main class="main">
     <div class="topbar">
-      <button id="t-rail" class="ghost icon" title="Conversations">☰</button>
+      <button id="t-rail" class="ghost icon" title="对话列表">☰</button>
       <div id="crumbs" class="crumbs"></div>
       <span class="grow"></span>
       <span id="sess-usage" class="sess-usage mono muted" hidden></span>
       <button id="stop" class="ghost small" hidden>■ 停止</button>
-      <button id="more" class="ghost icon" title="More" hidden>⋯</button>
+      <button id="more" class="ghost icon" title="更多" hidden>⋯</button>
     </div>
     <div class="scroll" id="scroll">
       <div class="col">
@@ -54,7 +54,7 @@
     </div>
     <div class="composer">
       <div class="col">
-        <div class="inputbox"><button id="attach" class="ghost icon" title="Attach RTL (.sv / .v)">＋</button><textarea id="input" rows="1" placeholder="描述你要的硬件，或者对当前结果提要求…"></textarea><button id="send" class="primary icon" title="Send (⏎)">↑</button></div>
+        <div class="inputbox"><button id="attach" class="ghost icon" title="附加 RTL（.sv / .v）">＋</button><textarea id="input" rows="1" placeholder="描述你要的硬件，或者对当前结果提要求…"></textarea><button id="send" class="primary icon" title="发送（⏎）">↑</button></div>
         <input id="attach-file" type="file" accept=".sv,.v,.svh,.vh" multiple hidden>
         <div class="chint"><span id="chint">⏎ 发送 · ⇧⏎ 换行</span><span id="modes" class="modes" hidden></span></div>
       </div>

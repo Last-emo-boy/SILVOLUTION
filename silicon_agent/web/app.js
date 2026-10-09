@@ -296,10 +296,10 @@ function buildTurn(r, prevIr, unit, spec) {
   for (const nt of r.notes || []) b.appendChild(el(`<div class="action"><span class="why">${esc(nt.message)}</span></div>`));
   for (const u of r.user) b.appendChild(el(`<div class="usermsg"><span class="u">你</span>${esc(u.message)}</div>`));
   const a = r.plan?.action ?? r.action;
-  if (r.slot) b.appendChild(el(`<div class="action"><span class="why">并行候选（同轮实测）— </span>${esc(r.action || "")}</div>`));
+  if (r.slot) b.appendChild(el(`<div class="action"><span class="why">并行候选（同轮实测）— </span>${esc(loopText(r.action || ""))}</div>`));
   else if (r.n === 1) b.appendChild(el(`<div class="action">从规格的起点设计开始。</div>`));
-  else if (a) b.appendChild(el(`<div class="action">${r.plan?.fallback ? `<span class="why">兜底候选 — </span>` : ""}${esc(a)}</div>`));
-  if (r.note) b.appendChild(el(`<div class="action"><span class="why">${esc(r.note)}</span></div>`));
+  else if (a) b.appendChild(el(`<div class="action">${r.plan?.fallback ? `<span class="why">兜底候选 — </span>` : ""}${esc(loopText(a))}</div>`));
+  if (r.note) b.appendChild(el(`<div class="action"><span class="why">${esc(loopText(r.note))}</span></div>`));
   if (r.ir) b.appendChild(el(irChips(r.ir, prevIr, spec.locked)));
   if (r.pending) {
     b.appendChild(el(`<div class="head"><span class="verdict live">${r.ir ? "仿真 · 综合 · 布局布线" : "规划中"}</span></div>`));
@@ -337,12 +337,14 @@ function buildTurn(r, prevIr, unit, spec) {
     }
   }
   if (inner.childElementCount) { d.querySelector("summary").textContent = `详情 · ${parts.join(" · ")}`; b.appendChild(d); }
-  if (r.next?.stop) b.appendChild(el(`<div class="action"><span class="why">规划器停止 — </span>${esc(r.next.action)}</div>`));
+  if (r.next?.stop) b.appendChild(el(`<div class="action"><span class="why">规划器停止 — </span>${esc(loopText(r.next.action))}</div>`));
   if (r.userAfter) for (const u of r.userAfter) b.appendChild(el(`<div class="usermsg"><span class="u">you</span>${esc(u.message)} <span class="muted">（将在下一轮规划前生效）</span></div>`));
   li.dataset.sig = turnSignature(r);
   return li;
 }
 
+const LOOP_ZH = { "stopped by user": "用户已停止", "stopping with best-so-far": "规划器不可用，以目前最佳设计结束", "no legal candidate": "没有合法候选", "measure every point": "逐点实测", "REJECTED (all candidates invalid or duplicates) -- propose different IRs": "全部候选无效或重复，要求重新提出", "stop": "停止" };
+const loopText = (x) => typeof x === "string" ? (LOOP_ZH[x] || x.replace(/^planner unavailable: /, "规划器不可用：").replace(/^design-space sweep over (.*): (\d+) points$/, "设计空间扫描 $1：$2 个点").replace(/^sweep point (.*) rejected: /, "扫描点 $1 被拒：").replace(/^sweep point (.*) invalid: /, "扫描点 $1 无效：").replace(/^sibling candidate: /, "").replace(/^sibling candidate #(\d+) won this round; continuing from it$/, "并行候选 #$1 赢得本轮，从它继续")) : x;
 function renderTranscript(rows, unit, spec, c) {
   const ol = $("#transcript");
   const atBottom = ol.scrollHeight - ol.scrollTop - ol.clientHeight < 60;
