@@ -218,8 +218,15 @@ assumptions; follow-ups in the same thread either refine (fork with edited
 constraints, seeded from the previous best or closest design), steer a running
 job, or are answered as questions. When a run ends, the agent narrates what was
 tried and what won. Cards are collapsed by default; simulation stages, IR
-changes, critical paths and logs appear only when expanded. The UI follows the
-language of the conversation. `sa ask "…" [--thread id]` is the same from a shell.
+changes, critical paths and logs appear only when expanded. The result card
+carries a **trust strip** — behavioral sim, netlist sims, P&R seed spread, formal
+check, mutation score — so how much verification stands behind the number is one
+glance; the formal / mutation buttons fill it in (`GET /api/jobs/<id>/trust` is
+the same read-only view). The rail has a search box (⌘K: title, your requests,
+generator, device). While the model account is out (DeepSeek 402) a strip under
+the top bar says so before you type: the server probes the provider's balance at
+start and every 10 minutes (`/api/health` → `llm`). The UI follows the language
+of the conversation. `sa ask "…" [--thread id]` is the same from a shell.
 
 ## Worktable
 
@@ -246,6 +253,13 @@ New runs are configured in a form (design, backend, constraints, objective
 order by drag, locked fields, starting design from presets or "best from
 memory", live screening estimate) with a JSON escape hatch.
 
+Three views sit beside the runs: **Memory** (lessons per generator × device, with
+votes), **Bench** (the regression ledger per tag), **Catalog** (every generator ×
+device measured so far: verified points, the fastest and the smallest design on
+the Pareto front, the last run — `GET /api/catalog`) and **Proposals** (every
+generator change the agent proposed: gate steps, A/B run, diff, the merge command
+for the operator).
+
 Deploys are safe: on SIGTERM the server finishes the in-flight iteration,
 requeues the job, and on restart replays it from the EDA and planner caches.
 
@@ -266,10 +280,17 @@ export SA_TOKEN=$(security find-generic-password -s silicon-agent-token -w)
 ./sa submit specs/matmul_int8_xc7s50.json --max-iter 8   # explicit spec, streams progress until done
 ./sa list
 ./sa get <job-id> summary.json                           # or iter_03.json, llm_02.json
+./sa sweep specs/fir_ecp5.json fold=1,2,4 pipe_mul=0,1   # measure every point of the knob product, Pareto marked
+./sa trust <job-id>                                      # verification state: ladder, seeds, formal, mutation
+./sa formal <job-id> --depth 20 ; ./sa mutation <job-id> # run them (background on the server; the CLI waits)
+./sa rtl upload --top my_fir --tb tb.sv --params params.json my_fir.sv   # bring your own RTL -> design rtl:<id>
+./sa propose change.diff --title "..." --designs fir --ab-spec specs/fir_ecp5.json   # gated generator change
+./sa proposals [<id> --diff] ; ./sa export <thread-id> report.md ; ./sa package <job-id> out.zip
 ```
 
-`sa` is a single stdlib Python file: no toolchain, no dependencies on the laptop.
-`--backend ecp5|xc7s50` overrides the spec's backend.
+`sa` is a single stdlib Python file: no toolchain, no dependencies on the laptop;
+without `SA_TOKEN` it reads the macOS Keychain item `silicon-agent-token`.
+`--backend <device>` overrides the spec's backend.
 
 ## Quick start (local, ECP5 only)
 
