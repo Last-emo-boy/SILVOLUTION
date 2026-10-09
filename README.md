@@ -144,6 +144,47 @@ balanced tree — became the `sum_tree` knob of the FIR generator; measured A/B 
 at the input side — pre-adder carry chain → tap mux → DSP input — and became `pipe_in`; with both knobs
 the planner measured 219.0 MHz at 445 LUT (from 515), formal PASS (`fir-ecp5-200-4dsp`).
 
+## The agent improves its own generators (author mode)
+
+A conversation switched to **author** mode runs in a separate Agnes Harness session (the fork's `author`
+recipe: read/write/edit/shell) whose workspace is a scratch copy of `silicon_agent/` (`a/` = deployed code,
+`b/` = the agent's working copy); the plugin's `tool_call` hook confines writes to that copy. The agent edits,
+checks with `sa_check` (emit + elaborate + the behavioral bench on the job server's toolchain), and submits
+`diff -ruN a b` with `sa_propose`. The job server gates the diff on a clean copy (`silicon_agent/proposals.py`):
+every preset still emits and elaborates on three devices, the bench cases' behavioral sims pass, the RTL of
+unchanged IRs is formally equivalent to the current generator (SymbiYosys), the testbench's mutation score
+(`silicon_agent/mutate.py`, 24 injected bugs) does not drop, then an optional measured A/B run on the patched
+tree. The chat shows the verdict per step; nothing merges until the operator runs
+`deploy/merge-proposal.sh <id>`. First proposal by the agent: a `reg_out` knob for CORDIC, gated 4/4 and A/B'd.
+
+## Bring your own RTL
+
+`POST /api/rtl` (or the `sa_rtl_upload` tool, or the attach button in the chat) registers the user's
+SystemVerilog + a self-checking bench (`RESULT PASS/FAIL`) + the parameters the planner may move as a design
+kind `rtl:<id>`. The same ladder runs on it (the user's bench on the behavioral RTL and on every netlist, synth,
+P&R, formal properties); `formal.equivalence(..., shift=k)` checks two parameter sets transfer-by-transfer so a
+pipelining change can be proven equivalent.
+
+## ASIC: sky130 through OpenROAD
+
+Backend `sky130` runs OpenROAD-flow-scripts (sky130hd, slang frontend) in the `orfs` compose service, fed
+through a queue directory on the shared volume (no docker socket in the job server). Metrics: standard cells,
+`area_um2`, power, the STA critical path through `fa_1/ha_1` adder cells, Fmax from the min period; post-synth and
+post-route netlist sims use the `sky130_fd_sc_hd` functional models. First measured FIR: 207.8 MHz, 1833 cells,
+22.2k µm², 7.4 mW; `max_area_um2` / `minimize_area` are the ASIC constraint and objective; the package carries
+the GDS.
+
+## More generators, surrogate, sweeps
+
+`decim` (polyphase decimating FIR, N/M multipliers at full input rate), `nco` (NCO/DDS + complex mixer, bit-exact
+quarter-wave table in BRAM or logic, dither) and `iir` (Butterworth biquad cascade, exact fixed point with
+saturation) join the registry and the `graph` node kinds — a digital down-converter (`nco → decim → fir`)
+is one graph. `silicon_agent/surrogate.py` fits a Gaussian process on the residual of the closed-form estimate
+over a design/device's measured points and ranks candidates by constrained expected improvement; the loop fills
+a round with local one-knob moves around the incumbent when the planner brings fewer than three. A spec with
+`sweep: {knob: [values]}` measures the whole grid (`sa_sweep`; the chat marks the Pareto set). Every run can
+be mutation-scored (`sa_mutation`, a button on the result card).
+
 ## Other agents: the MCP server
 
 `sa_mcp.py` is a stdio MCP server exposing the same tools the AGH plugin has (interpret, estimate, run, job,
