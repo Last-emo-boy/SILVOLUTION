@@ -39,14 +39,50 @@ OPERATORS: list[tuple[str, str, str, int]] = [
 _SKIP = re.compile(r"^\s*(//|`|typedef|module|endmodule|input|output|parameter|localparam|logic|wire|reg|for\s*\(|generate|endgenerate|assign\s+\w+_ext|.*begin\s*:\s*g_)")
 
 
+_GEN_IF = re.compile(r"^\s*if \((0|1)\) begin\s*:\s*g_\w+")
+_GEN_ELSE = re.compile(r"^\s*end else begin\s*:\s*g_\w+")
+
+
+def dead_lines(lines: list[str]) -> set[int]:
+    """Line indexes inside the branch a literal generate-if does not take (`if (0) begin : g_x ... end else begin
+    : g_y ... end`): the emitters write both branches of a knob and let elaboration drop one, so a mutant there
+    is dead code -- it survives every test and says nothing about the bench."""
+    dead: set[int] = set()
+    i = 0
+    while i < len(lines):
+        m = _GEN_IF.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        taken = m.group(1) == "1"
+        depth, j, in_else = 0, i, False
+        while j < len(lines):
+            ln = lines[j]
+            if j > i and _GEN_ELSE.match(ln) and depth == 1:
+                in_else = True
+                j += 1
+                continue
+            depth += len(re.findall(r"\bbegin\b", ln)) - len(re.findall(r"\bend\b(?!\w)", ln))
+            if j > i and not in_else and not taken:
+                dead.add(j)
+            if j > i and in_else and taken:
+                dead.add(j)
+            if depth <= 0 and j > i:
+                break
+            j += 1
+        i = j + 1
+    return dead
+
+
 def mutants(rtl: str, limit: int = 24) -> list[tuple[str, str]]:
     """[(label, mutated rtl)] -- each differs from `rtl` in exactly one place."""
     out: list[tuple[str, str]] = []
     lines = rtl.split("\n")
+    dead = dead_lines(lines)
     for name, pat, rep, cap in OPERATORS:
         done = 0
         for i, line in enumerate(lines):
-            if done >= cap or _SKIP.match(line):
+            if done >= cap or i in dead or _SKIP.match(line):
                 continue
             m = re.search(pat, line)
             if not m:
