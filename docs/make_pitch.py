@@ -301,10 +301,17 @@ for i, (t, b_) in enumerate(facts):
     card(s, x, y, Inches(5.9), Inches(1.5), t, b_, title_color=ACCENT, body_size=11, mono_title=True)
 text(s, Inches(0.7), Inches(6.7), Inches(12), Inches(0.4), "这些都写进了规划器的「器件事实」提示和设计记忆——每一条都附带实测数字。", size=12, color=MUTED)
 
+# ------------------------------------------------------------------ 10b. versatility: author mode, BYO-RTL, ASIC
+s = slide(); n += 1; header(s, "更 versatile：智能体改自己的生成器、用户自带 RTL、ASIC 标准单元", "12b · 扩展", n)
+card(s, Inches(0.7), Inches(1.8), Inches(3.9), Inches(4.6), "智能体改生成器（author 模式）", [[("AGH 里一个独立会话（author 配方，可写/可执行）在 silicon_agent/ 的草稿副本上改代码，sa_check 用真实工具链试跑，sa_propose 提交 diff。", {})], [("", {})], [("作业服务器门禁：所有预设可发射/展开、bench 用例行为仿真、未改 IR 形式等价、测试台变异分数不降、再在改过的生成器上实跑 A/B。", {})], [("", {})], [("第一个提案：智能体给 CORDIC 加了 reg_out 旋钮，门禁 4/4 通过，A/B 实测 202 MHz。合并仍由人决定。", {"color": GOOD})]])
+card(s, Inches(4.75), Inches(1.8), Inches(3.9), Inches(4.6), "用户自带 RTL", [[("上传 SystemVerilog + 自检测试台 + 允许调的参数，注册成 rtl:<id>；同一条阶梯：用户的台跑行为级和每一级网表，综合、布局布线、形式属性。", {})], [("", {})], [("流水线改动用 transfer-level 等价（允许延迟偏移）证明两组参数功能相同。", {})], [("", {})], [("聊天里一个 ＋ 按钮附加 .sv 文件，智能体自己写台、注册、跑。", {"color": GOOD})]])
+card(s, Inches(8.8), Inches(1.8), Inches(3.9), Inches(4.6), "ASIC：sky130 + OpenROAD", [[("OpenROAD-flow-scripts 跑在独立容器里，队列目录耦合；指标变成标准单元数、面积 µm²、功耗、STA 关键路径（fa_1/ha_1 进位链）。", {})], [("", {})], [("综合后与布线后网表都用 sky130_fd_sc_hd 功能模型跑向量台；交付包含 GDS。", {})], [("", {})], [("首个实测：16 阶 FIR 207.8 MHz、1833 单元、22.2k µm²、7.4 mW，规划器自己从 3698 单元收敛到 1833。", {"color": GOOD})]])
+text(s, Inches(0.7), Inches(6.6), Inches(12), Inches(0.5), "同一轮还加了：decim / nco / iir 三个生成器（DDC = nco→decim→fir 一张图）、GP 代理模型排序候选、设计空间扫描卡、每次运行的变异分数、MCP 服务器。", size=12.5, color=TEXT2)
+
 # ------------------------------------------------------------------ 11. roadmap
 s = slide(); n += 1; header(s, "路线图：本周做完的，和下一步", "13 · 路线图", n)
-lanes = [("已完成（本周）", GOOD, ["✓ 5 种器件插件：ECP5 / Spartan-7 / iCE40 / Gowin / GateMate", "✓ 7 类生成器：matmul、FIR(+系数端口)、conv2d、FIR 级联、CORDIC、FFT、通用 IR 图", "✓ 并行候选评估 + kNN 校准估算（Gowin Fmax 误差 53%→13%）", "✓ 形式等价 + 覆盖率 + 每晚回归告警 + 多种子 Fmax", "✓ 交付包含板级工程；规划器多模型 A/B 开关", "✓ 聊天：ETA、架构替代方案一键追问、会话隔离"]),
-         ("下一步 · 扩大空间", ACCENT, ["Artix-7 / UltraScale+：装上 Vivado 器件文件即启用（后端已写好）", "更多节点：池化、滑窗 max、dot-product 折叠 matmul、CIC 抽取", "估算器上做贝叶斯优化：用 kNN 后验直接提候选，减少规划器调用", "多模型规划器基准对照（DeepSeek-reasoner / Claude / GPT）跑进每晚回归"]),
+lanes = [("已完成", GOOD, ["✓ 6 种后端：ECP5 / Spartan-7 / iCE40 / Gowin / GateMate / sky130 ASIC", "✓ 10 类生成器 + 用户自带 RTL；DDC 级联一张图", "✓ 智能体改生成器：门禁（发射/仿真/形式等价/变异分数）+ A/B，人合并", "✓ GP 代理模型 + 设计空间扫描 + 每次运行变异分数", "✓ AGH 底座：快/深思/author 三种模式、账本、重启续接", "✓ MCP 服务器：Claude Code 直接调用"]),
+         ("下一步 · 扩大空间", ACCENT, ["Artix-7 / UltraScale+：装上 Vivado 器件文件即启用", "让智能体写全新生成器：RTL 与参考模型分两个会话写、互相校验", "更多节点：CIC、池化、im2col+matmul 卷积层、CRC", "多模型规划器对照进每晚回归"]),
          ("更远 · 平台化", WARN, ["有板后：ILA/VIO 在板验证作为第六级", "开放 IR 规范（/schema 已导出），让外部生成器接入；设计记忆跨用户共享（可审计）", "形式等价扩展到跨 IR（折叠 vs 展开同一滤波器）", "从 SDF 时序仿真到门级功耗估计"])]
 for i, (t_, c, items) in enumerate(lanes):
     x = Inches(0.7 + i * 4.1)
@@ -316,7 +323,7 @@ for i, (t_, c, items) in enumerate(lanes):
 # ------------------------------------------------------------------ 12. close
 s = slide(); n += 1
 text(s, Inches(0.9), Inches(2.0), Inches(11.5), Inches(1.2), "说一句话，拿到签核过的 Verilog。", size=40, color=TEXT, bold=True)
-text(s, Inches(0.9), Inches(3.3), Inches(11.5), Inches(2.4), [["• 7 类生成器（matmul、FIR、conv2d、FIR 级联、CORDIC、FFT、通用 IR 图）× 5 种器件，20+ 个真实任务达标，最高 319.5 MHz"], ["• 五级仿真阶梯 + 真实布局布线签核 + 3 种子中位数 Fmax + SymbiYosys 形式等价，没有一个估算数字进结论"], ["• 自动验证的设计经验池；14 例回归每晚自动跑并告警；交付包含 AXI-Stream 包装与板级工程"], ["• 3 天、约 9,610 行 Python/JS，38 次提交；已部署，笔记本是瘦客户端"]], size=16, color=TEXT2, spacing=1.4)
+text(s, Inches(0.9), Inches(3.3), Inches(11.5), Inches(2.4), [["• 10 类生成器 + 自带 RTL × 6 种后端（含 sky130 ASIC），真实器件上签核；最高 319.5 MHz"], ["• 五级仿真阶梯 + 形式等价 + 变异分数：没有一个估算数字进结论"], ["• 智能体跑在 Agnes Harness 上，并且能在门禁下改自己的生成器——两个旋钮已经由它提出、实测、合并"], ["• 每晚回归；交付包含 AXI-Stream 包装、板级工程、ASIC 的 GDS；MCP 服务器给别的智能体用"]], size=16, color=TEXT2, spacing=1.4)
 text(s, Inches(0.9), Inches(6.2), Inches(11), Inches(0.5), "https://silicon.w33d.xyz   ·   ~/Playground/silicon-agent", size=13, color=ACCENT, font=MONO)
 
 out = "docs/silicon-agent-pitch.pptx"
