@@ -285,3 +285,12 @@ svg.scatter circle.ok { fill: var(--surface-2); stroke: var(--text-2); stroke-wi
 svg.scatter circle.bad { fill: none; stroke: var(--bad); stroke-width: 1.2; } svg.scatter .lbl { font: 10px var(--mono); fill: var(--muted); }
 .rail-foot .foot-r { display: inline-flex; align-items: center; gap: 6px; }
 .rail-foot #theme { width: 24px; height: 24px; font-size: 13px; color: var(--muted); } .rail-foot #theme:hover { color: var(--text); }
+/* tournament card */
+table.tour { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.tour td { padding: 6px 8px 6px 0; border-top: 1px solid var(--border); vertical-align: top; }
+table.tour tr:first-child td { border-top: 0; }
+table.tour td.lb { width: 32%; color: var(--text); } table.tour td.ph { width: 18%; font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
+table.tour td.nm { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); } table.tour td.nm b { color: var(--text); }
+table.tour td.op { width: 24px; text-align: right; } table.tour td.op a { text-decoration: none; color: var(--muted); } table.tour td.op a:hover { color: var(--text); }
+table.tour tr.lead td.lb { color: var(--good); font-weight: 500; }
+table.tour .x { color: var(--bad); }

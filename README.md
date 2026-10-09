@@ -228,6 +228,18 @@ the top bar says so before you type: the server probes the provider's balance at
 start and every 10 minutes (`/api/health` → `llm`). The UI follows the language
 of the conversation. `sa ask "…" [--thread id]` is the same from a shell.
 
+### Tournaments
+
+"Try both" / "race the planners": the same task as 2–4 **variants** — a different
+planner model (deepseek-flash vs deepseek-v4-pro), starting design, objective
+order or constraints, memory off — run as independent jobs grouped under one id
+(`POST /api/tournaments`, AGH tool `sa_tournament`, MCP `sa_tournament`). The chat
+shows one card with a row per variant (phase, best numbers) and the leader by the
+first objective; with `SA_WORKERS=2` (the default in `deploy/compose.yml`) the
+variants run at the same time. First measured race: fast vs deep planner on a
+16-tap 4-DSP ECP5 FIR both landed on the same architecture (223.1 vs 222.1 MHz,
+seed noise) — the deep planner spent 7 iterations to the fast one's 5.
+
 ### Projects
 
 A **project** is a folder of conversations with standing instructions — the

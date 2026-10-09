@@ -346,6 +346,26 @@ export const siliconAgent = {
     })
 
     agnes.registerTool({
+      name: 'sa_tournament',
+      description: 'Run the same task as several competing runs and compare them: variants differ by planner model ("deepseek-flash" fast vs "deepseek-v4-pro" deep), starting design (initial_ir), objective order / constraints, or memory off. Each variant is an ordinary run grouped under one tournament id; the chat shows them side by side with the leader marked. Use it when the user asks to "compare approaches", "try both", "race the planners", or when two architectures look equally plausible. 2-4 variants; follow with sa_tournament_status, then sa_job on the winner for details.',
+      parameters: obj({ spec: any(), variants: any(), thread: str({ maxLength: 64 }) }, ['spec', 'variants']),
+      meta: starts,
+      async execute({ spec, variants, thread }, tctx) {
+        try { return text(await api('POST', '/tournaments', { spec, variants, thread }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
+      name: 'sa_tournament_status',
+      description: 'Status of a tournament: every variant with its run status, iterations, best design and numbers, and the current leader by the first objective. Call again until done.',
+      parameters: obj({ id: str({ maxLength: 64 }) }, ['id']),
+      meta: readOnly,
+      async execute({ id }, tctx) {
+        try { return text(await api('GET', `/tournaments/${encodeURIComponent(id)}`, undefined, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
       name: 'sa_memory',
       description: 'Search the design memory: one-sentence lessons distilled from measured planner moves on every generator and device ("when X was the critical path, doing Y gave Z"), each with a score from later confirmations. Text search over all lessons with a preference for the given design / device; hits from another pair are marked transfer. Use it to answer "what have we learned about ...", before proposing an unusual architecture, or to explain a result with precedent.',
       parameters: obj({ query: str({ maxLength: 400 }), design: str({ maxLength: 32 }), backend: str({ maxLength: 32 }), k: num() }, ['query']),
@@ -378,6 +398,7 @@ export const siliconAgent = {
       '5b. "Sweep", "compare all", "how does X scale with Y", "Pareto": sa_sweep with the knob values -- it measures every point instead of searching, and the card shows the Pareto set. Keep sweeps small (<= 12 points on an FPGA, <= 4 on sky130).',
       '6. A follow-up that only asks about results you already have (critical path, why it stopped, numbers) is answered from your own tool records or one sa_job call: do not start another run, do not re-estimate, do not re-read artifacts you have read. Start a new run only when the user asks for a change, a retry, or a different design.',
       '7. The user may bring their own RTL (they paste SystemVerilog, or describe a block that no generator covers but they have code for). Then: ask for (or write from what they pasted) a self-checking bench that prints RESULT PASS/FAIL, decide with them which parameters the planner may move, call sa_rtl_upload (pass the conversation `thread`: the bundle is then listed under that conversation\'s project and later conversations there can use it), and run the spec with design "rtl:<id>" (locked {}, initial_ir = the parameter defaults). The ladder (behavioral sim, synthesis, P&R, netlist sims, formal properties) is the same; the planner tunes only the exposed parameters. sa_schema does not list rtl designs; sa_rtl_list does.',
+      '7a. "Compare / try both / race": sa_tournament with 2-4 variants (planner deepseek-flash vs deepseek-v4-pro, two starting designs, two objective orders); poll sa_tournament_status; report the leader and why the others lost, with numbers.',
       '7b. sa_memory searches the lessons of every earlier run (text + design/device preference). Use it when the user asks what was learned, when a run stalls and you want precedent for the next move (then sa_steer with the lesson), or to explain a result; cite the lesson id.',
       '8. Devices: the FPGAs plus `sky130` (OpenROAD ASIC standard cells, 2-10 min per flow): no DSP/LUT there -- the numbers are cells, area in um2 (max_area_um2 is the budget, minimize_area the objective) and the STA critical path through fa_1/ha_1 adder cells.',
       'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',

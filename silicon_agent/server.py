@@ -26,6 +26,7 @@ API
   GET  /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]   every measured point, the Pareto front, best under constraints
   GET  /api/catalog              every (design, device) measured so far: verified points, fastest / smallest on the front, last run
   POST /api/memory/<d>/<b>/vote  {"id": ..., "vote": "up"|"down"}
+  POST /api/tournaments          {spec, variants: [{label, planner?, initial_ir?, constraints?, max_iter?}], thread?}: the same task as several runs, compared; GET /api/tournaments/<id>
   GET  /api/projects[/<id>]      folders of conversations with standing instructions; POST /api/projects {name, instructions}, POST /api/projects/<id>, DELETE
   POST /api/threads/<id>/project {"project": id | null}   file a conversation under a project / take it out
   GET  /api/threads              conversations (newest first; each carries its project)
@@ -98,6 +99,8 @@ _queue: queue.Queue[str] = queue.Queue()
 _shutting_down = threading.Event()
 _worker_idle = threading.Event()
 _worker_idle.set()
+_busy_workers = 0
+_WORKERS = max(1, int(os.environ.get("SA_WORKERS", "1")))   # jobs run at once (variants of a tournament overlap with 2+)
 
 
 # ---------------------------------------------------------------- persistence
@@ -170,13 +173,17 @@ def _events_from_history(history: list[dict]) -> list[dict]:
 
 # ---------------------------------------------------------------- worker
 def _worker():
+    global _busy_workers
     while True:
-        _worker_idle.set()
         job_id = _queue.get()
-        _worker_idle.clear()
         with _lock:
+            _busy_workers += 1
+            _worker_idle.clear()
             job = _jobs[job_id]
             if job["status"] == "deleted":
+                _busy_workers -= 1
+                if _busy_workers == 0:
+                    _worker_idle.set()
                 continue
             job["status"] = "running"
             job["started"] = time.time()
@@ -237,6 +244,9 @@ def _worker():
         finally:
             with _lock:
                 job["finished"] = time.time()
+                _busy_workers -= 1
+                if _busy_workers == 0:
+                    _worker_idle.set()
             if job["status"] not in ("queued", "running"):
                 _narrate_job_async(job_id)
 
@@ -432,7 +442,8 @@ def _visible(th: dict, sub: str) -> bool:
 def _thread_jobs(tid: str) -> list[str]:
     """Job ids bound to a thread, oldest first."""
     th = _threads.get(tid) or {"messages": []}
-    ids = {jid for jid, j in _jobs.items() if j.get("thread") == tid} | {m["job"] for m in th["messages"] if m.get("job") and m["job"] in _jobs}
+    ids = {jid for jid, j in _jobs.items() if j.get("thread") == tid} | {m["job"] for m in th["messages"] if m.get("job") and m["job"] in _jobs} \
+        | {j for m in th["messages"] for j in (m.get("jobs") or []) if j in _jobs}
     return sorted(ids, key=lambda j: _jobs[j]["created"])
 
 
@@ -537,6 +548,67 @@ def _submit(spec: dict, max_iter: int, sub: str, parent: dict | None = None, thr
         _save_state(job_id)
     _queue.put(job_id)
     return job_id
+
+
+# ---------------------------------------------------------------- tournaments: several planners on one task, compared
+# A tournament runs the same task as N variants -- a different planner model, starting design, objective order or
+# constraints -- as independent jobs grouped under one id; the chat shows them side by side as they progress and
+# the conversation (or the agent) picks the winner. With SA_WORKERS >= 2 the variants overlap.
+_VARIANT_KEYS = ("planner", "initial_ir", "constraints", "max_iter", "no_memory")
+
+
+def _start_tournament(spec: dict, variants: list[dict], sub: str, thread: str | None, lang: str) -> dict:
+    gid = time.strftime("%Y%m%d-%H%M%S") + "-t" + secrets.token_hex(2)
+    jobs = []
+    for i, v in enumerate(variants[:6]):
+        sp = json.loads(json.dumps(spec))
+        label = str(v.get("label") or f"variant {i + 1}")[:40]
+        if v.get("planner"):
+            sp["planner"] = v["planner"]
+        if isinstance(v.get("initial_ir"), dict):
+            sp["initial_ir"] = {**sp.get("initial_ir", {}), **v["initial_ir"]}
+        if isinstance(v.get("constraints"), dict):
+            sp["constraints"] = {**sp.get("constraints", {}), **v["constraints"]}
+        if v.get("no_memory"):
+            sp["no_memory"] = True
+        sp["task"] = f"{sp.get('task', '')} [{label}]"
+        sp["tournament"] = {"id": gid, "label": label}
+        jid = _submit(sp, max(1, min(int(v.get("max_iter") or 8), 20)), sub, thread=thread)
+        jobs.append(jid)
+    if thread and thread in _threads:
+        th = _threads[thread]
+        names = " · ".join(f"[{(v.get('label') or f'variant {i + 1}')}]" for i, v in enumerate(variants[:6]))
+        with _lock:
+            th["messages"].append({"role": "assistant", "kind": "tournament", "text": (f"竞标开始：{spec.get('task', '')} — {len(jobs)} 路并行 {names}" if lang == "zh" else f"Tournament started: {spec.get('task', '')} — {len(jobs)} variants {names}"),
+                                   "tournament": gid, "jobs": jobs, "lang": lang, "t": time.time(), "source": "agh"})
+            _save_thread(thread)
+    return {"id": gid, "jobs": jobs}
+
+
+def _tournament_view(gid: str) -> dict | None:
+    rows = []
+    with _lock:
+        for jid, j in _jobs.items():
+            t = j["spec"].get("tournament")
+            if t and t.get("id") == gid:
+                results = [e for e in j["events"] if e["kind"] == "result"]
+                best = (j.get("summary") or {}).get("best")
+                rows.append({"job": jid, "label": t.get("label"), "status": j["status"], "iterations": len(results), "max_iter": j.get("max_iter"),
+                             "planner": j["spec"].get("planner"), "objective": (j["spec"].get("constraints") or {}).get("objective"),
+                             "best": {"ir": best["ir"], "fmax_mhz": best["metrics"].get("fmax_mhz"), "lut": best["metrics"].get("lut"), "dsp": best["metrics"].get("dsp"), "area_um2": best["metrics"].get("area_um2"),
+                                      "throughput": best.get("throughput"), "iteration": best.get("iteration")} if best else None,
+                             "eda_seconds": round(sum(e.get("eda_seconds", 0) for e in results), 1), "planner_calls": sum(1 for e in j["events"] if e["kind"] == "plan")})
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r["job"])
+    done = all(r["status"] not in ("queued", "running") for r in rows)
+    # the leader by the first objective among feasible variants
+    obj = (rows[0]["objective"] or ["maximize_throughput"])[0]
+    feas = [r for r in rows if r["best"]]
+    key = {"maximize_throughput": lambda r: (-(r["best"]["throughput"] or 0), -(r["best"]["fmax_mhz"] or 0)), "maximize_fmax": lambda r: (-(r["best"]["fmax_mhz"] or 0),),
+           "minimize_lut": lambda r: (r["best"]["lut"] or 0,), "minimize_area": lambda r: (r["best"]["area_um2"] or r["best"]["lut"] or 0,), "minimize_dsp": lambda r: (r["best"]["dsp"] or 0,)}.get(obj, lambda r: (-(r["best"]["fmax_mhz"] or 0),))
+    leader = min(feas, key=key)["job"] if feas else None
+    return {"id": gid, "done": done, "leader": leader, "objective": obj, "variants": rows}
 
 
 def _handle_chat(tid: str, text: str, sub: str) -> dict:
@@ -1271,6 +1343,9 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"name": f.stem, "task": s.get("task", ""), "design": s.get("design", "matmul"),
                             "backend": s.get("backend", "ecp5"), "spec": s})
             return self._json(200, out)
+        if len(parts) == 2 and parts[0] == "tournaments":
+            v = _tournament_view(parts[1])
+            return self._json(200, v) if v else self._json(404, {"error": "no such tournament"})
         if path == "/projects":
             with _lock:
                 rows = [_project_view(pid) for pid, pr in _projects.items() if _visible(pr, sub)]
@@ -1642,6 +1717,23 @@ class Handler(BaseHTTPRequestHandler):
                         j["stop_requested"] = True
                         stopped["jobs"].append(jid)
             return self._json(200, stopped)
+        if path == "/tournaments":
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+                spec = body["spec"]
+                variants = [v for v in (body.get("variants") or []) if isinstance(v, dict)]
+                if not isinstance(spec, dict) or not spec.get("constraints") or not variants:
+                    return self._json(400, {"error": "spec (with constraints) and variants [{label, planner?, initial_ir?, constraints?, max_iter?}]"})
+                from .designs import design_for
+                d = design_for(spec)
+                d.ir_cls.from_dict({**spec.get("initial_ir", {}), **spec.get("locked", {})})
+            except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
+                return self._json(400, {"error": f"bad request: {e}"})
+            thread = body.get("thread")
+            if thread and thread not in _threads:
+                return self._json(404, {"error": "no such thread"})
+            first = next((m["text"] for m in _threads[thread]["messages"] if m["role"] == "user"), "") if thread else ""
+            return self._json(202, _start_tournament(spec, variants, sub, thread, nl._lang(first)))
         if path == "/projects":
             try:
                 body = json.loads(self.rfile.read(n) or b"{}")
@@ -2049,7 +2141,8 @@ def main():
     _load_threads()
     _load_projects()
     _load_proposals()
-    threading.Thread(target=_worker, daemon=True).start()
+    for _ in range(_WORKERS):
+        threading.Thread(target=_worker, daemon=True).start()
     threading.Thread(target=_resume_turns, daemon=True).start()
     threading.Thread(target=_llm_probe, daemon=True).start()
     srv = ThreadingHTTPServer((host, port), Handler)
