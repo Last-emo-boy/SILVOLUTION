@@ -140,7 +140,7 @@ function threadRow(th) {
     : th.status === "done" && b ? `${fmt(b.fmax_mhz, 0)} MHz · ${b.area_um2 != null ? `${b.lut} cells` : `${b.dsp} DSP`}${th.n_runs > 1 ? ` · ${th.n_runs} ${T.runs}` : ""}`
     : th.status ? ({ running: T.progress, queued: T.queued, failed: T.noResult, error: T.error, interrupted: T.stopped }[th.status] || th.status) : "";
   const dev = th.backend ? `<span class="dev">${esc(th.backend)}</span>` : "";
-  const li = el(`<div class="row thread ${th.id === tid ? "sel" : ""}" data-id="${esc(th.id)}" title="${esc(th.title)}"><span class="dot ${th.busy ? "busy" : th.status || ""}"></span><div class="tx"><div class="t">${esc(th.title)}</div><div class="m">${dev}${esc(m)}</div></div><button class="dots" title="…">⋯</button></div>`);
+  const li = el(`<div class="row thread ${th.id === tid ? "sel" : ""}" data-id="${esc(th.id)}" title="${esc(th.title)}"><span class="dot ${th.busy ? "busy" : th.status || ""}"></span><div class="tx"><div class="t">${esc(th.title)}</div><div class="m">${dev}<span class="mt">${esc(m)}</span></div></div><button class="dots" title="…">⋯</button></div>`);
   li.onclick = () => openThread(th.id);
   li.querySelector(".dots").onclick = (e) => { e.stopPropagation(); threadMenu(th, e.currentTarget); };
   li.draggable = true;

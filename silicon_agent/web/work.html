@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <script>document.documentElement.dataset.theme = localStorage.getItem("sa.theme") || "dark";</script>
@@ -15,36 +15,36 @@
   <aside class="rail" id="rail">
     <div class="rail-head">
       <span class="brand"><span class="logo">▣</span> silicon-agent</span>
-      <button id="new-run" class="primary small" title="New run">+</button>
+      <button id="new-run" class="primary small" title="新建运行">+</button>
     </div>
     <nav class="navlist">
-      <button id="open-catalog" class="nav">▦ Catalog</button>
-      <button id="open-bench" class="nav">▤ Bench</button>
-      <button id="open-proposals" class="nav">⎇ Proposals <span id="prop-count" class="muted"></span></button>
-      <button id="open-memory" class="nav">◎ Memory <span id="mem-count" class="muted"></span></button>
+      <button id="open-catalog" class="nav">▦ 设计目录</button>
+      <button id="open-bench" class="nav">▤ 回归基准</button>
+      <button id="open-proposals" class="nav">⎇ 生成器提案 <span id="prop-count" class="muted"></span></button>
+      <button id="open-memory" class="nav">◎ 设计记忆 <span id="mem-count" class="muted"></span></button>
     </nav>
-    <div class="group">Runs</div>
+    <div class="group">运行</div>
     <ul id="runs" class="runs"></ul>
-    <div class="rail-foot"><a class="wb" href="/">▣ Chat</a><span class="foot-r"><button id="theme" class="ghost icon" title="Theme">◐</button><span id="who" class="mono muted"></span></span></div>
+    <div class="rail-foot"><a class="wb" href="/">▣ 对话</a><span class="foot-r"><button id="theme" class="ghost icon" title="主题">◐</button><span id="who" class="mono muted"></span></span></div>
   </aside>
 
   <main class="main" id="main">
-    <div id="empty" class="empty">Select a run, or start one.</div>
+    <div id="empty" class="empty">选一个运行，或者新建一个。</div>
 
     <!-- new run -->
     <section id="new-form" class="newform" hidden>
-      <div class="bar"><div class="bar-l"><h1>New run</h1><span id="nf-sub" class="mono muted"></span></div><div class="bar-r"><button id="nf-json-toggle" class="ghost small">edit as JSON ▸</button></div></div>
+      <div class="bar"><div class="bar-l"><h1>新建运行</h1><span id="nf-sub" class="mono muted"></span></div><div class="bar-r"><button id="nf-json-toggle" class="ghost small">编辑 JSON ▸</button></div></div>
       <div class="form-wrap">
         <div class="form" id="nf-form">
           <div class="fcol">
-            <div class="fsec"><h3>Task</h3>
+            <div class="fsec"><h3>任务</h3>
               <div class="frow">
-                <label class="f w180">design <select id="nf-design"></select></label>
-                <label class="f w220">backend <select id="nf-backend"></select></label>
-                <label class="f grow">name <input id="nf-task" type="text" placeholder="INT8 matmul · 300 MHz"></label>
+                <label class="f w180">生成器 <select id="nf-design"></select></label>
+                <label class="f w220">器件 <select id="nf-backend"></select></label>
+                <label class="f grow">名称 <input id="nf-task" type="text" placeholder="INT8 矩阵乘 · 300 MHz"></label>
               </div>
             </div>
-            <div class="fsec"><h3>Constraints <span class="hint">hard — a design is feasible only if all hold</span></h3>
+            <div class="fsec"><h3>约束 <span class="hint">硬约束 — 全部满足才算可行</span></h3>
               <div class="frow" id="nf-cons">
                 <label class="f w110">fmax ≥ MHz <input data-c="fmax_mhz" type="number" min="1"></label>
                 <label class="f w90">DSP ≤ <input data-c="max_dsp" type="number" min="0" placeholder="—"></label>
@@ -53,33 +53,33 @@
                 <label class="f w90">BRAM ≤ <input data-c="max_bram" type="number" min="0" placeholder="—"></label>
               </div>
             </div>
-            <div class="fsec"><h3>Objective <span class="hint">lexicographic — drag to reorder, click to toggle</span></h3>
+            <div class="fsec"><h3>优化目标 <span class="hint">按优先级排序 — 拖动调整顺序，点击启用/停用</span></h3>
               <ol id="nf-obj" class="objlist"></ol>
             </div>
-            <div class="fsec"><h3>Locked <span class="hint">task parameters the planner may not change</span></h3>
+            <div class="fsec"><h3>固定参数 <span class="hint">任务参数，规划器不可改动</span></h3>
               <div class="frow wrap" id="nf-locked"></div>
             </div>
           </div>
           <div class="fcol">
-            <div class="fsec"><h3>Starting design <span class="hint">the planner's first iteration</span></h3>
+            <div class="fsec"><h3>起点设计 <span class="hint">规划器的第一轮</span></h3>
               <div class="frow wrap" id="nf-presets"></div>
               <div class="knobform" id="nf-knobs"></div>
-              <div class="estbox" id="nf-est"><span class="muted">screen estimate</span></div>
+              <div class="estbox" id="nf-est"><span class="muted">筛选估算</span></div>
             </div>
-            <div class="fsec"><h3>Run</h3>
+            <div class="fsec"><h3>运行</h3>
               <div class="frow">
-                <label class="f w110">max iterations <input id="maxiter" type="number" min="1" max="20" value="8"></label>
-                <label class="inline"><input id="usemem" type="checkbox" checked> use design memory</label>
+                <label class="f w110">最多轮数 <input id="maxiter" type="number" min="1" max="20" value="8"></label>
+                <label class="inline"><input id="usemem" type="checkbox" checked> 使用设计记忆</label>
                 <span class="grow"></span>
-                <button id="submit" class="primary">Run</button>
+                <button id="submit" class="primary">开始运行</button>
               </div>
               <div id="submit-msg" class="msg"></div>
             </div>
           </div>
         </div>
         <div class="form json" id="nf-json" hidden>
-          <label class="f grow">spec (JSON) <textarea id="spec" spellcheck="false" rows="26"></textarea></label>
-          <div class="frow"><button id="nf-json-apply" class="small">apply to form</button><span id="nf-json-msg" class="msg"></span></div>
+          <label class="f grow">规格 (JSON) <textarea id="spec" spellcheck="false" rows="26"></textarea></label>
+          <div class="frow"><button id="nf-json-apply" class="small">应用到表单</button><span id="nf-json-msg" class="msg"></span></div>
         </div>
       </div>
     </section>
@@ -88,23 +88,23 @@
     <section id="run" class="run" hidden>
       <div class="bar">
         <div class="bar-l">
-          <button id="t-rail" class="ghost icon small" title="Runs">☰</button>
+          <button id="t-rail" class="ghost icon small" title="运行列表">☰</button>
           <h1 id="j-task"></h1>
           <span id="j-pill" class="pill"></span>
         </div>
         <div class="bar-r">
           <span id="j-best" class="mono muted"></span>
-          <button id="btn-stop" class="ghost small" hidden>■ Stop</button>
-          <div class="menu"><button id="btn-more" class="ghost small" title="Actions">⋯</button>
+          <button id="btn-stop" class="ghost small" hidden>■ 停止</button>
+          <div class="menu"><button id="btn-more" class="ghost small" title="操作">⋯</button>
             <div class="menu-list" id="menu-list" hidden>
-              <button id="act-fork">Fork from best…</button>
-              <button id="act-compare">Compare with…</button>
-              <button id="act-package">Download package (zip)</button>
-              <button id="act-rerun">Re-run same spec</button>
-              <button id="act-delete" class="danger">Delete run</button>
+              <button id="act-fork">从最佳设计分叉…</button>
+              <button id="act-compare">与其他运行比较…</button>
+              <button id="act-package">下载交付包 (zip)</button>
+              <button id="act-rerun">按同一规格重跑</button>
+              <button id="act-delete" class="danger">删除运行</button>
             </div>
           </div>
-          <button id="t-insp" class="ghost small" title="Details">Details ▸</button>
+          <button id="t-insp" class="ghost small" title="详情">详情 ▸</button>
         </div>
       </div>
       <div class="split" id="split">
@@ -113,14 +113,14 @@
           <div class="composer" id="composer">
             <div class="sugs" id="sugs"></div>
             <div class="inputbox">
-              <textarea id="steer" rows="1" placeholder="Steer the planner…"></textarea>
-              <button id="send" class="primary icon" title="Send (⌘↵)">↑</button>
+              <textarea id="steer" rows="1" placeholder="给规划器下一轮的指示…"></textarea>
+              <button id="send" class="primary icon" title="发送 (⌘↵)">↑</button>
             </div>
-            <div class="chint"><span id="chint-l">applies before the next plan · ⌘↵</span><span id="chint-r"></span></div>
+            <div class="chint"><span id="chint-l">在下一轮规划前生效 · ⌘↵</span><span id="chint-r"></span></div>
           </div>
         </div>
         <aside class="inspector" id="inspector">
-          <nav class="tabs"><button data-tab="design" class="on">Design</button><button data-tab="trajectory">Trajectory</button><button data-tab="sim">Simulation</button><button data-tab="rtl">RTL</button><button data-tab="memory">Memory</button><button data-tab="agent" id="tab-agent" hidden>Agent</button><button id="close-insp" class="x" title="Close">×</button></nav>
+          <nav class="tabs"><button data-tab="design" class="on">设计</button><button data-tab="trajectory">轨迹</button><button data-tab="sim">验证</button><button data-tab="rtl">RTL</button><button data-tab="memory">记忆</button><button data-tab="agent" id="tab-agent" hidden>智能体</button><button id="close-insp" class="x" title="关闭">×</button></nav>
           <div class="pane" id="pane-design"></div>
           <div class="pane" id="pane-trajectory" hidden></div>
           <div class="pane" id="pane-sim" hidden></div>
@@ -133,42 +133,42 @@
 
     <!-- compare -->
     <section id="compare" class="compare" hidden>
-      <div class="bar"><div class="bar-l"><button id="cmp-back" class="ghost icon small" title="Back">←</button><h1>Compare runs</h1></div><div class="bar-r"><span id="cmp-sub" class="mono muted"></span></div></div>
+      <div class="bar"><div class="bar-l"><button id="cmp-back" class="ghost icon small" title="返回">←</button><h1>比较运行</h1></div><div class="bar-r"><span id="cmp-sub" class="mono muted"></span></div></div>
       <div class="cmp-body" id="cmp-body"></div>
     </section>
 
     <!-- memory browser -->
     <section id="memory" class="memview" hidden>
-      <div class="bar"><h1>Design memory</h1><span class="muted small-text">lessons distilled from every planner move, scored by what happened when later runs followed them. The planner retrieves them by situation and by text (BM25 over every lesson, same generator / device first; hits from elsewhere are transfer).</span></div>
-      <div class="memsearch"><input id="mem-q" type="search" placeholder="search the lessons: e.g. carry chain accumulator, BRAM table read, DSP budget fold" spellcheck="false"><select id="mem-design"><option value="">any generator</option></select><select id="mem-backend"><option value="">any device</option></select></div>
+      <div class="bar"><h1>设计记忆</h1><span class="muted small-text">从每一次规划器的动作里提炼出的教训，按后续运行采纳后的结果打分。规划器按情境和文本检索（对全部教训做 BM25，同生成器/同器件优先；来自其他组合的命中标为"迁移"）。</span></div>
+      <div class="memsearch"><input id="mem-q" type="search" placeholder="搜索教训：例如 carry chain accumulator、BRAM table read、DSP budget fold" spellcheck="false"><select id="mem-design"><option value="">任意生成器</option></select><select id="mem-backend"><option value="">任意器件</option></select></div>
       <div id="memory-list" class="memlist"></div>
     </section>
     <section id="bench" class="memview" hidden>
-      <div class="bar"><h1>Bench</h1><span class="muted small-text">the regression suite: every case per tag (golden = the best known design per case re-measured, no planner; nightly = default planner; planner-pro = DeepSeek V4 Pro; agent = driven through the chat; knob / newgen = manual)</span></div>
+      <div class="bar"><h1>回归基准</h1><span class="muted small-text">回归套件：每个用例按标签分列（golden = 每个用例已知最佳设计重新实测，不用规划器；nightly = 默认规划器；planner-pro = DeepSeek V4 Pro；agent = 通过对话驱动；knob / newgen = 手动）</span></div>
       <div id="bench-view" class="memlist"></div>
     </section>
     <section id="catalog" class="memview" hidden>
-      <div class="bar"><h1>Catalog</h1><span class="muted small-text">every generator × device measured so far: verified points (behavioral + netlist sims passed, fits), the fastest and the smallest design on the Pareto front, the last run. Ask the chat for a design on a device you already have and it starts from these points.</span></div>
+      <div class="bar"><h1>设计目录</h1><span class="muted small-text">到目前为止实测过的每个生成器 × 器件：已验证的点（行为级 + 网表仿真通过、能放下）、Pareto 前沿上最快和最小的设计、最近一次运行。在对话里要一个已有器件上的设计，它会从这些点起步。</span></div>
       <div id="catalog-view" class="memlist"></div>
     </section>
     <section id="proposals" class="memview" hidden>
-      <div class="bar"><h1>Proposals</h1><span class="muted small-text">generator changes the agent proposed as diffs; each went through the gate (emit + elaborate every preset, behavioral sims, formal equivalence of unchanged IRs, mutation score) and optionally an A/B run. Nothing merges by itself: the operator runs deploy/merge-proposal.sh &lt;id&gt;</span></div>
+      <div class="bar"><h1>生成器提案</h1><span class="muted small-text">智能体以 diff 形式提出的生成器改动；每一份都经过门禁（发射并展开所有预设、行为级仿真、未改动 IR 的形式等价、变异分数），可选 A/B 实测。不会自动合并：由操作员执行 deploy/merge-proposal.sh &lt;id&gt;</span></div>
       <div id="proposals-view" class="memlist"></div>
     </section>
   </main>
 </div>
 
 <dialog id="fork-dlg">
-  <h2>Fork this run</h2>
-  <div class="frow"><label class="f grow">start from iteration <div class="iters" id="fk-iters"></div></label></div>
+  <h2>分叉这个运行</h2>
+  <div class="frow"><label class="f grow">从第几轮开始 <div class="iters" id="fk-iters"></div></label></div>
   <div class="frow">
     <label class="f w110">fmax ≥ MHz <input id="fk-fmax" type="number"></label>
     <label class="f w90">DSP ≤ <input id="fk-dsp" type="number" placeholder="—"></label>
     <label class="f w100">LUT ≤ <input id="fk-lut" type="number" placeholder="—"></label>
-    <label class="f w110">max iterations <input id="fk-iter" type="number" min="1" max="20"></label>
+    <label class="f w110">最多轮数 <input id="fk-iter" type="number" min="1" max="20"></label>
   </div>
-  <div class="frow"><label class="f grow">name <input id="fk-task" type="text"></label></div>
-  <div class="actions"><button id="fk-cancel">Cancel</button><button id="fk-go" class="primary">Fork</button></div>
+  <div class="frow"><label class="f grow">名称 <input id="fk-task" type="text"></label></div>
+  <div class="actions"><button id="fk-cancel">取消</button><button id="fk-go" class="primary">分叉</button></div>
 </dialog>
 <div class="tooltip" id="tip" hidden></div>
 <script type="module" src="/static/app.js"></script>

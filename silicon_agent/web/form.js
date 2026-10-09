@@ -1,6 +1,7 @@
 // New-run form (schema-driven), run actions (fork / re-run / delete), and the compare view.
 // Loaded by app.js; shares its helpers through the exported `wire()` entry point.
 
+const STATUS_ZH = { queued: "排队中", running: "运行中", done: "完成", failed: "未找到可行设计", error: "出错", interrupted: "已停止" };
 export function wire({ $, api, post, esc, el, fmt, specs, state, select, refreshJobs, show }) {
   let schema = null, form = { design: "matmul", backend: "ecp5", task: "", constraints: {}, objective: [], locked: {}, initial_ir: {} };
   let estTimer = null;
@@ -15,13 +16,13 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     bs.onchange = () => { form.backend = bs.value; renderKnobs(); estimate(); };
     $("#nf-task").oninput = (e) => { form.task = e.target.value; };
     $("#nf-cons").querySelectorAll("input").forEach((i) => { i.oninput = () => { const v = i.value === "" ? null : Number(i.value); if (v == null) delete form.constraints[i.dataset.c]; else form.constraints[i.dataset.c] = v; estimate(); }; });
-    $("#nf-json-toggle").onclick = () => { const on = $("#nf-json").hidden; $("#nf-json").hidden = !on; $("#nf-form").hidden = on; $("#nf-json-toggle").textContent = on ? "edit as form ▸" : "edit as JSON ▸"; if (on) $("#spec").value = JSON.stringify(toSpec(), null, 2); };
-    $("#nf-json-apply").onclick = () => { try { fromSpec(JSON.parse($("#spec").value)); $("#nf-json-msg").textContent = "applied"; $("#nf-json-toggle").click(); } catch (e) { $("#nf-json-msg").textContent = e.message; } };
+    $("#nf-json-toggle").onclick = () => { const on = $("#nf-json").hidden; $("#nf-json").hidden = !on; $("#nf-form").hidden = on; $("#nf-json-toggle").textContent = on ? "编辑表单 ▸" : "编辑 JSON ▸"; if (on) $("#spec").value = JSON.stringify(toSpec(), null, 2); };
+    $("#nf-json-apply").onclick = () => { try { fromSpec(JSON.parse($("#spec").value)); $("#nf-json-msg").textContent = "已应用"; $("#nf-json-toggle").click(); } catch (e) { $("#nf-json-msg").textContent = e.message; } };
     $("#submit").onclick = submit;
     // template specs seed the form; the first one is the default
     const tplRow = el(`<div class="frow wrap" id="nf-templates"></div>`);
     $("#nf-form .fcol .fsec").prepend(tplRow);
-    tplRow.appendChild(el(`<span class="muted small-text">templates:</span>`));
+    tplRow.appendChild(el(`<span class="muted small-text">模板：</span>`));
     for (const sp of specs) { const b = el(`<button class="preset">${esc(sp.task)}</button>`); b.onclick = () => fromSpec(sp.spec); tplRow.appendChild(b); }
     fromSpec(specs[0]?.spec || { design: "matmul", backend: "ecp5" });
   }
@@ -56,7 +57,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     const all = [...form.objective, ...schema.objectives.filter((o) => !form.objective.includes(o))];
     all.forEach((o) => {
       const on = form.objective.includes(o);
-      const li = el(`<li class="${on ? "on" : ""}" draggable="true" data-o="${o}"><span class="grip">⋮⋮</span><span class="n">${on ? form.objective.indexOf(o) + 1 : "·"}</span><span>${o.replace("_", " ")}</span></li>`);
+      const li = el(`<li class="${on ? "on" : ""}" draggable="true" data-o="${o}"><span class="grip">⋮⋮</span><span class="n">${on ? form.objective.indexOf(o) + 1 : "·"}</span><span title="${o}">${({ maximize_throughput: "最大化吞吐", maximize_fmax: "最大化时钟频率", minimize_lut: "最小化 LUT", minimize_dsp: "最小化 DSP", minimize_area: "最小化面积", minimize_latency: "最小化延迟", minimize_power: "最小化功耗" })[o] || o.replace("_", " ")}</span></li>`);
       li.onclick = () => { if (on) form.objective = form.objective.filter((x) => x !== o); else form.objective.push(o); renderObjectives(); estimate(); };
       li.ondragstart = (e) => { e.dataTransfer.setData("text/plain", o); li.classList.add("dragging"); };
       li.ondragend = () => li.classList.remove("dragging");
@@ -70,13 +71,13 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     const box = $("#nf-locked"); box.innerHTML = "";
     const d = schema.designs[form.design];
     for (const [k, v] of Object.entries(form.locked)) {
-      const chip = el(`<span class="lockchip">🔒 ${esc(k)} = ${esc(JSON.stringify(v))} <button title="unlock">×</button></span>`);
+      const chip = el(`<span class="lockchip">🔒 ${esc(k)} = ${esc(JSON.stringify(v))} <button title="解除固定">×</button></span>`);
       chip.querySelector("button").onclick = () => { delete form.locked[k]; renderLocked(); renderKnobs(); };
       box.appendChild(chip);
     }
     const free = d.locked_candidates.filter((k) => !(k in form.locked));
     if (free.length) {
-      const sel = el(`<select class="lockadd"><option value="">+ lock a field</option>${free.map((k) => `<option value="${k}">${k}</option>`).join("")}</select>`);
+      const sel = el(`<select class="lockadd"><option value="">+ 固定一个字段</option>${free.map((k) => `<option value="${k}">${k}</option>`).join("")}</select>`);
       sel.onchange = () => { if (sel.value) { form.locked[sel.value] = form.initial_ir[sel.value] ?? schema.designs[form.design].fields.find((f) => f.name === sel.value)?.choices?.[1] ?? 8; renderLocked(); renderKnobs(); } };
       box.appendChild(sel);
     }
@@ -91,7 +92,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
       box.appendChild(b);
     }
     const best = state.jobs.filter((j) => j.best && (j.design || "matmul") === form.design && j.backend === form.backend)[0];
-    if (best) { const b = el(`<button class="preset">best from memory (${fmt(best.best.metrics.fmax_mhz, 0)} MHz)</button>`); b.onclick = () => { form.initial_ir = { ...best.best.ir, ...form.locked }; delete form.initial_ir.coefs; renderPresets(); renderKnobs(); estimate(); }; box.appendChild(b); }
+    if (best) { const b = el(`<button class="preset">记忆里的最佳 (${fmt(best.best.metrics.fmax_mhz, 0)} MHz)</button>`); b.onclick = () => { form.initial_ir = { ...best.best.ir, ...form.locked }; delete form.initial_ir.coefs; renderPresets(); renderKnobs(); estimate(); }; box.appendChild(b); }
   }
 
   function renderKnobs() {
@@ -122,16 +123,16 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
         $("#submit").disabled = false;
         const e = r.estimate, v = r.est_violations;
         const bad = (k) => v.some((x) => x.startsWith(k));
-        box.innerHTML = `<span class="muted">screen estimate${e.calibrated ? ` (calibrated on ${e.n_obs} runs)` : ""}</span><span class="${bad("fmax") ? "bad" : ""}">~${fmt(e.fmax_mhz, 0)} MHz</span><span class="${bad("dsp") ? "bad" : ""}">~${e.dsp} DSP</span><span class="${bad("lut") ? "bad" : ""}">~${e.lut} LUT</span><span class="muted">${v.length ? "violates " + v.map((x) => x.split("~")[0]).join(", ") + " — a good place to start the agent" : "looks feasible already; the agent will optimize from here"}</span>`;
+        box.innerHTML = `<span class="muted">筛选估算${e.calibrated ? `（按 ${e.n_obs} 次运行校准）` : ""}</span><span class="${bad("fmax") ? "bad" : ""}">~${fmt(e.fmax_mhz, 0)} MHz</span><span class="${bad("dsp") ? "bad" : ""}">~${e.dsp} DSP</span><span class="${bad("lut") ? "bad" : ""}">~${e.lut} LUT</span><span class="muted">${v.length ? "估计违反 " + v.map((x) => x.split("~")[0]).join(", ") + " — 适合作为智能体的起点" : "估计已可行；智能体会从这里继续优化"}</span>`;
       } catch (err) { box.innerHTML = `<span class="bad">${esc(err.message)}</span>`; }
     }, 250);
   }
 
   async function submit() {
-    const msg = $("#submit-msg"); msg.className = "msg"; msg.textContent = "submitting…";
+    const msg = $("#submit-msg"); msg.className = "msg"; msg.textContent = "提交中…";
     try {
       const r = await post("/jobs", { spec: toSpec(), max_iter: Number($("#maxiter").value), thread: state.thread || undefined });
-      msg.textContent = `queued ${r.id}`;
+      msg.textContent = `已排队 ${r.id}`;
       await refreshJobs(); select(r.id);
     } catch (e) { msg.className = "msg err"; msg.textContent = e.message; }
   }
@@ -148,8 +149,8 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
       const dlg = $("#fork-dlg"), iters = $("#fk-iters"); iters.innerHTML = "";
       let pick = best ? null : results.length;  // null = best feasible
       const paint = () => iters.querySelectorAll("button").forEach((b) => b.classList.toggle("on", (b.dataset.i === "" ? null : Number(b.dataset.i)) === pick));
-      if (best) { const b = el(`<button data-i="">best (feasible)</button>`); b.onclick = () => { pick = null; paint(); }; iters.appendChild(b); }
-      for (const r of results) { const b = el(`<button data-i="${r.iteration}" title="${esc(r.violations.join("; ") || "feasible")}">${r.iteration} · ${fmt(r.metrics.fmax_mhz, 0)} MHz${r.violations.length ? " ✗" : " ✓"}</button>`); b.onclick = () => { pick = r.iteration; paint(); }; iters.appendChild(b); }
+      if (best) { const b = el(`<button data-i="">最佳（可行）</button>`); b.onclick = () => { pick = null; paint(); }; iters.appendChild(b); }
+      for (const r of results) { const b = el(`<button data-i="${r.iteration}" title="${esc(r.violations.join("; ") || "可行")}">${r.iteration} · ${fmt(r.metrics.fmax_mhz, 0)} MHz${r.violations.length ? " ✗" : " ✓"}</button>`); b.onclick = () => { pick = r.iteration; paint(); }; iters.appendChild(b); }
       paint();
       $("#fk-fmax").value = c.fmax_mhz; $("#fk-dsp").value = c.max_dsp ?? ""; $("#fk-lut").value = c.max_lut ?? ""; $("#fk-iter").value = d.max_iter || 8; $("#fk-task").value = (d.spec.task || "") + " (fork)";
       $("#fk-cancel").onclick = () => dlg.close();
@@ -166,7 +167,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
       dlg.showModal();
     };
     $("#act-rerun").onclick = async () => { const d = state.detail; if (!d) return; const r = await post("/jobs", { spec: { ...d.spec, task: (d.spec.task || "") + " (re-run)" }, max_iter: d.max_iter || 8, thread: state.thread || undefined }); await refreshJobs(); select(r.id); };
-    $("#act-delete").onclick = async () => { if (!state.selected || !confirm("Delete this run and its artifacts?")) return; await api(`/jobs/${state.selected}`, { method: "DELETE" }); await refreshJobs(); show("empty"); };
+    $("#act-delete").onclick = async () => { if (!state.selected || !confirm("删除这个运行及其产物？")) return; await api(`/jobs/${state.selected}`, { method: "DELETE" }); await refreshJobs(); show("empty"); };
     $("#act-compare").onclick = () => openCompare(state.selected);
     $("#act-package").onclick = () => { if (state.selected) window.open(`/api/jobs/${state.selected}/package`, "_blank"); };
     $("#cmp-back").onclick = () => { if (state.cmpA) select(state.cmpA); else show("empty"); };
@@ -181,10 +182,10 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     if (state.thread && (!state.jobs.some((j) => j.id === aId) || (bId && !state.jobs.some((j) => j.id === bId)))) { show("empty"); return; }
     const a = await api(`/jobs/${aId}`);
     const others = state.jobs.filter((j) => j.id !== aId);
-    const pick = el(`<div class="cmp-pick"><span>A: <b>${esc(a.spec.task || aId)}</b></span><span>vs B:</span><select id="cmp-sel"><option value="">choose a run…</option>${others.map((j) => `<option value="${j.id}" ${j.id === bId ? "selected" : ""}>${esc(j.task || j.id)} · ${esc(j.backend)} · ${j.status}</option>`).join("")}</select></div>`);
+    const pick = el(`<div class="cmp-pick"><span>A：<b>${esc(a.spec.task || aId)}</b></span><span>对比 B：</span><select id="cmp-sel"><option value="">选一个运行…</option>${others.map((j) => `<option value="${j.id}" ${j.id === bId ? "selected" : ""}>${esc(j.task || j.id)} · ${esc(j.backend)} · ${j.status}</option>`).join("")}</select></div>`);
     pick.querySelector("select").onchange = (e) => openCompare(aId, e.target.value || undefined);
     body.appendChild(pick);
-    if (!bId) { body.appendChild(el(`<div class="muted">Pick a second run. Same spec with and without memory, or two targets for the same design, are the interesting pairs.</div>`)); return; }
+    if (!bId) { body.appendChild(el(`<div class="muted">再选一个运行。同一规格开/关记忆、或同一设计的两个目标，是最值得比的组合。</div>`)); return; }
     const b = await api(`/jobs/${bId}`);
     $("#cmp-sub").textContent = `${aId} vs ${bId}`;
     const rows = (d) => d.events.filter((e) => e.kind === "result");
@@ -195,25 +196,25 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     const cell = (v, cls = "") => `<div class="v ${cls}">${v ?? "–"}</div>`;
     const lines = [["", `<div class="h">A · ${esc(a.spec.task || aId)}</div>`, `<div class="h">B · ${esc(b.spec.task || bId)}</div>`]];
     const add = (k, va, vb, cls = ["", ""]) => lines.push([`<div class="k">${k}</div>`, cell(va, cls[0]), cell(vb, cls[1])]);
-    add("design / backend", `${a.spec.design || "matmul"} / ${a.spec.backend || "ecp5"}`, `${b.spec.design || "matmul"} / ${b.spec.backend || "ecp5"}`);
-    add("constraints", `≥${a.spec.constraints.fmax_mhz} MHz · ≤${a.spec.constraints.max_dsp ?? "∞"} DSP · ≤${a.spec.constraints.max_lut ?? "∞"} LUT`, `≥${b.spec.constraints.fmax_mhz} MHz · ≤${b.spec.constraints.max_dsp ?? "∞"} DSP · ≤${b.spec.constraints.max_lut ?? "∞"} LUT`);
-    add("memory", a.spec.no_memory ? "off" : "on", b.spec.no_memory ? "off" : "on");
-    add("status", a.status, b.status);
-    add("iterations", ra.length, rb.length, win(ra.length, rb.length, true));
+    add("生成器 / 器件", `${a.spec.design || "matmul"} / ${a.spec.backend || "ecp5"}`, `${b.spec.design || "matmul"} / ${b.spec.backend || "ecp5"}`);
+    add("约束", `≥${a.spec.constraints.fmax_mhz} MHz · ≤${a.spec.constraints.max_dsp ?? "∞"} DSP · ≤${a.spec.constraints.max_lut ?? "∞"} LUT`, `≥${b.spec.constraints.fmax_mhz} MHz · ≤${b.spec.constraints.max_dsp ?? "∞"} DSP · ≤${b.spec.constraints.max_lut ?? "∞"} LUT`);
+    add("设计记忆", a.spec.no_memory ? "关" : "开", b.spec.no_memory ? "关" : "开");
+    add("状态", STATUS_ZH[a.status] || a.status, STATUS_ZH[b.status] || b.status);
+    add("轮数", ra.length, rb.length, win(ra.length, rb.length, true));
     const feasA = ra.findIndex((r) => r.violations.length === 0) + 1 || null, feasB = rb.findIndex((r) => r.violations.length === 0) + 1 || null;
-    add("first feasible at", feasA ?? "never", feasB ?? "never", win(feasA ?? 99, feasB ?? 99, true));
-    add("EDA time", `${Math.round(ra.reduce((s, r) => s + r.eda_seconds, 0))} s`, `${Math.round(rb.reduce((s, r) => s + r.eda_seconds, 0))} s`);
-    add("best fmax", ba ? `${fmt(ba.metrics.fmax_mhz)} MHz` : null, bb ? `${fmt(bb.metrics.fmax_mhz)} MHz` : null, win(ba?.metrics.fmax_mhz, bb?.metrics.fmax_mhz));
-    add("best throughput", ba ? `${ba.throughput} ${unit}` : null, bb ? `${bb.throughput} ${unit}` : null, win(ba?.throughput, bb?.throughput));
-    add("best LUT / DSP", ba ? `${ba.metrics.lut} / ${ba.metrics.dsp}` : null, bb ? `${bb.metrics.lut} / ${bb.metrics.dsp}` : null, win(ba?.metrics.lut, bb?.metrics.lut, true));
-    add("best IR", ba ? `<span class="chips">${Object.entries(ba.ir).filter(([k]) => k !== "coefs" && !(k in (a.spec.locked || {}))).map(([k, v]) => `<span class="chip"><span class="k">${k}=</span>${JSON.stringify(v)}</span>`).join("")}</span>` : null, bb ? `<span class="chips">${Object.entries(bb.ir).filter(([k]) => k !== "coefs" && !(k in (b.spec.locked || {}))).map(([k, v]) => `<span class="chip"><span class="k">${k}=</span>${JSON.stringify(v)}</span>`).join("")}</span>` : null);
+    add("首次可行", feasA != null ? `第 ${feasA} 轮` : "从未", feasB != null ? `第 ${feasB} 轮` : "从未", win(feasA ?? 99, feasB ?? 99, true));
+    add("EDA 用时", `${Math.round(ra.reduce((s, r) => s + r.eda_seconds, 0))} s`, `${Math.round(rb.reduce((s, r) => s + r.eda_seconds, 0))} s`);
+    add("最佳 Fmax", ba ? `${fmt(ba.metrics.fmax_mhz)} MHz` : null, bb ? `${fmt(bb.metrics.fmax_mhz)} MHz` : null, win(ba?.metrics.fmax_mhz, bb?.metrics.fmax_mhz));
+    add("最佳吞吐", ba ? `${ba.throughput} ${unit}` : null, bb ? `${bb.throughput} ${unit}` : null, win(ba?.throughput, bb?.throughput));
+    add("最佳 LUT / DSP", ba ? `${ba.metrics.lut} / ${ba.metrics.dsp}` : null, bb ? `${bb.metrics.lut} / ${bb.metrics.dsp}` : null, win(ba?.metrics.lut, bb?.metrics.lut, true));
+    add("最佳 IR", ba ? `<span class="chips">${Object.entries(ba.ir).filter(([k]) => k !== "coefs" && !(k in (a.spec.locked || {}))).map(([k, v]) => `<span class="chip"><span class="k">${k}=</span>${JSON.stringify(v)}</span>`).join("")}</span>` : null, bb ? `<span class="chips">${Object.entries(bb.ir).filter(([k]) => k !== "coefs" && !(k in (b.spec.locked || {}))).map(([k, v]) => `<span class="chip"><span class="k">${k}=</span>${JSON.stringify(v)}</span>`).join("")}</span>` : null);
     const grid = el(`<div class="cmp-grid"></div>`);
     for (const [k, va, vb] of lines) { grid.insertAdjacentHTML("beforeend", k || "<div></div>"); grid.insertAdjacentHTML("beforeend", va); grid.insertAdjacentHTML("beforeend", vb); }
     body.appendChild(grid);
     // overlaid trajectories
-    const ch = el(`<div><div class="cmp-legend"><span><i style="background:var(--accent)"></i>A</span><span><i style="background:var(--lut)"></i>B</span><span class="muted">hollow = violates</span></div><div class="cmp-charts"></div></div>`);
+    const ch = el(`<div><div class="cmp-legend"><span><i style="background:var(--accent)"></i>A</span><span><i style="background:var(--lut)"></i>B</span><span class="muted">空心 = 违反约束</span></div><div class="cmp-charts"></div></div>`);
     body.appendChild(ch);
-    for (const [title, get, target] of [["Fmax (MHz)", (r) => r.metrics.fmax_mhz, Math.max(a.spec.constraints.fmax_mhz, b.spec.constraints.fmax_mhz)], ["LUT", (r) => r.metrics.lut, null], ["DSP", (r) => r.metrics.dsp, null], [`Throughput (${unit})`, (r) => r.throughput, null]]) {
+    for (const [title, get, target] of [["Fmax (MHz)", (r) => r.metrics.fmax_mhz, Math.max(a.spec.constraints.fmax_mhz, b.spec.constraints.fmax_mhz)], ["LUT", (r) => r.metrics.lut, null], ["DSP", (r) => r.metrics.dsp, null], [`吞吐 (${unit})`, (r) => r.throughput, null]]) {
       const sec = el(`<div class="sec"><h3>${title}</h3><div class="chart"></div></div>`);
       ch.querySelector(".cmp-charts").appendChild(sec);
       requestAnimationFrame(() => overlay(sec.querySelector(".chart"), [ra, rb], get, target));

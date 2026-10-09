@@ -31,7 +31,7 @@ button.icon { width: 30px; height: 30px; padding: 0; display: grid; place-items:
 button:disabled { opacity: .45; cursor: default; }
 
 /* ---------- fixed shell: nothing here scrolls except #scroll ---------- */
-.shell { height: 100vh; height: 100dvh; display: grid; grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.shell { height: 100vh; height: 100dvh; display: grid; grid-template-columns: 280px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
 .scrim { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 9; }
 .shell.rail-hidden { grid-template-columns: minmax(0, 1fr); } .shell.rail-hidden .rail { display: none; }
 .rail { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
@@ -51,9 +51,10 @@ button:disabled { opacity: .45; cursor: default; }
 .rail-list .row .dots { border: 0; padding: 0; width: 22px; height: 20px; line-height: 20px; color: var(--muted); font-size: 14px; opacity: 0; border-radius: 5px; }
 .rail-list .row:hover .dots, .rail-list .row.sel .dots { opacity: 1; } .rail-list .row .dots:hover { color: var(--text); background: var(--surface-3); }
 .rail-list .tx { min-width: 0; }
-.rail-list .t { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-list .m { font: 10.5px var(--mono); color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-list .m .dev { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; margin-right: 6px; }
+.rail-list .t { font-size: 13px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-list .m { font: 10.5px var(--mono); color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: center; }
+.rail-list .m .dev { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; flex: none; }
+.rail-list .m .mt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-list .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-3); }
 .rail-list .dot.running, .rail-list .dot.queued, .rail-list .dot.busy { background: var(--accent); animation: pulse 1.2s infinite; }
 .rail-list .dot.done { background: var(--good); } .rail-list .dot.failed, .rail-list .dot.error { background: var(--bad); }
@@ -79,7 +80,7 @@ button:disabled { opacity: .45; cursor: default; }
 .project .bestcard:hover { border-color: var(--border-2); background: var(--surface-2); }
 .project .bestcard .bh { display: flex; gap: 8px; align-items: center; font-size: 12px; } .project .bestcard .bh .mono { font-weight: 600; color: var(--text); }
 .project .bestcard .bh .dev { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; } .project .bestcard .bh .so { color: var(--good); margin-left: auto; }
-.project .bestcard .bn { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font: 11.5px var(--mono); color: var(--text-2); } .project .bestcard .bn b { font: 600 15px var(--font); color: var(--text); }
+.project .bestcard .bn { display: flex; flex-direction: column; gap: 1px; font: 11px var(--mono); color: var(--text-2); } .project .bestcard .bn b { font: 600 16px var(--font); color: var(--text); margin-bottom: 2px; }
 .project .bestcard .bt { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project .bestcard .bl a { font: 11px var(--mono); color: var(--muted); text-decoration: none; } .project .bestcard .bl a:hover { color: var(--text); }
 .project .prtls { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
@@ -264,7 +265,7 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 
 .usage { font: 11px var(--mono); color: var(--muted); margin: 6px 0 2px; }
 .usage .model { opacity: .7; }
-.sess-usage { font-size: 11px; white-space: nowrap; }
+.sess-usage { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
 @media (max-width: 720px) { .sess-usage { display: none; } }
 .live-note { margin-top: 6px; max-width: 70ch; white-space: pre-wrap; }
 .agent-tools .tchip i { font-style: normal; opacity: .65; margin-left: 6px; }

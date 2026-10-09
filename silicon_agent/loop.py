@@ -7,6 +7,7 @@ Generic over the design registry (silicon_agent.designs) and the backend table
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -39,6 +40,7 @@ move (e.g. "throughput at the DSP cap: 32 PEs = 32 DSP", "acc_width at its legal
 device's intrinsic DSP M->P stage, 2.31 ns, no IR field touches it"), and which knobs were tried without gain. A stop
 without a measured bound is not acceptable: if a knob is untested and could plausibly help, try it instead.
 
+@LANG@
 Respond with a JSON object:
 {
   "diagnosis": "<2-4 sentences: what limits the last design, citing the critical path>",
@@ -51,10 +53,19 @@ Respond with a JSON object:
 }"""
 
 
+# the planner's prose fields (diagnosis, why, stop_reason) and the distilled lessons are what the worktable and the
+# chat show; the product's language is Chinese, so they are written in Chinese -- knob names, cell names, numbers
+# and units stay as they are (SA_PLANNER_LANG=en switches back for the English benches)
+PLANNER_LANG = os.environ.get("SA_PLANNER_LANG", "zh")
+_LANG_RULE = {"zh": "Write every prose field (diagnosis, why, stop_reason) in Chinese; keep knob names, RTL/cell names, numbers and units exactly as they are.",
+              "en": ""}
+
+
 def build_system(design: Design, backend: str) -> str:
     p = prompts_for(design.kind)
     return (SYSTEM.replace("@WHAT@", p["what"]).replace("@DEVICE_NAME@", BACKENDS[backend]["name"])
-            .replace("@IR_SCHEMA@", p["ir"]).replace("@DEVICE_FACTS@", device_facts(design.kind, backend)).replace("@IR_JSON@", p["ir_json"]))
+            .replace("@IR_SCHEMA@", p["ir"]).replace("@DEVICE_FACTS@", device_facts(design.kind, backend)).replace("@IR_JSON@", p["ir_json"])
+            .replace("@LANG@", _LANG_RULE.get(PLANNER_LANG, "")))
 
 
 def merge_locked(ir: dict, locked: dict) -> dict:
@@ -149,6 +160,7 @@ what was changed, what happened, and the mechanism if the critical path makes it
 Example: "When a folded FIR on XC7S50 is timing-limited by the tap-operand mux, going non-symmetric at twice the
 fold keeps the MAC count and removes the pre-adder from the path (+22 MHz, feasible at 259 MHz)."
 Respond with JSON: {"lesson": "<sentence>", "confidence": 0.0-1.0}"""
+LESSON_LANG_RULE = {"zh": "\nWrite the sentence in Chinese; keep knob names, cell names, numbers and units as they are.", "en": ""}
 
 
 def _learn(design, backend: str, c: Constraints, run_id: str, prev: dict, cur: dict, shown: list[dict], emit) -> None:
@@ -167,7 +179,7 @@ def _learn(design, backend: str, c: Constraints, run_id: str, prev: dict, cur: d
         "planner_diagnosis": cur.get("diagnosis", ""), "planner_action": cur.get("action", ""),
     }
     try:
-        r = llm.chat_json(LESSON_SYSTEM, json.dumps(facts), retries=2)
+        r = llm.chat_json(LESSON_SYSTEM + LESSON_LANG_RULE.get(PLANNER_LANG, ""), json.dumps(facts), retries=2)
         text = str(r.get("lesson", "")).strip()
         conf = float(r.get("confidence", 0.5))
     except Exception as e:  # a lesson is a nice-to-have; never fail the run over it
