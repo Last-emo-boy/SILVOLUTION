@@ -324,7 +324,7 @@ function proposalCard(m) {
   const steps = el(`<div class="gate-steps"></div>`);
   (pr.steps || []).forEach((s) => {
     const row = el(`<div class="gstep"><span class="${s.ok ? "v" : s.ok === false ? "x" : "muted"}">${s.ok ? "✓" : s.ok === false ? "✕" : "·"}</span> ${esc(s.name)}${s.seconds != null ? ` <span class="muted">${s.seconds} s</span>` : ""}</div>`);
-    if (s.mutation) row.appendChild(el(`<div class="muted small">${s.mutation.map((x) => `${esc(x.design)}: ${x.killed}/${x.total} killed (${x.score == null ? "—" : Math.round(x.score * 100) + "%"})${x.survived?.length ? ` · survived ${esc(x.survived.join(", "))}` : ""}`).join(" · ")}</div>`));
+    if (s.mutation) row.appendChild(el(`<div class="muted small">${s.mutation.map((x) => x.baseline === false ? `${esc(x.design)}: <span class="x">bench fails on the unmutated RTL</span>` : `${esc(x.design)}: ${x.killed}/${x.total} killed (${x.score == null ? "—" : Math.round(x.score * 100) + "%"})${x.survived?.length ? ` · survived ${esc(x.survived.join(", "))}` : ""}`).join(" · ")}</div>`));
     if (s.equivalence) row.appendChild(el(`<div class="muted small">${s.equivalence.map((x) => `${esc(x.case)}: ${x.identical ? "identical" : x.ok ? "equivalent @" + x.depth : "<span class='x'>NOT equivalent</span>"}`).join(" · ")}</div>`));
     if (s.failures?.length) row.appendChild(el(`<pre class="log">${esc(s.failures.join("\n").slice(0, 1500))}</pre>`));
     if (s.sims?.length) row.appendChild(el(`<pre class="log">${esc(s.sims.map((x) => `${x.case}: ${x.log || "failed"}`).join("\n").slice(0, 1500))}</pre>`));

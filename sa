@@ -202,7 +202,7 @@ def print_proposal(p: dict, with_diff: bool) -> None:
         ok = "ok " if st.get("ok") else "BAD" if st.get("ok") is False else " - "
         extra = ""
         if st.get("mutation"):
-            extra = "  " + "; ".join(f"{x['design']} {x['killed']}/{x['total']}" for x in st["mutation"])
+            extra = "  " + "; ".join(f"{x['design']} " + ("bench fails unmutated" if x.get("baseline") is False else f"{x['killed']}/{x['total']}") for x in st["mutation"])
         if st.get("equivalence"):
             extra = "  " + "; ".join(f"{x['case']} {'identical' if x.get('identical') else 'equivalent' if x.get('ok') else 'NOT equivalent'}" for x in st["equivalence"])
         secs = f"  {st['seconds']}s" if st.get("seconds") is not None else ""

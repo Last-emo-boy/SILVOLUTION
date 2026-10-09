@@ -67,6 +67,12 @@ def score(d: Design, ir, rtl: str, work: Path | None = None, limit: int = 24) ->
     from . import eda
     work = work or Path(tempfile.mkdtemp(prefix="sa_mut_"))
     res = {"total": 0, "killed": 0, "survived": [], "uncompilable": 0}
+    # a bench that fails on the unmutated RTL "kills" every mutant: no score, say why
+    (work / "baseline" / "rtl").mkdir(parents=True, exist_ok=True)
+    (work / "baseline" / "rtl" / f"{d.top}.sv").write_text(rtl)
+    ok, log, _ = eda.simulate(d, ir, work / "baseline", timeout=240)
+    if not ok:
+        return {**res, "score": None, "baseline": False, "error": "the testbench fails on the unmutated RTL: " + log[-300:].strip()}
     for label, text in mutants(rtl, limit):
         w = work / re.sub(r"[^\w]", "_", label)
         (w / "rtl").mkdir(parents=True, exist_ok=True)
