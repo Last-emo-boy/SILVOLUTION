@@ -738,7 +738,7 @@ function eta(j, rows, done) {
 let BFACTS = {};
 
 // phrases the loop itself writes (not the planner): shown in the UI language
-const LOOP_ZH = { "stopped by user": "用户已停止", "stopping with best-so-far": "规划器不可用，以目前最佳设计结束", "no legal candidate": "没有合法候选", "measure every point": "逐点实测", "REJECTED (all candidates invalid or duplicates) -- propose different IRs": "全部候选无效或重复，要求重新提出", "stop": "停止" };
+const LOOP_ZH = { "initial design from spec": "规格的起点设计", "stopped by user": "用户已停止", "stopping with best-so-far": "规划器不可用，以目前最佳设计结束", "no legal candidate": "没有合法候选", "measure every point": "逐点实测", "REJECTED (all candidates invalid or duplicates) -- propose different IRs": "全部候选无效或重复，要求重新提出", "stop": "停止" };
 const loopText = (x) => (zh && typeof x === "string") ? (LOOP_ZH[x] || x.replace(/^planner unavailable: /, "规划器不可用：").replace(/^design-space sweep over (.*): (\d+) points$/, "设计空间扫描 $1：$2 个点").replace(/^sweep point (.*) rejected: /, "扫描点 $1 被拒：").replace(/^sweep point (.*) invalid: /, "扫描点 $1 无效：").replace(/^sibling candidate: /, "").replace(/^sibling candidate #(\d+) won this round; continuing from it$/, "并行候选 #$1 赢得本轮，从它继续")) : x;
 function trajCard(jid, j, rows, done, liveRow, spec) {
   const live = ["queued", "running"].includes(j.status), unit = j.summary?.throughput_unit || (spec.design === "fir" ? "samples/cycle" : "MAC/cycle");

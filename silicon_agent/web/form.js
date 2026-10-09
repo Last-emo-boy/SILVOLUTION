@@ -2,6 +2,7 @@
 // Loaded by app.js; shares its helpers through the exported `wire()` entry point.
 
 const STATUS_ZH = { queued: "排队中", running: "运行中", done: "完成", failed: "未找到可行设计", error: "出错", interrupted: "已停止" };
+const LOOP_TXT = (x) => typeof x === "string" ? ({ "initial design from spec": "规格的起点设计", "stopped by user": "用户已停止", "no legal candidate": "没有合法候选" }[x] || x.replace(/^sibling candidate: /, "")) : x;
 export function wire({ $, api, post, esc, el, fmt, specs, state, select, refreshJobs, show }) {
   let schema = null, form = { design: "matmul", backend: "ecp5", task: "", constraints: {}, objective: [], locked: {}, initial_ir: {} };
   let estTimer = null;
@@ -220,7 +221,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
       requestAnimationFrame(() => overlay(sec.querySelector(".chart"), [ra, rb], get, target));
     }
     // side-by-side mini transcripts
-    const mini = (rs) => `<div class="mini">${rs.map((r) => `<div class="t"><span class="n">${r.n ?? r.iteration}</span><div><div>${esc(r.action || "")}</div><div class="nums ${r.violations.length ? "bad" : ""}">${fmt(r.metrics.fmax_mhz)} MHz · ${r.metrics.lut} LUT · ${r.metrics.dsp} DSP${r.violations.length ? " · " + esc(r.violations.join("; ")) : " · feasible"}</div></div></div>`).join("")}</div>`;
+    const mini = (rs) => `<div class="mini">${rs.map((r) => `<div class="t"><span class="n">${r.n ?? r.iteration}</span><div><div>${esc(LOOP_TXT(r.action || ""))}</div><div class="nums ${r.violations.length ? "bad" : ""}">${fmt(r.metrics.fmax_mhz)} MHz · ${r.metrics.lut} LUT · ${r.metrics.dsp} DSP${r.violations.length ? " · " + esc(r.violations.join("; ")) : " · 可行"}</div></div></div>`).join("")}</div>`;
     body.appendChild(el(`<div class="cmp-turns"><div class="col"><h4>A</h4>${mini(ra)}</div><div class="col"><h4>B</h4>${mini(rb)}</div></div>`));
   }
 
