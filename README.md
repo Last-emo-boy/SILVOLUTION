@@ -228,6 +228,18 @@ the top bar says so before you type: the server probes the provider's balance at
 start and every 10 minutes (`/api/health` → `llm`). The UI follows the language
 of the conversation. `sa ask "…" [--thread id]` is the same from a shell.
 
+### The harness workbench
+
+`/agh/` on the same host is Agnes Harness's own web UI — every session's full
+transcript, tool records, approvals, provider and model settings — the thing to
+open when you want to see exactly what the agent did under a chat turn. The daemon
+runs with its local-web capability, the harness's `serve` launcher and a TCP relay
+run inside the agh container, and the job server proxies pages and the browser
+websocket with the loopback Host/Origin the harness pins (it refuses any other, by
+design). Operator token, `SA_AGH_WEB_USERS` subjects or an `SA_AGH_WEB_GROUP` SSO
+group only: the workbench shows all conversations. The ⚙ AGH link appears in the
+chat rail for those accounts.
+
 ### Tournaments
 
 "Try both" / "race the planners": the same task as 2–4 **variants** — a different

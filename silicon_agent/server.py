@@ -1273,12 +1273,13 @@ MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=ut
 AGH_WEB = os.environ.get("SA_AGH_WEB", "")                       # host:port of the agh container's web launcher, e.g. agh:4177
 AGH_WEB_ORIGIN = os.environ.get("SA_AGH_WEB_ORIGIN", "http://127.0.0.1:4177")
 AGH_WEB_GROUP = os.environ.get("SA_AGH_WEB_GROUP", "")           # SSO group allowed besides the operator token
+AGH_WEB_USERS = {u.strip() for u in os.environ.get("SA_AGH_WEB_USERS", "").split(",") if u.strip()}   # SSO subjects allowed
 
 
 def _agh_web_allowed(sub: str | None, groups: str) -> bool:
     if not AGH_WEB or sub is None:
         return False
-    if sub == "cli" or SHARED:
+    if sub == "cli" or SHARED or sub in AGH_WEB_USERS:
         return True
     return bool(AGH_WEB_GROUP) and AGH_WEB_GROUP in [g.strip() for g in groups.split(",") if g.strip()]
 

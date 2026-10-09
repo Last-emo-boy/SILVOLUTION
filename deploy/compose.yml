@@ -37,6 +37,7 @@ services:
       SA_AGH_WEB: agh:4177                   # the harness's web workbench inside the agh container (relay -> loopback launcher), proxied at /agh/
       SA_AGH_WEB_ORIGIN: http://127.0.0.1:4178  # the origin the launcher is pinned to inside its container
       SA_AGH_WEB_GROUP: ${SA_AGH_WEB_GROUP:-}
+      SA_AGH_WEB_USERS: ${SA_AGH_WEB_USERS:-}   # SSO subjects allowed into /agh/ (comma-separated)
       SA_PUBLIC_URL: ${SA_PUBLIC_URL:-https://silicon.w33d.xyz}
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
