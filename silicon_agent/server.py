@@ -400,6 +400,33 @@ def _narrate_job_async(job_id: str) -> None:
     for tid, th in list(_threads.items()):
         if any(m.get("job") == job_id and m.get("kind") == "run" for m in th["messages"]):
             threading.Thread(target=_narrate_if_done, args=(tid,), daemon=True).start()
+    threading.Thread(target=_notify, args=(job_id,), daemon=True).start()
+
+
+def _notify(job_id: str) -> None:
+    """Run-finished notification: POST a small JSON to SA_WEBHOOK (and to the job's own `webhook` when it names one),
+    so a user does not have to keep the tab open. Payload: id, status, task, design, backend, best metrics, link."""
+    job = _jobs.get(job_id)
+    if not job:
+        return
+    urls = [u for u in (os.environ.get("SA_WEBHOOK", ""), (job.get("spec") or {}).get("webhook", "")) if u]
+    if not urls:
+        return
+    best = (job.get("summary") or {}).get("best")
+    payload = {"id": job_id, "status": job["status"], "task": job["spec"].get("task", ""), "design": job["spec"].get("design"), "backend": job["spec"].get("backend"),
+               "best": {k: best["metrics"].get(k) for k in ("fmax_mhz", "lut", "dsp", "area_um2")} | {"throughput": best.get("throughput")} if best else None,
+               "link": f"{os.environ.get('SA_PUBLIC_URL', '').rstrip('/')}/work?job={job_id}" if os.environ.get("SA_PUBLIC_URL") else None,
+               "text": (f"{'✓' if best else '✕'} {job['spec'].get('task', job_id)[:80]} — " + (f"{best['metrics']['fmax_mhz']:.1f} MHz · {best['metrics']['lut']} {'cells' if best['metrics'].get('area_um2') else 'LUT'} · {best['metrics']['dsp']} DSP" if best else "no feasible design"))}
+    import urllib.request
+    for u in urls:
+        try:
+            body = payload
+            if "hooks.slack.com" in u or "discord.com/api/webhooks" in u:
+                body = {"text": payload["text"] + (f" {payload['link']}" if payload["link"] else ""), "content": payload["text"]}
+            req = urllib.request.Request(u, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
+            urllib.request.urlopen(req, timeout=10).read()
+        except Exception as e:
+            print(f"webhook {u[:40]}...: {e}", flush=True)
 
 
 def _submit(spec: dict, max_iter: int, sub: str, parent: dict | None = None, thread: str | None = None) -> str:
@@ -675,6 +702,48 @@ def _mutation_start(job_id: str, job: dict) -> dict:
         _mutation_jobs[job_id] = t
         t.start()
     return {"status": "running", "note": "mutation scoring started; call again in a minute"}
+
+
+def _export_md(tid: str) -> str:
+    th = _threads[tid]
+    out = [f"# silicon-agent · {th.get('title') or tid}", "", f"_conversation {tid} · exported {time.strftime('%Y-%m-%d %H:%M')}_", ""]
+    for m in th["messages"]:
+        t = time.strftime("%H:%M", time.localtime(m.get("t", 0)))
+        if m["role"] == "user":
+            out += [f"**You** · {t}", "", m["text"], ""]
+            continue
+        if m.get("kind") == "run" and m.get("job") in _jobs:
+            j = _jobs[m["job"]]; sp = j["spec"]; c = sp.get("constraints", {})
+            out += [f"**Run `{m['job']}`** · {t} — {sp.get('task', '')}", "",
+                    f"- design `{sp.get('design')}` on `{sp.get('backend')}`; constraints: ≥{c.get('fmax_mhz')} MHz" + (f", ≤{c['max_dsp']} DSP" if c.get("max_dsp") is not None else "") + (f", ≤{c['max_lut']} LUT" if c.get("max_lut") is not None else "") + f"; objective {c.get('objective')}",
+                    f"- locked: `{json.dumps({k: v for k, v in sp.get('locked', {}).items() if k != 'coefs'})}`", ""]
+            res = [e for e in j["events"] if e["kind"] == "result"]
+            if res:
+                asic = any(e["metrics"].get("area_um2") is not None for e in res)
+                out += ["| iter | " + ("cells | area µm² " if asic else "LUT | DSP ") + "| MHz | throughput | verdict | change |", "|---|---|---|---|---|---|---|"]
+                for e in res:
+                    mm = e["metrics"]
+                    out.append(f"| {e['iteration']}{'.' + str(e['slot']) if e.get('slot') else ''} | {mm['lut']} | {f'{mm.get('area_um2', 0):.0f}' if asic else mm['dsp']} | {mm['fmax_mhz']:.1f} | {e['throughput']} | {'feasible' if not e['violations'] else '; '.join(e['violations'])} | {(e.get('action') or '')[:90]} |")
+                out.append("")
+            best = (j.get("summary") or {}).get("best")
+            if best:
+                out += [f"**Best**: iteration {best['iteration']} — {best['metrics']['fmax_mhz']:.1f} MHz, {best['metrics']['lut']} {'cells' if best['metrics'].get('area_um2') else 'LUT'}, {best['metrics']['dsp']} DSP, {best.get('throughput')} {(j.get('summary') or {}).get('throughput_unit', '')}; IR `{json.dumps({k: v for k, v in best['ir'].items() if k != 'coefs'})}`", ""]
+            stop = next((e for e in j["events"] if e["kind"] == "plan" and e.get("stop")), None)
+            if stop:
+                out += [f"_Stopped: {stop.get('stop_reason') or stop.get('action')}_", ""]
+            continue
+        if m.get("kind") == "proposal":
+            pr = _proposals.get(m.get("proposal"))
+            if pr:
+                v = _proposal_view(m["proposal"])
+                out += [f"**Generator change proposal `{m['proposal']}`** · {t} — {v['title']} ({v['status']})", ""] + [f"- {'✓' if st['ok'] else '✕'} {st['name']}" for st in v["steps"]] + [""]
+            continue
+        if m.get("text"):
+            out += [f"**Agent** · {t}" + (" · resumed" if m.get("resumed") else ""), "", m["text"], ""]
+            if m.get("usage"):
+                u = m["usage"]
+                out += [f"_{u.get('calls')} model calls · {(u.get('input') or 0) + (u.get('cache_read') or 0) + (u.get('output') or 0)} tokens · ${(u.get('usd_micros') or 0) / 1e6:.4f} · {u.get('model')}_", ""]
+    return "\n".join(out)
 
 
 def _run_note(spec: dict, lang: str) -> str:
@@ -1007,6 +1076,19 @@ class Handler(BaseHTTPRequestHandler):
                 r["backend"] = j["spec"].get("backend") if j else None
             rows.sort(key=lambda r: r["last"], reverse=True)
             return self._json(200, rows)
+        if len(parts) == 3 and parts[0] == "threads" and parts[2] == "export.md":
+            # the conversation as Markdown: messages, run specs and results, proposals -- a report to share or file
+            th = _threads.get(parts[1])
+            if not th or not _visible(th, sub):
+                return self._json(404, {"error": "no such thread"})
+            data = _export_md(parts[1]).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="silicon-agent-{parts[1]}.md"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if len(parts) == 2 and parts[0] == "threads":
             th = _threads.get(parts[1])
             if not th or not _visible(th, sub):

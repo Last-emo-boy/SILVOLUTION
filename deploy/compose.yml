@@ -32,6 +32,8 @@ services:
       SA_AGH_HOME: /srv/sa/agh               # the agh service's home: its unix socket lives under data/daemon/
       SA_AGH_PRESET: silicon                 # AGH recipe for chat sessions (the fork's read-only tool set)
       SA_ASIC_QUEUE: /srv/sa/asic/queue      # the orfs service's request queue (sky130 backend)
+      SA_WEBHOOK: ${SA_WEBHOOK:-}            # optional: POSTed a run-finished JSON (Slack/Discord webhooks get a text line)
+      SA_PUBLIC_URL: ${SA_PUBLIC_URL:-https://silicon.w33d.xyz}
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     volumes:
