@@ -5,6 +5,8 @@ you can get on this device" without a new run, and seeds new runs with known-goo
 
 from __future__ import annotations
 
+import json
+
 from .ir import Metrics
 
 
@@ -24,7 +26,8 @@ def points(jobs: dict, design: str, backend: str) -> list[dict]:
             m = Metrics(**{k: mm.get(k, d) for k, d in (("fmax_mhz", 0), ("lut", 0), ("ff", 0), ("dsp", 0), ("bram", 0), ("critical_path", []), ("sim_passed", True))},
                         fits=mm.get("fits", True), sim_stages=mm.get("sim_stages") or {}, power_mw=mm.get("power_mw"))
             ir = {k: v for k, v in e["ir"].items() if k != "coefs"}
-            key = (tuple(sorted(ir.items())), tuple(sorted((sp.get("locked") or {}).items())))
+            # IRs may hold lists (graph nodes, coefficient tables): the dedup key is their canonical JSON
+            key = json.dumps([ir, sp.get("locked") or {}], sort_keys=True)
             if key in seen:
                 continue
             seen.add(key)
