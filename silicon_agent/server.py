@@ -1114,7 +1114,20 @@ class Handler(BaseHTTPRequestHandler):
             reps = sorted(bdir.glob("*.json")) if bdir.exists() else []
             last = json.loads(reps[-1].read_text()) if reps else None
             status = (bdir / "LAST").read_text().strip() if (bdir / "LAST").exists() else ""
-            return self._json(200, {"status": status, "reports": [r.name for r in reps[-10:]], "last": last})
+            # the latest report per tag (nightly, agent, planner-pro, knob ...) as a compact table: case -> ok/first/best
+            latest: dict = {}
+            for r in reps:
+                tag = r.name.rsplit("-", 2)[0]
+                latest[tag] = r
+            by_tag = {}
+            for tag, r in latest.items():
+                try:
+                    rep = json.loads(r.read_text())
+                except ValueError:
+                    continue
+                by_tag[tag] = {"file": r.name, "t": rep.get("t"), "planner": rep.get("planner"), "agent": rep.get("agent"), "summary": rep.get("summary"),
+                               "cases": {c["name"]: {"ok": c["ok"], "first": c["first_feasible"], "rounds": c["rounds"], "best": c["best"], "job": c["job"]} for c in rep.get("cases", [])}}
+            return self._json(200, {"status": status, "reports": [r.name for r in reps[-10:]], "last": last, "by_tag": by_tag})
         if path == "/pareto":
             from . import pareto
             q = parse_qs(u.query)
