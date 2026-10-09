@@ -255,7 +255,7 @@ def cmd_run(a) -> int:
         ag = r.get("agent") or {}
         lg = ag.get("ledger") or {}
         print(f"   {'OK ' if r['ok'] else 'REG'} feasible={r['feasible']} first@{r['first_feasible']} rounds={r['rounds']} "
-              f"{(f'{b['fmax_mhz']:.1f} MHz {b['lut']} LUT {b['dsp']} DSP thr={b['throughput']}' if b else '-')} eda={r['eda_seconds']}s wall={r['wall_seconds']}s job={r['job']}"
+              f"{('%.1f MHz %s LUT %s DSP thr=%s' % (b['fmax_mhz'], b['lut'], b['dsp'], b['throughput'])) if b else '-'} eda={r['eda_seconds']}s wall={r['wall_seconds']}s job={r['job']}"
               + (f"  agent: {len(ag.get('tools') or [])} tools, {lg.get('model_calls')} model calls, {lg.get('tokens')} tok, ${lg.get('usd')}" if lg else "")
               + (f"  FAILED TOOLS {ag['failed_tools']}" if ag.get("failed_tools") else "")
               + (f"  ERROR {str(r['error'])[:160]}" if r["error"] else ""), flush=True)
