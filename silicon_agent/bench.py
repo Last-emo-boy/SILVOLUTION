@@ -108,6 +108,11 @@ CASES: list[tuple[str, dict, dict]] = [
                                  {"kind": "decim", "ir": {"taps": 16, "decim": 4, "data_width": 12, "coef_width": 12, "cutoff": 0.1, "acc_width": 29, "fold": 1, "pipe_mul": 1, "reg_in": True, "dsp_regs": "in_pipe_out", "sum_tree": True}},
                                  {"kind": "fir", "ir": {"taps": 8, "data_width": 12, "coef_width": 12, "cutoff": 0.3, "acc_width": 28, "symmetric": False, "fold": 1, "pipe_mul": 1, "reg_in": True, "dsp_regs": "in_pipe_out"}}], "fifo_depth": 16, "adapt": "truncate"}},
      {"feasible": True, "max_rounds": 4}),
+    ("iir-ecp5-40", {
+        "task": "4th-order Butterworth IIR lowpass, 16-bit, ECP5, 40 MHz", "design": "iir", "backend": "ecp5", "locked": {"sections": 2, "data_width": 16, "coef_width": 18, "cutoff": 0.1},
+        "constraints": {"fmax_mhz": 40, "max_dsp": 10, "objective": ["maximize_fmax", "minimize_lut"]},
+        "initial_ir": {"coef_frac": 15, "state_width": 24, "pipe_mul": 0, "reg_in": True, "dsp_regs": "none"}},
+     {"feasible": True, "max_rounds": 4}),
     ("cordic-ecp5-200", {
         "task": "16-bit sin/cos CORDIC, ECP5, 200 MHz", "design": "cordic", "backend": "ecp5", "locked": {"mode": "rotate", "width": 16},
         "constraints": {"fmax_mhz": 200, "max_lut": 3500, "objective": ["maximize_throughput", "minimize_lut"]},

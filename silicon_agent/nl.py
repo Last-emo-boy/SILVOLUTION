@@ -39,6 +39,8 @@ Available designs:
           "sample-rate reduction"; throughput is 1/fold input samples per cycle.
   nco     NCO / DDS with complex mixer: phase accumulator + sine table + I/Q multiply (digital down-converter front end,
           "mixer", "DDC", "数控振荡器", "混频"). locked: data_width, phase_width (16-48), sin_width, out_width. 1 sample/cycle.
+  iir     IIR lowpass (Butterworth biquad cascade, exact fixed point; "IIR", "biquad", "recursive filter", "无限冲激响应").
+          locked: sections (order/2), data_width, coef_width, cutoff. 1 sample/cycle; Fmax is bounded by the recursive loop.
   conv2d  streaming single-channel K x K 2-D convolution (image filter / blur / edge kernel) with line buffers.
           locked: k (3/5/7), width (image width in pixels), data_width (8/12/16), coef_width (8/12/16).
           Throughput is par_rows/k pixels per cycle. A pixel rate R MHz means fmax >= R*k/par_rows.
@@ -46,7 +48,7 @@ Available designs:
           Pipelined 1 sample/cycle or iterative (fold = iterations) for tiny area. Precision ~ iterations bits.
   fft     streaming N-point complex FFT, radix-2 SDF pipeline, 1 sample/cycle. locked: n (power of 2), data_width.
           4 DSPs per stage; natural-order output needs bit_reverse=true (+N latency).
-  graph   a datapath of 2-6 heterogeneous stream nodes in series (any of fir / decim / nco / conv2d / cordic / fft) with FIFOs.
+  graph   a datapath of 2-6 heterogeneous stream nodes in series (any of fir / decim / nco / iir / conv2d / cordic / fft) with FIFOs.
           locked: {"nodes": [{"kind": ..., "ir": {<that node's task fields>}}, ...]}; initial_ir: {"nodes": [{"kind", "ir": <full IR>}], "fifo_depth": 32, "adapt": "truncate"}.
           Use it when the user describes a pipeline of different blocks ("filter then FFT", "CORDIC then low-pass").
   fir_chain  a cascade of 2-4 FIR stages with FIFOs between them (e.g. anti-alias then shaping, or decimation

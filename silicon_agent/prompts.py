@@ -226,6 +226,33 @@ lut table (8-bit address) -> 211 LUT, 0 BRAM, 113 MHz. The phase accumulator is 
 114 LUT, 1 BSRAM, 195 MHz.""",
 }
 
+IIR_WHAT = "an IIR lowpass filter: a cascade of second-order sections (Butterworth biquads, transposed direct form II, exact fixed point)"
+
+IIR_IR = """IR fields and legal ranges (sections, data_width, coef_width, cutoff and the coefficients are fixed by the task):
+  coef_frac   int 4..coef_width-2  fractional bits of the quantized coefficients: pole accuracy (a sharp lowpass has
+                                   poles near z=1 and needs many bits or it goes unstable -- validate() rejects that)
+  state_width int dw+2..48         bits of the two state registers per section: headroom above data_width + the
+                                   rounding noise floor; the carry chains of the state adders scale with it
+  pipe_mul    int 0..1             register after the feed-forward (b) multipliers; the recursive (a) multiplies and
+                                   the state adders form the loop y -> a1*y, a2*y -> s1/s2 -> y which NO register can
+                                   break without changing the filter: it is the intrinsic critical path
+  reg_in      bool                 register the input
+  dsp_regs    str in {"none","out","in_out","in_pipe_out"}  DSP-internal registers of the feed-forward multipliers only
+
+Structure summary: 5 multipliers per section (b0 b1 b2 a1 a2), one sample per cycle, output saturated to data_width.
+Fmax is set by the recursive loop: multiplier (data_width x coef_width) + two adders + saturation in one cycle, so
+it is low (tens of MHz on an FPGA) and the levers are coef_width/data_width (task), state_width (shorter carry
+chains), and the device. Throughput cannot change; the objectives that move are fmax and resources."""
+
+IIR_IR_JSON = '{"coef_frac":..,"state_width":..,"pipe_mul":..,"reg_in":..,"dsp_regs":".."}'
+
+IIR_FACTS = {
+    "ecp5": """ECP5, measured on 2 sections, 16-bit data, 18-bit coefficients (frac 15), state 24, dsp_regs in_pipe_out: 8 MULT18X18D,
+584 LUT, 36.2 MHz; the critical path is the recursive loop s1 -> y -> a1*y (carry chain) -> s1.""",
+    "gowin": """Gowin, same filter, dsp_regs none: 8 DSP, 505 LUT, 52.8 MHz (the loop again).""",
+    "ice40": """iCE40, 12-bit data, 16-bit coefficients (frac 14), state 20, pipe_mul 1: 8 SB_MAC16, 502 LC, 23.7 MHz.""",
+}
+
 CORDIC_WHAT = "a fixed-point CORDIC engine (rotation: sin/cos; vectoring: magnitude/atan2) as a streaming pipeline or an iterative unit"
 
 CORDIC_IR = """IR fields and legal ranges:
@@ -292,9 +319,9 @@ BRAM (26 BSRAM). Do not retry a cmul=four shape that was reported as not fitting
 }
 
 
-GRAPH_WHAT = "a datapath: a chain of 2-6 heterogeneous stream nodes (fir, decim, nco, conv2d, cordic, fft) connected by valid/ready FIFOs"
+GRAPH_WHAT = "a datapath: a chain of 2-6 heterogeneous stream nodes (fir, decim, nco, iir, conv2d, cordic, fft) connected by valid/ready FIFOs"
 
-GRAPH_IR = """IR: {"nodes": [{"kind": "fir"|"decim"|"nco"|"conv2d"|"cordic"|"fft", "ir": <that design's IR>}, ...], "fifo_depth": 4..64, "adapt": "truncate"|"round"|"saturate"}
+GRAPH_IR = """IR: {"nodes": [{"kind": "fir"|"decim"|"nco"|"iir"|"conv2d"|"cordic"|"fft", "ir": <that design's IR>}, ...], "fifo_depth": 4..64, "adapt": "truncate"|"round"|"saturate"}
 The node kinds and each node's task-defining fields are fixed; you edit each node's architecture knobs (the same
 knobs those designs expose on their own: fold/symmetric/dsp_regs/... for fir, par_rows/tree_regs/line_mem for conv2d,
 unroll/fold/guard_bits for cordic, mul_regs/bf_regs/growth/delay_mem for fft), plus fifo_depth and adapt.
@@ -315,6 +342,7 @@ PROMPTS = {
     "graph": {"what": GRAPH_WHAT, "ir": GRAPH_IR, "ir_json": GRAPH_IR_JSON, "facts": GRAPH_FACTS},
     "decim": {"what": DECIM_WHAT, "ir": DECIM_IR, "ir_json": DECIM_IR_JSON, "facts": DECIM_FACTS},
     "nco": {"what": NCO_WHAT, "ir": NCO_IR, "ir_json": NCO_IR_JSON, "facts": NCO_FACTS},
+    "iir": {"what": IIR_WHAT, "ir": IIR_IR, "ir_json": IIR_IR_JSON, "facts": IIR_FACTS},
     "cordic": {"what": CORDIC_WHAT, "ir": CORDIC_IR, "ir_json": CORDIC_IR_JSON, "facts": CORDIC_FACTS},
     "fft": {"what": FFT_WHAT, "ir": FFT_IR, "ir_json": FFT_IR_JSON, "facts": FFT_FACTS},
     "fir_chain": {"what": CHAIN_WHAT, "ir": CHAIN_IR, "ir_json": CHAIN_IR_JSON, "facts": CHAIN_FACTS},

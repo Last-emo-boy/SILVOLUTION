@@ -37,6 +37,9 @@ def node_golden(kind, ir, xs, mode_in_width):
     if kind == "decim":
         from silicon_agent.decim import golden
         return golden(ir, xs)
+    if kind == "iir":
+        from silicon_agent.iir import golden
+        return golden(ir, xs)
     if kind == "nco":
         from silicon_agent.nco import golden
         return [o[0] for o in golden(ir, xs, [1 << (ir.phase_width - 3)] * len(xs))]

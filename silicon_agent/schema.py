@@ -122,6 +122,27 @@ SCHEMAS = {
         "constraints_default": {"fmax_mhz": 150, "max_dsp": 2, "max_lut": 1000},
         "locked_default": {"data_width": 16, "phase_width": 32, "sin_width": 16, "out_width": 16},
     },
+    "iir": {
+        "title": "IIR lowpass as a cascade of biquads (Butterworth from cutoff + sections; transposed direct form II, bit-exact fixed point)",
+        "locked_candidates": ["sections", "data_width", "coef_width", "cutoff"],
+        "fields": [
+            {"name": "sections", "type": "int", "min": 1, "max": 8, "hint": "biquads (filter order / 2)"},
+            {"name": "data_width", "type": "choice", "choices": [8, 12, 16, 18, 24], "hint": "sample bits (in and out)"},
+            {"name": "coef_width", "type": "choice", "choices": [12, 16, 18, 24], "hint": "coefficient bits"},
+            {"name": "cutoff", "type": "float", "min": 0.01, "max": 0.45, "hint": "-3 dB point as a fraction of the sample rate"},
+            {"name": "coef_frac", "type": "int", "min": 4, "max": 22, "hint": "fractional bits of the coefficients (<= coef_width-2); pole precision -- sharp lowpass needs more"},
+            {"name": "state_width", "type": "int", "min": 10, "max": 48, "hint": "section state bits (>= data_width+2): headroom and rounding noise"},
+            {"name": "pipe_mul", "type": "int", "min": 0, "max": 1, "hint": "register after the feed-forward multipliers (the recursive path cannot be pipelined)"},
+            {"name": "reg_in", "type": "bool", "hint": "register the input"},
+            {"name": "dsp_regs", "type": "choice", "choices": ["none", "out", "in_out", "in_pipe_out"], "hint": "DSP-internal registers of the feed-forward multipliers"},
+        ],
+        "presets": {
+            "4th order": {"sections": 2, "data_width": 16, "coef_width": 18, "cutoff": 0.1, "coef_frac": 15, "state_width": 24, "pipe_mul": 0, "reg_in": True, "dsp_regs": "none"},
+            "2nd order compact": {"sections": 1, "data_width": 12, "coef_width": 16, "cutoff": 0.1, "coef_frac": 14, "state_width": 18, "pipe_mul": 0, "reg_in": True, "dsp_regs": "none"},
+        },
+        "constraints_default": {"fmax_mhz": 50, "max_dsp": 10, "max_lut": 2000},
+        "locked_default": {"sections": 2, "data_width": 16, "coef_width": 18, "cutoff": 0.1},
+    },
     "cordic": {
         "title": "CORDIC sin/cos (rotate) or magnitude/atan2 (vector)",
         "locked_candidates": ["mode", "width"],
@@ -161,7 +182,7 @@ SCHEMAS = {
         "locked_default": {"n": 256, "data_width": 16},
     },
     "graph": {
-        "title": "datapath graph: chain of fir / decim / nco / conv2d / cordic / fft nodes with FIFOs",
+        "title": "datapath graph: chain of fir / decim / nco / iir / conv2d / cordic / fft nodes with FIFOs",
         "locked_candidates": ["nodes"],
         "nested": "nodes",
         "fields": [

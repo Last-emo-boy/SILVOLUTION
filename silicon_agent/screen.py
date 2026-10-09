@@ -161,6 +161,17 @@ def estimate_nco(ir: dict, backend: str) -> dict:
     return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": 1.0}
 
 
+def estimate_iir(ir: dict, backend: str) -> dict:
+    sec, dw, cw, sw = ir.get("sections", 2), ir.get("data_width", 16), ir.get("coef_width", 18), ir.get("state_width", 24)
+    dsp = 5 * sec if _style(backend) == "vivado" or (dw <= 18 and cw <= 18) else 8 * sec
+    lut = sec * (sw * 6 + dw * 3 + 40)
+    # the recursive loop: one multiply + two adds + saturation per cycle
+    fmax = (90 if _style(backend) == "vivado" else 55) - 0.6 * max(sw - 20, 0) - 0.5 * max(dw + cw - 32, 0)
+    if _style(backend) != "vivado":
+        fmax *= _scale(backend)
+    return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": 1.0}
+
+
 def estimate_cordic(ir: dict, backend: str) -> dict:
     W = ir["width"] + ir.get("guard_bits", 2); N = ir["iterations"]; U = ir.get("unroll", 1); fold = ir.get("fold", 1)
     dsp = 1 if ir.get("scale_comp") else 0
@@ -206,7 +217,7 @@ def estimate_graph(ir: dict, backend: str) -> dict:
             "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
 
 
-ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft, "decim": estimate_decim, "nco": estimate_nco}
+ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft, "decim": estimate_decim, "nco": estimate_nco, "iir": estimate_iir}
 ESTIMATORS["graph"] = estimate_graph
 
 
@@ -249,6 +260,9 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
     elif design == "nco":
         f += [ir.get("phase_width", 32) / 32, ir.get("lut_addr_width", 12) / 12, 1.0 if ir.get("table_mem") == "lut" else 0.0, ir.get("pipe_lut", 0),
               ir.get("pipe_mix", 0), 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("dither") else 0.0]
+    elif design == "iir":
+        f += [float(ir.get("sections", 2)), ir.get("data_width", 16) / 16, ir.get("coef_width", 18) / 18, ir.get("state_width", 24) / 24,
+              ir.get("coef_frac", 15) / 16, float(ir.get("pipe_mul", 0)), 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0]
     elif design == "cordic":
         f += [ir["width"] / 16, ir["iterations"] / 16, math.log2(ir.get("unroll", 1) + 0.0) if ir.get("unroll", 1) > 0 else 0, 1.0 if ir.get("fold", 1) > 1 else 0.0,
               ir.get("guard_bits", 0) / 4, 1.0 if ir.get("scale_comp") else 0.0, 0.0]

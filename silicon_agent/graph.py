@@ -28,7 +28,7 @@ def DESIGNS_REF():
     return DESIGNS
 
 
-KINDS = ("fir", "decim", "nco", "conv2d", "cordic", "fft")
+KINDS = ("fir", "decim", "nco", "iir", "conv2d", "cordic", "fft")
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,8 @@ def _io(kind: str, ir) -> dict:
         return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True}
     if kind == "decim":
         return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True, "decim": ir.decim}
+    if kind == "iir":
+        return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.data_width), "signed": True}
     if kind == "nco":
         # in a chain the NCO's I output continues; its FCW is fixed to fs/8 (a graph has no side-band control ports)
         return {"in": ("in_data", ir.data_width), "out": ("out_i", ir.out_width), "signed": True, "nco": True}
@@ -142,7 +144,7 @@ def emit_graph(a: GraphArch, backend: str = "ecp5") -> str:
         if kind == "fir":
             extra = ", .coef_we(1'b0), .coef_addr('0), .coef_data('0)" if getattr(a.node_ir(i), "coef_port", False) else ""
             inst.append(f"    n{i}_{top} u_n{i} (.clk(clk), .rst(rst), .in_valid({src_v}), .in_data({src_d}), .in_ready({rdy}), .out_valid({ov}), .out_data({od}){extra});")
-        elif kind == "decim":
+        elif kind in ("decim", "iir"):
             inst.append(f"    n{i}_{top} u_n{i} (.clk(clk), .rst(rst), .in_valid({src_v}), .in_data({src_d}), .in_ready({rdy}), .out_valid({ov}), .out_data({od}));")
         elif kind == "nco":
             pw = a.node_ir(i).phase_width

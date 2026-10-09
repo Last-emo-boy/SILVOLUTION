@@ -232,6 +232,24 @@ endmodule
 """
 
 
+# ---------------------------------------------------------------- iir (fir-shaped bench; output width = data width)
+def iir_vectors(ir, seed: int = 1, n: int = 200) -> tuple[list[str], list[str]]:
+    import math as _m
+    from silicon_agent.iir import golden as iir_golden
+    DW = ir.data_width
+    rng = random.Random(seed)
+    lo, hi = -(1 << (DW - 1)), (1 << (DW - 1)) - 1
+    xs = [hi] * 30 + [0] * 10 + [lo] + [0] * 20 + [int(0.5 * hi * _m.sin(2 * _m.pi * ir.cutoff * i)) for i in range(40)] + [rng.randint(lo, hi) for _ in range(n)]
+    ys = iir_golden(ir, xs)
+    gaps = [0 if i < 100 or i >= len(xs) - n // 2 else rng.choice([0, 0, 1, 2]) for i in range(len(xs))]
+    stim = [f"{g:x} {x & ((1 << DW) - 1):0{max(1, (DW + 3) // 4)}x}" for g, x in zip(gaps, xs)]
+    exp = [f"{y & ((1 << DW) - 1):0{max(1, (DW + 3) // 4)}x}" for y in ys]
+    return stim, exp
+
+
+TB_IIR = TB_FIR.replace("fir_top dut", "iir_top dut").replace("{COEF_TIE}", "").replace("parameter int DW = {DW}, AW = {AW};", "parameter int DW = {DW}, AW = {DW};")
+
+
 # ---------------------------------------------------------------- conv2d
 def conv_vectors(ir, seed: int = 1, n_rows: int | None = None) -> tuple[list[str], list[str]]:
     K, W, DW, AW = ir.k, ir.width, ir.data_width, ir.acc_width
