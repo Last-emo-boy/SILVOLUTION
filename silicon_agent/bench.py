@@ -201,10 +201,21 @@ def run_agent_case(server: str, token: str, name: str, spec: dict, tag: str) -> 
                                            "failed_tools": [t.get("name") for t in reply.get("tools", []) if t.get("status") == "failed"]}
 
 
+def golden_point(server: str, token: str, spec: dict) -> dict | None:
+    """The best design the server has already measured for this case's generator / device under its constraints
+    (the cross-run Pareto store); None when nothing measured meets them yet."""
+    c = spec["constraints"]
+    q = "&".join(f"{k}={v}" for k, v in (("design", spec["design"]), ("backend", spec["backend"]), ("fmax_mhz", c.get("fmax_mhz")), ("max_dsp", c.get("max_dsp")), ("max_lut", c.get("max_lut"))) if v is not None)
+    r = _req(server, token, "GET", f"/pareto?{q}")
+    return r.get("best_under")
+
+
 def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_iter: int, no_memory: bool, tag: str, reuse: str | None = None,
-             planner: str | None = None, agent: bool = False) -> dict:
+             planner: str | None = None, agent: bool = False, golden: bool = False) -> dict:
     """Submit through the job server (so it serializes with everything else and shows in the UI), wait, score.
-    With `agent`, the case goes through the chat instead: the harness agent interprets the task sentence itself."""
+    With `agent`, the case goes through the chat instead: the harness agent interprets the task sentence itself.
+    With `golden`, no planner at all: the best design already measured for the case is re-measured as a one-point
+    sweep -- a generator / toolchain / simulation-model regression test that needs no model account."""
     spec = json.loads(json.dumps(spec))
     spec["task"] = f"[{tag}] {spec['task']}"
     if no_memory:
@@ -213,6 +224,17 @@ def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_i
         spec["planner"] = planner
     t0 = time.time()
     agent_info = None
+    if golden and not reuse:
+        g = golden_point(server, token, spec)
+        if not g:
+            return {"name": name, "job": None, "design": spec["design"], "backend": spec["backend"], "status": "no-golden", "feasible": False,
+                    "first_feasible": None, "rounds": 0, "planner_calls": 0, "eda_seconds": 0, "wall_seconds": 0.0, "best": None,
+                    "ok": True, "skipped": "no measured design meets the case yet", "expect": expect, "error": None}
+        ir = {k: v for k, v in g["ir"].items() if k not in (spec.get("locked") or {})}
+        spec["initial_ir"] = ir
+        spec["sweep"] = {k: [v] for k, v in ir.items()}
+        spec["golden"] = {"job": g["job"], "iteration": g["iteration"], "fmax_mhz": g["fmax_mhz"], "lut": g["lut"], "dsp": g["dsp"]}
+        max_iter = 1
     if agent and not reuse:
         jid, agent_info = run_agent_case(server, token, name, spec, tag)
         if not jid:
@@ -234,7 +256,14 @@ def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_i
     ok = bool(best) == expect.get("feasible", True) and (first is None or first <= expect.get("max_rounds", 99))
     if expect.get("feasible", True) and best is None:
         ok = False
+    gold = spec.get("golden")
+    if gold and best:
+        # the same design re-measured: Fmax may move with the P&R seed noise (6 %), the cell count must not grow
+        drift = best["metrics"]["fmax_mhz"] / max(gold["fmax_mhz"], 1) - 1
+        ok = ok and drift > -0.06 and best["metrics"]["lut"] <= gold["lut"] * 1.15 and best["metrics"]["dsp"] <= gold["dsp"]
+        gold = {**gold, "fmax_drift": round(drift, 3)}
     return {"name": name, "job": jid, "design": spec["design"], "backend": spec["backend"], "status": j["status"], "feasible": bool(best), **({"agent": agent_info} if agent_info else {}),
+            **({"golden": gold} if gold else {}),
             "first_feasible": first, "rounds": len(results), "planner_calls": plans, "eda_seconds": round(eda_s, 1), "wall_seconds": round(time.time() - t0, 1),
             "best": {"fmax_mhz": best["metrics"]["fmax_mhz"], "lut": best["metrics"]["lut"], "dsp": best["metrics"]["dsp"], "throughput": best["throughput"]} if best else None,
             "ok": ok, "expect": expect, "error": j.get("error")}
@@ -249,17 +278,21 @@ def cmd_run(a) -> int:
     existing = {j["task"]: j["id"] for j in _req(server, token, "GET", "/jobs")} if a.reuse else {}
     for name, spec, expect in cases:
         print(f"== {name} ({spec['design']}/{spec['backend']})", flush=True)
-        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"), a.planner, a.agent)
+        r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"), a.planner, a.agent, a.golden)
         rows.append(r)
         b = r["best"]
         ag = r.get("agent") or {}
         lg = ag.get("ledger") or {}
+        if r.get("skipped"):
+            print(f"   SKIP {r['skipped']}", flush=True)
+            continue
         print(f"   {'OK ' if r['ok'] else 'REG'} feasible={r['feasible']} first@{r['first_feasible']} rounds={r['rounds']} "
               f"{('%.1f MHz %s LUT %s DSP thr=%s' % (b['fmax_mhz'], b['lut'], b['dsp'], b['throughput'])) if b else '-'} eda={r['eda_seconds']}s wall={r['wall_seconds']}s job={r['job']}"
               + (f"  agent: {len(ag.get('tools') or [])} tools, {lg.get('model_calls')} model calls, {lg.get('tokens')} tok, ${lg.get('usd')}" if lg else "")
               + (f"  FAILED TOOLS {ag['failed_tools']}" if ag.get("failed_tools") else "")
+              + (f"  golden {r['golden']['fmax_mhz']:.1f} MHz from {r['golden']['job']} (drift {r['golden'].get('fmax_drift', 0):+.1%})" if r.get("golden") else "")
               + (f"  ERROR {str(r['error'])[:160]}" if r["error"] else ""), flush=True)
-    rep = {"tag": a.tag, "t": time.time(), "max_iter": a.max_iter, "no_memory": a.no_memory, "planner": a.planner, "agent": a.agent, "cases": rows,
+    rep = {"tag": a.tag, "t": time.time(), "max_iter": a.max_iter, "no_memory": a.no_memory, "planner": a.planner, "agent": a.agent, "golden": a.golden, "cases": rows,
            "summary": {"n": len(rows), "ok": sum(r["ok"] for r in rows), "feasible": sum(r["feasible"] for r in rows),
                        "mean_first_feasible": round(sum(r["first_feasible"] or a.max_iter + 1 for r in rows) / max(len(rows), 1), 2),
                        "eda_seconds": round(sum(r["eda_seconds"] for r in rows), 1),
@@ -292,7 +325,7 @@ def compare(old: dict, new: dict, fmax_tol: float = 0.06) -> list[str]:
     by = {c["name"]: c for c in old["cases"]}
     for c in new["cases"]:
         o = by.get(c["name"])
-        if not o:
+        if not o or o.get("skipped") or c.get("skipped"):
             continue
         if o["feasible"] and not c["feasible"]:
             alerts.append(f"{c['name']}: was feasible, now not")
@@ -347,6 +380,7 @@ def main(argv: list[str]) -> int:
     r.add_argument("--reuse", action="store_true", help="attach to jobs with the same [tag] task already on the server instead of resubmitting")
     r.add_argument("--planner", help="planner model for every case (A/B: run the suite once per model with distinct --tag)")
     r.add_argument("--agent", action="store_true", help="drive each case through the chat (Agnes Harness agent) instead of submitting the spec directly")
+    r.add_argument("--golden", action="store_true", help="no planner: re-measure the best design already known for each case (generator / toolchain regression, no model account needed)")
     s = sub.add_parser("show"); s.add_argument("--last", type=int, default=5); s.add_argument("--dir")
     sub.add_parser("cases")
     a = ap.parse_args(argv)

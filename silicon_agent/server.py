@@ -1244,8 +1244,10 @@ class Handler(BaseHTTPRequestHandler):
                     rep = json.loads(r.read_text())
                 except ValueError:
                     continue
-                by_tag[tag] = {"file": r.name, "t": rep.get("t"), "planner": rep.get("planner"), "agent": rep.get("agent"), "summary": rep.get("summary"),
-                               "cases": {c["name"]: {"ok": c["ok"], "first": c["first_feasible"], "rounds": c["rounds"], "best": c["best"], "job": c["job"]} for c in rep.get("cases", [])}}
+                by_tag[tag] = {"file": r.name, "t": rep.get("t"), "planner": rep.get("planner"), "agent": rep.get("agent"), "golden": rep.get("golden"), "summary": rep.get("summary"),
+                               "cases": {c["name"]: {"ok": c["ok"], "first": c["first_feasible"], "rounds": c["rounds"], "best": c["best"], "job": c["job"],
+                                                     **({"skipped": c["skipped"]} if c.get("skipped") else {}), **({"drift": c["golden"].get("fmax_drift")} if c.get("golden") else {})}
+                                         for c in rep.get("cases", [])}}
             return self._json(200, {"status": status, "reports": [r.name for r in reps[-10:]], "last": last, "by_tag": by_tag})
         if path == "/pareto":
             from . import pareto
