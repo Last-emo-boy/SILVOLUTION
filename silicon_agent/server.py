@@ -181,6 +181,13 @@ def _worker():
 
             def on_event(ev: dict):
                 rec = {"t": round(time.time() - job["started"], 1), **ev}
+                if ev.get("kind") == "plan":
+                    # the loop keeps a run alive when the planner is gone ("planner unavailable: ..." and stop); that
+                    # is where an exhausted model account shows up for runs, so note it for /health
+                    if str(ev.get("diagnosis", "")).startswith("planner unavailable"):
+                        _llm_failed(str(ev["diagnosis"]))
+                    elif not ev.get("fallback"):
+                        _llm_ok()
                 with _lock:
                     job["events"].append(rec)
                 with evlog.open("a") as f:
@@ -212,6 +219,7 @@ def _worker():
             with _lock:
                 job["status"] = "error"
                 job["error"] = f"{e}\n{traceback.format_exc()[-2000:]}"
+                _llm_failed(str(e))
                 _save_state(job_id)
         finally:
             with _lock:
@@ -515,6 +523,29 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
                            "alternatives": it.get("alternatives") or []})
     _save_thread(tid)
     return {"action": "fork" if parent else "run", "job": job_id}
+
+
+# the model account's health as the server last saw it: a 401/402/403 from DeepSeek (chat turn or planner) sets it,
+# the next successful model-driven turn or run clears it; /health carries it so the UI can warn before the user types
+_llm_state: dict = {"ok": True}
+
+
+def _llm_failed(msg: str) -> bool:
+    if "Insufficient Balance" in msg or "QUOTA" in msg:
+        code = 402
+    else:
+        # a bare "402" could be part of a job id; the account errors always come with their HTTP status spelled out
+        m = re.search(r"HTTP (?:Error )?(40[123])\b", msg)
+        if not m:
+            return False
+        code = int(m.group(1))
+    _llm_state.update({"ok": False, "code": code, "since": _llm_state.get("since") or time.time(), "last": time.time()})
+    return True
+
+
+def _llm_ok() -> None:
+    if not _llm_state.get("ok", True):
+        _llm_state.clear(); _llm_state["ok"] = True
 
 
 _formal_jobs: dict[str, threading.Thread] = {}
@@ -919,6 +950,8 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
         r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（这一轮被中止）" if lang == "zh" else "(turn cut short)")
     with _lock:
         th.pop("live", None); th.pop("live_note", None)
+        if r.get("stop") != "cancelled" and (r["text"] or r["tools"]):
+            _llm_ok()
         th["messages"].append({"role": "assistant", "kind": "text", "text": r["text"] or ("（没有回复）" if lang == "zh" else "(no reply)"),
                                "job": started[-1] if started else (_thread_jobs(tid) or [None])[-1], "t": time.time(), "source": "agh", **({"resumed": True} if r.get("resumed") else {}),
                                **({"usage": r["usage"]} if r.get("usage") else {}),
@@ -1020,6 +1053,7 @@ def _chat_turn(tid: str, text: str, sub: str) -> None:
         else:
             msg = str(e)
             if "QUOTA" in msg or "402" in msg or "Insufficient Balance" in msg:
+                _llm_failed(msg)
                 lang = nl._lang(text)
                 msg = ("模型账户余额不足（DeepSeek 返回 402）：请给 DeepSeek 账户充值后重发这条消息；已启动的运行不受影响，只是规划器和对话暂停。"
                        if lang == "zh" else
@@ -1107,7 +1141,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/health", "/healthz"):
             from . import agh
             return self._json(200, {"ok": True, "backends": list(BACKENDS), "designs": list(DESIGNS),
-                                    "queued": _queue.qsize(), "jobs": len(_jobs), "runtime": "agh" if agh.enabled() else "builtin",
+                                    "queued": _queue.qsize(), "jobs": len(_jobs), "runtime": "agh" if agh.enabled() else "builtin", "llm": dict(_llm_state),
                                     **({"modes": {k: v["model"] + (f" · thinking {v['thinking']}" if v["thinking"] != "off" else "") for k, v in agh.MODES.items()},
                                         "default_mode": agh.DEFAULT_MODE} if agh.enabled() else {})})
         # static UI (public: sluice gates it before it reaches us)

@@ -240,6 +240,7 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
 .agent-steps-list .call code { font: 12px var(--mono); color: var(--text); } .agent-steps-list .call .args { font: 11px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-steps-list .call.x code { color: var(--bad, #e5484d); }
 .agent-reply { white-space: pre-wrap; font-size: 13px; color: var(--text); border-left: 2px solid var(--border); padding-left: 10px; }
+.banner { background: rgba(217,162,27,.14); color: var(--warn, #d9a21b); border-bottom: 1px solid rgba(217,162,27,.35); padding: 7px 16px; font-size: 12.5px; }
 .memgroup.prop { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; }
 .memgroup.prop.sel { border-color: var(--accent); }
 .memgroup.prop h3 { margin: 0 0 6px; font-size: 14px; }

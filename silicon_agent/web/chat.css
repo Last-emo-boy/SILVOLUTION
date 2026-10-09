@@ -25,6 +25,7 @@ button:disabled { opacity: .45; cursor: default; }
 .rail { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .rail-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 8px; }
 .brand { font-weight: 600; font-size: 13px; } .brand .logo { color: var(--accent); margin-right: 4px; }
+.banner { background: rgba(217,162,27,.14); color: var(--warn); border-bottom: 1px solid rgba(217,162,27,.35); padding: 7px 16px; font-size: 12.5px; }
 .rail-search { padding: 0 12px 8px; }
 .rail-search input { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 9px; font-size: 12.5px; outline: none; }
 .rail-search input:focus { border-color: var(--accent); }
@@ -56,6 +57,7 @@ button:disabled { opacity: .45; cursor: default; }
 .examples { display: flex; flex-wrap: wrap; gap: 8px; }
 .examples button { border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 400; color: var(--text-2); background: var(--surface); border-color: var(--border); text-align: left; }
 .examples button:hover { color: var(--text); border-color: var(--border-2); }
+.examples button.more { color: var(--muted); background: transparent; border-style: dashed; }
 
 /* ---------- messages ---------- */
 .msgs { list-style: none; margin: 0; padding: 20px 0 32px; display: flex; flex-direction: column; gap: 18px; }
