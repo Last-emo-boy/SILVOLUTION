@@ -38,6 +38,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   $("#open-memory").onclick = () => show("memory");
   $("#open-bench").onclick = () => show("bench");
   $("#open-proposals").onclick = () => show("proposals");
+  $("#open-catalog").onclick = () => show("catalog");
   refreshPropCount();
   $("#send").onclick = sendSteer;
   $("#steer").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendSteer(); });
@@ -58,7 +59,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   await refreshJobs();
   setInterval(refreshJobs, 5000);
   const hash = location.hash.slice(1);
-  if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "proposals" || hash.startsWith("proposals/")) show("proposals"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
+  if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "proposals" || hash.startsWith("proposals/")) show("proposals"); else if (hash === "catalog") show("catalog"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
   else if (hash && (!THREAD || jobs.some((j) => j.id === hash))) select(hash);
   else if (THREAD && jobs.length) select(jobs[0].id);
   else show("empty");
@@ -66,10 +67,11 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 
 function show(v) {
   view = v;
-  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare"; $("#bench").hidden = v !== "bench"; $("#proposals").hidden = v !== "proposals";
+  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare"; $("#bench").hidden = v !== "bench"; $("#proposals").hidden = v !== "proposals"; $("#catalog").hidden = v !== "catalog";
   if (v !== "run") { selected = null; clearTimeout(pollTimer); document.querySelectorAll("#runs li").forEach((li) => li.classList.remove("sel")); }
   if (v === "memory") { location.hash = "memory"; renderMemoryView(); }
   if (v === "bench") { location.hash = "bench"; renderBenchView(); }
+  if (v === "catalog") { location.hash = "catalog"; renderCatalogView(); }
   if (v === "proposals") { if (!location.hash.startsWith("#proposals")) location.hash = "proposals"; renderProposalsView(); }
   if (v === "new") location.hash = "new";
 }
@@ -571,6 +573,20 @@ async function renderBenchView() {
   const sums = `<tr><th>summary</th>${tags.map((t) => { const s = b.by_tag[t].summary || {}; return `<th class="muted small-text">${s.ok ?? "?"}/${s.n ?? "?"} ok · first ${s.mean_first_feasible ?? "?"}${s.agent_usd != null ? ` · $${s.agent_usd}` : ""}</th>`; }).join("")}</tr>`;
   box.appendChild(el(`<table class="bench"><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${sums}</tfoot></table>`));
   box.querySelectorAll("a[href^='#']").forEach((a) => { a.onclick = (e) => { e.preventDefault(); const id = a.getAttribute("href").slice(1); if (id) { location.hash = id; select(id); } }; });
+}
+
+// ---------------------------------------------------------------- catalog: best-so-far per generator x device
+async function renderCatalogView() {
+  const box = $("#catalog-view"); box.innerHTML = `<div class="muted">loading…</div>`;
+  const rows = await api("/catalog");
+  box.innerHTML = "";
+  if (!rows.length) { box.appendChild(el(`<div class="muted">nothing measured yet</div>`)); return; }
+  const res = (p) => p.area_um2 != null ? `${p.lut} cells` : `${p.lut} LUT · ${p.dsp} DSP`;
+  const pt = (p, unit) => `<a href="#${esc(p.job)}" title="${esc(JSON.stringify(p.ir))}">${fmt(p.fmax_mhz)} MHz · ${res(p)} · ${p.throughput} ${esc(unit)}</a>`;
+  const head = `<tr><th>generator</th><th>device</th><th>points</th><th>fastest</th><th>smallest</th><th>last run</th></tr>`;
+  const body = rows.map((r) => `<tr><td class="mono">${esc(r.design)}</td><td class="mono">${esc(r.backend)}</td><td>${r.n_points} <span class="muted small-text">(${r.n_front} on the front · ${r.n_runs} runs)</span></td><td>${pt(r.fastest, r.throughput_unit)}</td><td>${pt(r.smallest, r.throughput_unit)}</td><td><a href="#${esc(r.last_job)}" class="${r.last_status === "done" ? "" : "muted"}">${esc(r.last_task || r.last_job)}</a> <span class="muted small-text">${esc(r.last_status)}</span></td></tr>`).join("");
+  box.appendChild(el(`<table class="bench catalog"><thead>${head}</thead><tbody>${body}</tbody></table>`));
+  box.querySelectorAll("a[href^='#']").forEach((x) => { x.onclick = (ev) => { ev.preventDefault(); const id = x.getAttribute("href").slice(1); if (id) { location.hash = id; select(id); } }; });
 }
 
 // ---------------------------------------------------------------- proposals: every generator change the agent proposed, its gate verdict, its A/B

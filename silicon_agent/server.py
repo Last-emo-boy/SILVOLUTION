@@ -23,6 +23,7 @@ API
   GET  /api/memory               lessons per (design, backend), scored
   GET  /api/bench                last nightly regression status + report
   GET  /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]   every measured point, the Pareto front, best under constraints
+  GET  /api/catalog              every (design, device) measured so far: verified points, fastest / smallest on the front, last run
   POST /api/memory/<d>/<b>/vote  {"id": ..., "vote": "up"|"down"}
   GET  /api/threads              conversations (newest first)
   GET  /api/threads/<id>         messages + the jobs they refer to
@@ -1256,6 +1257,25 @@ class Handler(BaseHTTPRequestHandler):
             want = {k: float(q[k][0]) for k in ("fmax_mhz", "max_dsp", "max_lut") if k in q}
             best = pareto.best_under(pts, want.get("fmax_mhz"), want.get("max_dsp"), want.get("max_lut")) if want else None
             return self._json(200, {"design": design, "backend": backend, "n_points": len(pts), "front": fr, "points": pts, "best_under": best})
+        if path == "/catalog":
+            # every (design, device) pair ever measured: how many verified points, the Pareto front's extremes, the
+            # last run -- "what do I already have" without opening a run
+            from . import pareto
+            out = []
+            with _lock:
+                pairs = sorted({(j["spec"].get("design", "matmul"), j["spec"].get("backend", "ecp5")) for j in _jobs.values()})
+                for design, backend in pairs:
+                    pts = pareto.points(_jobs, design, backend)
+                    if not pts:
+                        continue
+                    fr = pareto.front(pts)
+                    js = sorted(((jid, j) for jid, j in _jobs.items() if j["spec"].get("design", "matmul") == design and j["spec"].get("backend", "ecp5") == backend), key=lambda x: x[1].get("created", 0))
+                    lid, last = js[-1]
+                    out.append({"design": design, "backend": backend, "n_points": len(pts), "n_front": len(fr), "n_runs": len(js),
+                                "fastest": max(fr, key=lambda p: p["fmax_mhz"]), "smallest": min(fr, key=lambda p: (p["lut"], p["dsp"])),
+                                "last_job": lid, "last_status": last["status"], "last_task": last["spec"].get("task", "")[:120],
+                                "throughput_unit": (last.get("summary") or {}).get("throughput_unit", "")})
+            return self._json(200, out)
         if path == "/schema":
             from .schema import SCHEMAS, OBJECTIVES
             return self._json(200, {"designs": SCHEMAS, "objectives": OBJECTIVES, "backends": {k: v["name"] for k, v in BACKENDS.items()},
