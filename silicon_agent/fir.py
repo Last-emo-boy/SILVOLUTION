@@ -143,8 +143,8 @@ class FirArch:
         if _style(backend) != "vivado":
             d.pop("acc_in_dsp", None)
         for k in ("sum_tree", "pipe_in"):
-            if not d.get(k):
-                d.pop(k, None)  # knobs added later; off = the RTL older entries were measured on
+            if not d.get(k) or d.get("fold", 1) == 1:
+                d.pop(k, None)  # knobs added later; off (or no effect at fold 1) = the RTL older entries were measured on
         return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
 

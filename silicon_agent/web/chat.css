@@ -190,3 +190,8 @@ pre.diff { max-height: 480px; }
 table.sweep { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0; }
 table.sweep th, table.sweep td { text-align: left; padding: 3px 8px 3px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.sweep tr.infeasible td { color: var(--muted); } table.sweep tr.pareto td { color: var(--text); font-weight: 500; }
+svg.scatter { display: block; max-width: 100%; margin: 6px 0; }
+svg.scatter .axis { stroke: var(--border-2); stroke-width: 1; } svg.scatter .target { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; opacity: .7; }
+svg.scatter .front { fill: none; stroke: var(--good); stroke-width: 1.2; opacity: .7; }
+svg.scatter circle.ok { fill: var(--surface-2); stroke: var(--text-2); stroke-width: 1.2; } svg.scatter circle.pareto { fill: var(--good); stroke: var(--good); }
+svg.scatter circle.bad { fill: none; stroke: var(--bad, #e5484d); stroke-width: 1.2; } svg.scatter .lbl { font: 10px var(--mono); fill: var(--muted); }

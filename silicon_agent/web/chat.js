@@ -534,6 +534,19 @@ function sweepCard(jid, j, spec) {
   const d = card(`${jid}:sweep`, T.sweep, `${pts.length} ${T.points} · ${esc(sw.knobs.join(" × "))} · ${pareto.filter(Boolean).length} ${T.paretoPts}`);
   const inner = d.querySelector(".inner");
   const rows = pts.map((p, i) => `<tr class="${p.feasible ? "" : "infeasible"}${pareto[i] ? " pareto" : ""}"><td>${sw.knobs.map((k) => `<span class="chip"><span class="k">${esc(k)}=</span>${esc(JSON.stringify(p.point[k]))}</span>`).join(" ")}</td><td>${fmt(p.fmax_mhz)}</td><td>${asic ? `${p.lut} · ${fmt((p.area_um2 || 0) / 1000, 1)}k` : `${p.lut} · ${p.dsp}`}</td><td>${p.throughput}</td><td>${p.feasible ? "✓" : "✕"}${pareto[i] ? " ★" : ""}</td></tr>`).join("");
+  // scatter: x = the resource of the second objective (LUT / area), y = Fmax; Pareto points filled, infeasible hollow
+  const xs = pts.map((p) => asic ? (p.area_um2 || p.lut) : p.lut), ys = pts.map((p) => p.fmax_mhz);
+  const W = 420, H = 180, pad = 34, x0 = Math.min(...xs) * 0.95, x1 = Math.max(...xs) * 1.05 || 1, y0 = 0, y1 = Math.max(...ys, spec.constraints?.fmax_mhz || 0) * 1.1 || 1;
+  const sx = (v) => pad + (v - x0) / (x1 - x0) * (W - pad - 10), sy = (v) => H - pad + 8 - (v - y0) / (y1 - y0) * (H - pad);
+  const tgt = spec.constraints?.fmax_mhz;
+  const dots = pts.map((p, i) => `<circle cx="${sx(xs[i]).toFixed(1)}" cy="${sy(ys[i]).toFixed(1)}" r="4.5" class="${pareto[i] ? "pareto" : p.feasible ? "ok" : "bad"}"><title>${esc(sw.knobs.map((k) => `${k}=${JSON.stringify(p.point[k])}`).join(" "))} · ${fmt(p.fmax_mhz)} MHz · ${xs[i]}</title></circle>`).join("");
+  const front = pts.map((p, i) => [xs[i], ys[i], pareto[i]]).filter((t) => t[2]).sort((a, b) => a[0] - b[0]).map(([x, y]) => `${sx(x).toFixed(1)},${sy(y).toFixed(1)}`).join(" ");
+  inner.appendChild(el(`<svg class="scatter" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+    <line x1="${pad}" y1="${H - pad + 8}" x2="${W - 10}" y2="${H - pad + 8}" class="axis"/><line x1="${pad}" y1="8" x2="${pad}" y2="${H - pad + 8}" class="axis"/>
+    ${tgt ? `<line x1="${pad}" y1="${sy(tgt).toFixed(1)}" x2="${W - 10}" y2="${sy(tgt).toFixed(1)}" class="target"/><text x="${W - 12}" y="${(sy(tgt) - 4).toFixed(1)}" class="lbl" text-anchor="end">${tgt} MHz</text>` : ""}
+    ${front ? `<polyline points="${front}" class="front"/>` : ""}${dots}
+    <text x="${W - 10}" y="${H - 4}" class="lbl" text-anchor="end">${asic ? "µm²" : "LUT"}</text><text x="${pad - 4}" y="14" class="lbl" text-anchor="end">MHz</text>
+  </svg>`));
   inner.appendChild(el(`<table class="sweep"><thead><tr><th>${T.point}</th><th>MHz</th><th>${asic ? "cells · µm²" : "LUT · DSP"}</th><th>${esc(unit)}</th><th></th></tr></thead><tbody>${rows}</tbody></table>`));
   inner.appendChild(el(`<div class="muted small">★ ${T.paretoNote.replace("{a}", o1).replace("{b}", o2)}</div>`));
   return d;
