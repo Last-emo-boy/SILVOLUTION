@@ -35,6 +35,8 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   $("#new-run").onclick = () => show("new");
   $("#open-memory").onclick = () => show("memory");
   $("#open-bench").onclick = () => show("bench");
+  $("#open-proposals").onclick = () => show("proposals");
+  refreshPropCount();
   $("#send").onclick = sendSteer;
   $("#steer").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendSteer(); });
   $("#steer").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px"; });
@@ -54,7 +56,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   await refreshJobs();
   setInterval(refreshJobs, 5000);
   const hash = location.hash.slice(1);
-  if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
+  if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "proposals" || hash.startsWith("proposals/")) show("proposals"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
   else if (hash && (!THREAD || jobs.some((j) => j.id === hash))) select(hash);
   else if (THREAD && jobs.length) select(jobs[0].id);
   else show("empty");
@@ -62,10 +64,11 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 
 function show(v) {
   view = v;
-  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare"; $("#bench").hidden = v !== "bench";
+  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare"; $("#bench").hidden = v !== "bench"; $("#proposals").hidden = v !== "proposals";
   if (v !== "run") { selected = null; clearTimeout(pollTimer); document.querySelectorAll("#runs li").forEach((li) => li.classList.remove("sel")); }
   if (v === "memory") { location.hash = "memory"; renderMemoryView(); }
   if (v === "bench") { location.hash = "bench"; renderBenchView(); }
+  if (v === "proposals") { if (!location.hash.startsWith("#proposals")) location.hash = "proposals"; renderProposalsView(); }
   if (v === "new") location.hash = "new";
 }
 function toggleInspector(force) {
@@ -73,6 +76,9 @@ function toggleInspector(force) {
   $("#split").classList.toggle("with-insp", on);
   $("#t-insp").textContent = on ? "Details ◂" : "Details ▸";
   localStorage.setItem("sa.insp", on ? "1" : "0");
+}
+async function refreshPropCount() {
+  try { const p = await api("/proposals"); $("#prop-count").textContent = p.length || ""; } catch {}
 }
 async function refreshMemCount() {
   try { const m = await api("/memory"); $("#mem-count").textContent = m.reduce((a, g) => a + g.count, 0); } catch {}
@@ -563,6 +569,35 @@ async function renderBenchView() {
   const sums = `<tr><th>summary</th>${tags.map((t) => { const s = b.by_tag[t].summary || {}; return `<th class="muted small-text">${s.ok ?? "?"}/${s.n ?? "?"} ok · first ${s.mean_first_feasible ?? "?"}${s.agent_usd != null ? ` · $${s.agent_usd}` : ""}</th>`; }).join("")}</tr>`;
   box.appendChild(el(`<table class="bench"><thead>${head}</thead><tbody>${rows}</tbody><tfoot>${sums}</tfoot></table>`));
   box.querySelectorAll("a[href^='#']").forEach((a) => { a.onclick = (e) => { e.preventDefault(); const id = a.getAttribute("href").slice(1); if (id) { location.hash = id; select(id); } }; });
+}
+
+// ---------------------------------------------------------------- proposals: every generator change the agent proposed, its gate verdict, its A/B
+async function renderProposalsView() {
+  const box = $("#proposals-view"); box.innerHTML = `<div class="muted">loading…</div>`;
+  const rows = await api("/proposals");
+  box.innerHTML = "";
+  if (!rows.length) { box.appendChild(el(`<div class="muted">none yet — in the chat, switch the agent to <b>author</b> mode and ask for a generator change (a new knob, a new design kind); the proposal lands here with its gate report</div>`)); return; }
+  const want = location.hash.startsWith("#proposals/") ? location.hash.slice("#proposals/".length) : null;
+  const counts = rows.reduce((c, p) => { c[p.status] = (c[p.status] || 0) + 1; return c; }, {});
+  box.appendChild(el(`<div class="muted small-text" style="margin-bottom:10px">${rows.length} proposals · ${Object.entries(counts).map(([k, v]) => `${v} ${esc(k)}`).join(" · ")}${rows.some((p) => p.merged) ? ` · ${rows.filter((p) => p.merged).length} merged` : ""}</div>`));
+  for (const p of rows) {
+    const verdict = p.status === "gating" ? `<span class="live">gating…</span>` : p.status === "passed" ? `<span class="ok">gate passed</span>` : `<span class="bad">gate failed${p.scope_errors?.length ? " · scope" : p.apply_error ? " · patch" : ""}</span>`;
+    const ab = p.ab?.job ? (() => { const j = jobs.find((x) => x.id === p.ab.job); const b = j?.summary?.best; return `A/B <a href="#${esc(p.ab.job)}">${esc(p.ab.job)}</a>${b ? ` · ${fmt(b.metrics.fmax_mhz)} MHz · ${b.metrics.lut} ${b.metrics.area_um2 ? "cells" : "LUT"} · ${b.metrics.dsp} DSP` : j ? ` · ${esc(j.status)}` : ""}`; })() : p.ab?.error ? `<span class="bad">A/B: ${esc(p.ab.error.slice(0, 120))}</span>` : "";
+    const g = el(`<div class="memgroup prop${want === p.id ? " sel" : ""}" id="prop-${esc(p.id)}">
+      <h3>${esc(p.title || p.id)} <span class="muted">${new Date((p.created || 0) * 1000).toLocaleString()}${p.thread ? ` · <a href="/?thread=${encodeURIComponent(p.thread)}" target="_blank">chat</a>` : ""}</span></h3>
+      <div class="small-text">${verdict} · <span class="mono">${esc((p.files || []).map((f) => f.replace(/^silicon_agent\//, "")).join(", "))}</span>${p.diff_lines ? ` · ${p.diff_lines} lines` : ""} · designs ${esc((p.designs || []).join(", "))}${p.merged ? ` · <span class="ok">merged</span>` : ""}</div>
+      ${p.rationale ? `<p class="muted small-text">${esc(p.rationale)}</p>` : ""}
+      <div class="gate-steps">${(p.steps || []).map((s) => `<div class="gstep"><span class="${s.ok ? "ok" : s.ok === false ? "bad" : "muted"}">${s.ok ? "✓" : s.ok === false ? "✕" : "·"}</span> ${esc(s.name)}${s.seconds != null ? ` <span class="muted">${s.seconds} s</span>` : ""}${s.mutation ? `<div class="muted small-text">${s.mutation.map((x) => `${esc(x.design)}: ${x.killed}/${x.total} killed${x.survived?.length ? ` · survived ${esc(x.survived.join(", "))}` : ""}`).join(" · ")}</div>` : ""}${s.equivalence ? `<div class="muted small-text">${s.equivalence.map((x) => `${esc(x.case)}: ${x.identical ? "identical" : x.ok ? "equivalent @" + x.depth : "<span class='bad'>NOT equivalent</span>"}`).join(" · ")}</div>` : ""}${s.failures?.length ? `<pre class="log">${esc(s.failures.join("\n").slice(0, 1200))}</pre>` : ""}${s.error ? `<pre class="log">${esc(s.error)}</pre>` : ""}</div>`).join("")}</div>
+      ${p.scope_errors?.length ? `<div class="bad small-text">${esc(p.scope_errors.join("; "))}</div>` : ""}${p.apply_error ? `<pre class="log">${esc(p.apply_error)}</pre>` : ""}
+      ${ab ? `<div class="small-text">${ab}</div>` : ""}
+      <div class="row gap"><button class="ghost small diff">View diff</button>${p.status === "passed" && !p.merged ? `<code class="mono muted small-text" title="run on the server as the operator">deploy/merge-proposal.sh ${esc(p.id)}</code>` : ""}</div>
+    </div>`);
+    g.querySelector("button.diff").onclick = async (e) => { let pre = g.querySelector("pre.diff"); if (pre) { pre.remove(); e.target.textContent = "View diff"; return; } const r = await api(`/proposals/${p.id}`); pre = el(`<pre class="log diff"></pre>`); pre.textContent = r.diff || ""; g.appendChild(pre); e.target.textContent = "Hide diff"; };
+    g.querySelectorAll("a[href^='#']").forEach((x) => { x.onclick = (ev) => { ev.preventDefault(); const id = x.getAttribute("href").slice(1); location.hash = id; select(id); }; });
+    box.appendChild(g);
+  }
+  if (want) document.getElementById(`prop-${want}`)?.scrollIntoView({ block: "start" });
+  if (rows.some((p) => p.status === "gating")) setTimeout(() => { if (view === "proposals") renderProposalsView(); }, 8000);
 }
 
 async function renderMemoryView() {

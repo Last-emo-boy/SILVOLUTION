@@ -7,8 +7,18 @@
     sa watch <job-id>
     sa list
     sa get <job-id> <file>          e.g. summary.json, iter_02.json, llm_01.json
+    sa sweep specs/fir.json fold=1,2,4 pipe_mul=0,1     measure every point of the knob product (no planner)
+    sa formal <job-id> [--depth 20]                      SymbiYosys equivalence + stream properties of the best design
+    sa mutation <job-id>                                 mutation score of the behavioral bench on the best design
+    sa trust <job-id>                                    verification state at a glance (ladder, seeds, formal, mutation)
+    sa rtl upload --top my_top --tb tb.sv --params params.json src1.sv [src2.sv ...]   bring your own RTL
+    sa rtl list
+    sa propose proposal.diff --title ... --designs fir,decim [--rationale ...] [--ab-spec spec.json] [--reference ref.py]
+    sa proposals [<id>] [--diff]                         gate verdicts; one proposal's steps / diff
+    sa export <thread-id> [out.md]                       a conversation as Markdown
+    sa package <job-id> [out.zip]                        the delivery package (RTL, AXI wrapper, bench, reports, GDS on sky130)
 
-Server: SA_SERVER (default http://127.0.0.1:8765). Token: SA_TOKEN.
+Server: SA_SERVER (default http://127.0.0.1:8765). Token: SA_TOKEN, or the macOS Keychain item `silicon-agent-token`.
 Pure standard library; no local toolchain needed.
 """
 
@@ -23,17 +33,32 @@ import urllib.error
 import urllib.request
 
 SERVER = os.environ.get("SA_SERVER", "http://127.0.0.1:8765").rstrip("/")
-TOKEN = os.environ.get("SA_TOKEN", "")
 
 
-def req(method: str, path: str, body: dict | None = None):
+def _token() -> str:
+    t = os.environ.get("SA_TOKEN", "")
+    if t:
+        return t
+    try:
+        import subprocess
+        return subprocess.run(["security", "find-generic-password", "-s", "silicon-agent-token", "-w"], capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+TOKEN = _token()
+
+
+def req(method: str, path: str, body: dict | None = None, timeout: int = 60, raw_bytes: bool = False):
     data = json.dumps(body).encode() if body is not None else None
     r = urllib.request.Request(f"{SERVER}{path}", data=data, method=method,
                                headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {TOKEN}"} if TOKEN else {})})
     try:
-        with urllib.request.urlopen(r, timeout=60) as resp:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
             ct = resp.headers.get("Content-Type", "")
             raw = resp.read()
+            if raw_bytes:
+                return raw
             return json.loads(raw) if "json" in ct else raw.decode()
     except urllib.error.HTTPError as e:
         sys.exit(f"{method} {path}: HTTP {e.code} {e.read().decode()[:300]}")
@@ -125,16 +150,106 @@ def ask(text: str, thread: str | None) -> int:
         time.sleep(3)
 
 
+def poll_background(path: str, label: str) -> dict:
+    """formal / mutation run server-side in the background and answer {"status": "running"} until done."""
+    for i in range(240):
+        r = req("GET", path)
+        if r.get("status") != "running":
+            return r
+        if i == 0:
+            print(f"{label}: running on the server ...", flush=True)
+        time.sleep(5)
+    sys.exit(f"{label}: still running after 20 min; ask again later")
+
+
+def _parse_knob(kv: str):
+    if "=" not in kv:
+        sys.exit(f"sweep knob must look like fold=1,2,4 (got {kv!r})")
+    k, vs = kv.split("=", 1)
+    vals = []
+    for v in vs.split(","):
+        v = v.strip()
+        if v in ("true", "false"):
+            vals.append(v == "true")
+        else:
+            try:
+                vals.append(int(v))
+            except ValueError:
+                try:
+                    vals.append(float(v))
+                except ValueError:
+                    vals.append(v)
+    return k.strip(), vals
+
+
+def print_trust(t: dict) -> None:
+    st = t.get("stages") or {}
+    mark = lambda v: "pass" if v is True else "FAIL" if v is False else "-"
+    print("sim ladder: " + "  ".join(f"{k}={mark(v)}" for k, v in st.items()))
+    seeds = t.get("seeds") or []
+    if len(seeds) > 1:
+        print(f"P&R seeds:  {' / '.join(f'{x:.0f}' for x in seeds)} MHz  (spread {100 * (max(seeds) - min(seeds)) / max(max(seeds), 1):.0f}%)")
+    f, m, run = t.get("formal"), t.get("mutation"), t.get("running") or {}
+    print("formal:     " + (f"equivalence={mark(f.get('equivalence'))} properties={mark(f.get('properties'))} depth={f.get('depth')}" if f else "running" if run.get("formal") else "not run  (sa formal <job>)"))
+    print("mutation:   " + (f"{m.get('killed')}/{m.get('total')} killed ({(m.get('score') or 0) * 100:.0f}%)" + (f"  survived: {', '.join(m['survived'])}" if m.get("survived") else "") if m else "running" if run.get("mutation") else "not run  (sa mutation <job>)"))
+
+
+def print_proposal(p: dict, with_diff: bool) -> None:
+    verdict = p["status"] if p["status"] != "failed" else "failed" + (" (scope)" if p.get("scope_errors") else " (patch)" if p.get("apply_error") else "")
+    print(f"{p['id']}  {verdict:8s}  {p.get('title', '')}")
+    print(f"    files: {', '.join(p.get('files') or [])}  ({p.get('diff_lines') or '?'} lines)  designs: {', '.join(p.get('designs') or [])}{'  MERGED' if p.get('merged') else ''}")
+    for st in p.get("steps") or []:
+        ok = "ok " if st.get("ok") else "BAD" if st.get("ok") is False else " - "
+        extra = ""
+        if st.get("mutation"):
+            extra = "  " + "; ".join(f"{x['design']} {x['killed']}/{x['total']}" for x in st["mutation"])
+        if st.get("equivalence"):
+            extra = "  " + "; ".join(f"{x['case']} {'identical' if x.get('identical') else 'equivalent' if x.get('ok') else 'NOT equivalent'}" for x in st["equivalence"])
+        secs = f"  {st['seconds']}s" if st.get("seconds") is not None else ""
+        print(f"    [{ok}] {st['name']}{secs}{extra}")
+        for line in (st.get("failures") or [])[:5]:
+            print(f"          {line[:160]}")
+        if st.get("error"):
+            print(f"          {st['error'][-300:]}")
+    if p.get("scope_errors"):
+        print("    scope: " + "; ".join(p["scope_errors"]))
+    if p.get("apply_error"):
+        print("    patch: " + p["apply_error"][:300])
+    if (p.get("ab") or {}).get("job"):
+        print(f"    A/B run: {p['ab']['job']}   (sa watch {p['ab']['job']})")
+    if (p.get("ab") or {}).get("error"):
+        print(f"    A/B: {p['ab']['error'][:200]}")
+    if p["status"] == "passed" and not p.get("merged"):
+        print(f"    merge on the server: deploy/merge-proposal.sh {p['id']}")
+    if with_diff and p.get("diff"):
+        print()
+        print(p["diff"])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="sa")
     sub = ap.add_subparsers(dest="cmd", required=True)
     k = sub.add_parser("ask"); k.add_argument("text"); k.add_argument("--thread")
     s = sub.add_parser("submit"); s.add_argument("spec"); s.add_argument("--max-iter", type=int, default=8)
-    s.add_argument("--backend", choices=["ecp5", "xc7s50"]); s.add_argument("--no-watch", action="store_true")
+    s.add_argument("--backend"); s.add_argument("--no-watch", action="store_true")
     sub.add_parser("list")
     w = sub.add_parser("watch"); w.add_argument("job_id")
     g = sub.add_parser("get"); g.add_argument("job_id"); g.add_argument("file")
     sub.add_parser("health")
+    sw = sub.add_parser("sweep"); sw.add_argument("spec"); sw.add_argument("knobs", nargs="+", metavar="KNOB=v1,v2,..."); sw.add_argument("--backend"); sw.add_argument("--no-watch", action="store_true")
+    fo = sub.add_parser("formal"); fo.add_argument("job_id"); fo.add_argument("--depth", type=int, default=20)
+    mu = sub.add_parser("mutation"); mu.add_argument("job_id")
+    tr = sub.add_parser("trust"); tr.add_argument("job_id")
+    rt = sub.add_parser("rtl"); rts = rt.add_subparsers(dest="rtl_cmd", required=True)
+    ru = rts.add_parser("upload"); ru.add_argument("files", nargs="+"); ru.add_argument("--top", required=True); ru.add_argument("--tb", required=True)
+    ru.add_argument("--params", required=True, help="JSON file {NAME: {default, min, max | choices, hint}}"); ru.add_argument("--name"); ru.add_argument("--description", default="")
+    ru.add_argument("--latency"); ru.add_argument("--throughput"); ru.add_argument("--throughput-unit"); ru.add_argument("--port-widths", help="JSON file {port: width}")
+    rts.add_parser("list")
+    pr = sub.add_parser("propose"); pr.add_argument("diff"); pr.add_argument("--title", required=True); pr.add_argument("--designs", required=True, help="comma-separated")
+    pr.add_argument("--rationale", default=""); pr.add_argument("--ab-spec"); pr.add_argument("--ab-max-iter", type=int); pr.add_argument("--reference", help="Python file: reference(ir, xs) for a new design kind"); pr.add_argument("--no-watch", action="store_true")
+    pl = sub.add_parser("proposals"); pl.add_argument("id", nargs="?"); pl.add_argument("--diff", action="store_true")
+    ex = sub.add_parser("export"); ex.add_argument("thread_id"); ex.add_argument("out", nargs="?")
+    pk = sub.add_parser("package"); pk.add_argument("job_id"); pk.add_argument("out", nargs="?")
     a = ap.parse_args()
 
     if a.cmd == "health":
@@ -158,6 +273,112 @@ def main() -> int:
     if a.cmd == "get":
         out = req("GET", f"/jobs/{a.job_id}/files/{a.file}")
         print(json.dumps(out, indent=2) if isinstance(out, (dict, list)) else out)
+        return 0
+    if a.cmd == "sweep":
+        spec = json.load(open(a.spec))
+        if a.backend:
+            spec["backend"] = a.backend
+        spec["sweep"] = dict(_parse_knob(kv) for kv in a.knobs)
+        n = 1
+        for vs in spec["sweep"].values():
+            n *= len(vs)
+        r = req("POST", "/jobs", {"spec": spec, "max_iter": 1})
+        print(f"sweep {r['id']}  {n} points over {', '.join(spec['sweep'])}  design={spec.get('design', 'matmul')}  backend={spec.get('backend', 'ecp5')}")
+        if a.no_watch:
+            return 0
+        rc = watch(r["id"])
+        sw = (req("GET", f"/jobs/{r['id']}").get("summary") or {}).get("sweep")
+        if sw:
+            print()
+            pts = sw.get("points", [])
+            feas = [p for p in pts if p.get("feasible")]
+            # Pareto on (fmax up, lut down) among the feasible points -- the same rule the chat's sweep card draws
+            pareto = {id(p) for p in feas if not any(q is not p and q["fmax_mhz"] >= p["fmax_mhz"] and q["lut"] <= p["lut"] and (q["fmax_mhz"] > p["fmax_mhz"] or q["lut"] < p["lut"]) for q in feas)}
+            for pt in pts:
+                res = f"{pt['lut']} cells  {pt['area_um2'] / 1000:.1f}k um2" if pt.get("area_um2") is not None else f"lut={pt['lut']}  dsp={pt['dsp']}"
+                print(f"  {'*' if id(pt) in pareto else ' '} {json.dumps(pt['point'])}  fmax={pt['fmax_mhz']:.1f} MHz  {res}  {pt['throughput']}  {'ok' if pt.get('feasible') else 'infeasible'}")
+            print("  * = Pareto-optimal (fmax vs cells among the feasible points)")
+        return rc
+    if a.cmd == "formal":
+        r = poll_background(f"/jobs/{a.job_id}/formal?depth={a.depth}", "formal")
+        eq, pr_ = r.get("equivalence") or {}, r.get("properties") or {}
+        print(f"equivalence: {'PASS' if eq.get('ok') else 'FAIL' if eq.get('ok') is False else 'n/a'}   properties: {'PASS' if pr_.get('ok') else 'FAIL'}   depth {r.get('depth')}")
+        for key, blk in (("equivalence", eq), ("properties", pr_)):
+            if blk.get("log") and not blk.get("ok"):
+                print(f"--- {key}\n{blk['log'][-1500:]}")
+        if r.get("error"):
+            print(f"error: {r['error']}")
+        return 0 if eq.get("ok") is not False and pr_.get("ok") else 1
+    if a.cmd == "mutation":
+        r = poll_background(f"/jobs/{a.job_id}/mutation", "mutation")
+        if r.get("error"):
+            sys.exit(f"mutation: {r['error']}")
+        print(f"killed {r.get('killed')}/{r.get('total')}  score {(r.get('score') or 0) * 100:.0f}%")
+        for sv in r.get("survived") or []:
+            print(f"  survived: {sv}")
+        return 0
+    if a.cmd == "trust":
+        print_trust(req("GET", f"/jobs/{a.job_id}/trust"))
+        return 0
+    if a.cmd == "rtl" and a.rtl_cmd == "list":
+        for b in req("GET", "/rtl"):
+            print(f"rtl:{b['id']}  {b.get('name', '')}  top={b.get('top')}  params={', '.join((b.get('params') or {}).keys())}  files={len(b.get('files') or [])}")
+        return 0
+    if a.cmd == "rtl" and a.rtl_cmd == "upload":
+        body = {"top": a.top, "tb": open(a.tb).read(), "params": json.load(open(a.params)), "files": {os.path.basename(f): open(f).read() for f in a.files},
+                "name": a.name or a.top, "description": a.description}
+        for k_, v_ in (("latency", a.latency), ("throughput", a.throughput), ("throughput_unit", a.throughput_unit)):
+            if v_:
+                body[k_] = v_
+        if a.port_widths:
+            body["port_widths"] = json.load(open(a.port_widths))
+        r = req("POST", "/rtl", body, timeout=420)
+        print(f"uploaded rtl:{r['id']}  bench on the behavioral RTL: {'PASS' if (r.get('check') or {}).get('ok') else '?'}")
+        print(f"run it:  sa ask \"optimize rtl:{r['id']} on ecp5 for 150 MHz\"   or a spec with \"design\": \"rtl:{r['id']}\"")
+        return 0
+    if a.cmd == "propose":
+        body = {"diff": open(a.diff).read(), "title": a.title, "rationale": a.rationale, "designs": [d.strip() for d in a.designs.split(",") if d.strip()]}
+        if a.ab_spec:
+            body["ab_spec"] = json.load(open(a.ab_spec))
+        if a.ab_max_iter:
+            body["ab_max_iter"] = a.ab_max_iter
+        if a.reference:
+            body["reference"] = open(a.reference).read()
+        r = req("POST", "/proposals", body)
+        pid = r["id"]
+        print(f"proposal {pid}: gating (emit + elaborate every preset, behavioral sims, formal equivalence, mutation score)")
+        if a.no_watch:
+            return 0
+        while True:
+            p = req("GET", f"/proposals/{pid}")
+            if p["status"] != "gating":
+                break
+            time.sleep(10)
+        print_proposal(p, False)
+        return 0 if p["status"] == "passed" else 1
+    if a.cmd == "proposals":
+        if a.id:
+            print_proposal(req("GET", f"/proposals/{a.id}"), a.diff)
+            return 0
+        rows = req("GET", "/proposals")
+        if not rows:
+            print("no proposals yet")
+        for p in rows:
+            print(f"{p['id']}  {p['status']:8s}  {', '.join(p.get('files') or [])}  {p.get('title', '')}{'  MERGED' if p.get('merged') else ''}")
+        return 0
+    if a.cmd == "export":
+        md = req("GET", f"/threads/{a.thread_id}/export.md")
+        if a.out:
+            open(a.out, "w").write(md)
+            print(f"wrote {a.out} ({len(md)} bytes)")
+        else:
+            print(md)
+        return 0
+    if a.cmd == "package":
+        data = req("GET", f"/jobs/{a.job_id}/package", timeout=300, raw_bytes=True)
+        out = a.out or f"silicon-agent-{a.job_id}.zip"
+        open(out, "wb").write(data)
+        print(f"wrote {out} ({len(data)} bytes)")
         return 0
     return 2
 

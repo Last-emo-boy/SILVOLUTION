@@ -20,6 +20,7 @@
     <div class="rail-foot">
       <button id="open-memory" class="ghost small">◎ Memory <span id="mem-count" class="muted"></span></button>
       <button id="open-bench" class="ghost small">▤ Bench</button>
+      <button id="open-proposals" class="ghost small">⎇ Proposals <span id="prop-count" class="muted"></span></button>
       <span id="who" class="mono muted"></span>
     </div>
   </aside>
@@ -141,6 +142,10 @@
     <section id="bench" class="memview" hidden>
       <div class="bar"><h1>Bench</h1><span class="muted small-text">the regression suite: every case per tag (nightly = default planner; planner-pro = DeepSeek V4 Pro; agent = driven through the chat; knob / newgen = manual)</span></div>
       <div id="bench-view" class="memlist"></div>
+    </section>
+    <section id="proposals" class="memview" hidden>
+      <div class="bar"><h1>Proposals</h1><span class="muted small-text">generator changes the agent proposed as diffs; each went through the gate (emit + elaborate every preset, behavioral sims, formal equivalence of unchanged IRs, mutation score) and optionally an A/B run. Nothing merges by itself: the operator runs deploy/merge-proposal.sh &lt;id&gt;</span></div>
+      <div id="proposals-view" class="memlist"></div>
     </section>
   </main>
 </div>

@@ -25,6 +25,10 @@ button:disabled { opacity: .45; cursor: default; }
 .rail { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .rail-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 8px; }
 .brand { font-weight: 600; font-size: 13px; } .brand .logo { color: var(--accent); margin-right: 4px; }
+.rail-search { padding: 0 12px 8px; }
+.rail-search input { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 9px; font-size: 12.5px; outline: none; }
+.rail-search input:focus { border-color: var(--accent); }
+.rail-search input::placeholder { color: var(--muted); }
 .threads { list-style: none; margin: 0; padding: 0 8px; overflow: auto; flex: 1; min-height: 0; }
 .threads li { display: grid; grid-template-columns: 7px minmax(0, 1fr) 18px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
 .threads li .x { border: 0; padding: 0; width: 18px; height: 18px; line-height: 18px; color: var(--muted); font-size: 14px; opacity: 0; } .threads li:hover .x { opacity: 1; } .threads li .x:hover { color: var(--bad); background: transparent; }
@@ -116,6 +120,14 @@ button:disabled { opacity: .45; cursor: default; }
 /* result card */
 .result .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: 13px; }
 .result .head b { font-size: 16px; color: var(--text); font-weight: 600; } .result .head span { color: var(--text-2); font-family: var(--mono); font-size: 12px; }
+.trust { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11.5px; }
+.trust .lbl { color: var(--muted); margin-right: 2px; }
+.trust .tp { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); font-family: var(--mono); font-size: 11px; }
+.trust .tp i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.trust .tp.ok i { background: var(--good); } .trust .tp.bad i { background: var(--bad); } .trust .tp.warn i { background: var(--warn, #d69e2e); }
+.trust .tp.run i { background: var(--accent); animation: tpulse 1.2s ease-in-out infinite; }
+.trust .tp.na { color: var(--muted); border-style: dashed; }
+@keyframes tpulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 .links { display: flex; flex-wrap: wrap; gap: 6px; }
 .links button, .links a { border-radius: 8px; padding: 5px 10px; font-size: 12px; text-decoration: none; border: 1px solid var(--border-2); color: var(--text-2); background: transparent; }
 .links a:hover, .links button:hover { color: var(--text); background: var(--surface-2); }

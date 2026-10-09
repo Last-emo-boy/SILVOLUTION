@@ -10,6 +10,7 @@ API
   GET  /api/jobs/<id>/axis       the AXI-Stream wrapper alone
   GET  /api/jobs/<id>/formal[?depth=20]  SymbiYosys: bounded equivalence of the measured RTL vs a fresh emit + stream properties
   GET  /api/jobs/<id>/mutation   mutation score of the behavioral testbench on the best design (background, cached)
+  GET  /api/jobs/<id>/trust      verification state of the best design at a glance (sim ladder, seeds, cached formal / mutation; starts nothing)
   GET  /api/specs                example specs shipped in specs/
   GET  /api/health
   POST /api/interpret            {"text": "...", "thread"?: id} -> spec + assumptions + alternatives (no run)
@@ -1139,7 +1140,9 @@ class Handler(BaseHTTPRequestHandler):
                          "created": t["created"], "job": (_thread_jobs(t["id"]) or [None])[-1], "subject": t.get("subject", ""),
                          "busy": bool(t.get("busy")), "n_runs": len(_thread_jobs(t["id"])),
                          "last": max([m.get("t", 0) for m in t["messages"]] + [t["created"]]),
-                         "agent": (t.get("live") or [{}])[-1].get("name") if t.get("busy") and t.get("live") else None}
+                         "agent": (t.get("live") or [{}])[-1].get("name") if t.get("busy") and t.get("live") else None,
+                         # what the rail's search box matches besides the title: the user's own words, bounded
+                         "text": " ".join(m.get("text", "") for m in t["messages"] if m.get("role") == "user")[:1500]}
                         for t in _threads.values() if _visible(t, sub)]
             for r in rows:
                 j = _jobs.get(r["job"]) if r["job"] else None
@@ -1313,6 +1316,27 @@ class Handler(BaseHTTPRequestHandler):
                 fresh_req = "fresh" in parse_qs(u.query)
                 st = _formal_start(job_id, job, k, fresh_req)
                 return self._json(202 if st.get("status") == "running" else 200, st)
+            if len(parts) == 3 and parts[2] == "trust":
+                # the verification state of the best design without starting anything: sim ladder from the metrics,
+                # cached formal / mutation reports when they exist (null otherwise), seed spread
+                best = (job.get("summary") or {}).get("best")
+                if not best:
+                    return self._json(404, {"error": "no feasible design yet"})
+                out = {"formal": None, "mutation": None}
+                for key in ("formal", "mutation"):
+                    rep = RESULTS / job_id / key / "report.json"
+                    if rep.exists():
+                        try:
+                            r = json.loads(rep.read_text())
+                            out[key] = ({"equivalence": (r.get("equivalence") or {}).get("ok"), "properties": (r.get("properties") or {}).get("ok"), "depth": r.get("depth")} if key == "formal"
+                                        else {"killed": r.get("killed"), "total": r.get("total"), "score": r.get("score"), "survived": r.get("survived")})
+                        except ValueError:
+                            pass
+                m = best["metrics"]
+                out["stages"] = {"behavioral": m.get("sim_passed"), **{k: v.get("passed") for k, v in (m.get("sim_stages") or {}).items()}}
+                out["seeds"] = m.get("fmax_seeds") or []
+                out["running"] = {k: bool(t and t.is_alive()) for k, t in (("formal", _formal_jobs.get(job_id)), ("mutation", _mutation_jobs.get(job_id)))}
+                return self._json(200, out)
             if len(parts) == 3 and parts[2] == "mutation":
                 best = (job.get("summary") or {}).get("best")
                 if not best:

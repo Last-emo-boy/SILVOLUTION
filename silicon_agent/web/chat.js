@@ -21,7 +21,7 @@ L.zh = {
   placeholder: "描述你要的硬件，或者对当前结果提要求…", hint: "⏎ 发送 · ⇧⏎ 换行", stop: "■ 停止", thinking: "思考中", newChat: "新对话",
   spec: "理解的规格", progress: "运行中", traj: "轨迹", result: "结果", noResult: "未找到可行设计", iter: "第 {n} 轮", iters: "{n} 轮", feasible: "{n} 轮可行",
   planning: "规划下一轮", sim: "行为级仿真", synth: "综合", pnr: "布局布线", queued: "排队中", stopped: "已停止", error: "出错",
-  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", covTitle: "行为级仿真覆盖的场景（次数）", formal: "形式验证", formalTitle: "SymbiYosys：实测 RTL 与当前生成器输出的有界等价 + 流协议属性", formalRunning: "验证中…", queued: "排队中，等这一轮结束后发送", exportTitle: "导出这个对话为 Markdown（规格、每轮结果、最佳设计、提案）", mutation: "变异分数", mutationTitle: "往 RTL 注入 24 处错误（加减互换、比较翻转、使能卡死…），看行为级测试台能抓住多少：验证强度", mutationRunning: "注入中…", survived: "漏网的变异", sweep: "设计空间扫描", points: "个点", paretoPts: "个 Pareto 最优", point: "旋钮", paretoNote: "在 {a} 与 {b} 上无其他可行点同时更优", attach: "附加 RTL 文件（.sv / .v）：用你自己的设计跑同一条阶梯", tooBig: "文件超过 400 KB", attachLead: "这是我自己的 RTL，请用同一条阶梯（仿真、综合、布局布线、形式验证）评估并优化它暴露的参数。", failedCalls: "{n} 次失败", modeFast: "快", modeDeep: "深思", modeAuthor: "改生成器", proposal: "生成器改动提案", gating: "门禁中…", gatePassed: "门禁通过", gateFailed: "门禁未通过", gateSteps: ["发射 + 展开所有预设", "行为级仿真", "形式等价（未改动的 IR）", "测试台变异分数"], abRun: "A/B 实测", merged: "已合并", viewDiff: "查看 diff", lines: "行", modeTitle: "智能体模式（下一轮生效）：", pendingMode: "新对话将以此模式开始", agentSteps: "智能体过程 · {n} 次工具调用", usage: "{calls} 次模型调用 · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness 账本：这一轮的模型调用、输入/输出 token（含缓存命中）、估算费用与用时", sessUsage: "本会话 {turns} 轮 · {tok} tokens · {usd}", sessUsageTitle: "本会话累计（Agnes Harness 账本）· 当前上下文 {ctx} tokens", today: "今天", earlier: "更早", agentAt: "智能体 ·", runs: "次运行", resumed: "重启后续接", resumedTitle: "服务器重启打断了上一轮，智能体根据自己的记录继续", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续",
+  pass: "通过", fail: "失败", viewRtl: "查看 Verilog", hideRtl: "收起 Verilog", download: "下载 {f}", pkg: "下载交付包 (zip)", worktable: "打开 worktable", compare: "与上一次比较", left: "剩余（最多）", del: "删除对话", alts: "也可以试试：", designs: "个设计", covTitle: "行为级仿真覆盖的场景（次数）", formal: "形式验证", formalTitle: "SymbiYosys：实测 RTL 与当前生成器输出的有界等价 + 流协议属性", formalRunning: "验证中…", queued: "排队中，等这一轮结束后发送", exportTitle: "导出这个对话为 Markdown（规格、每轮结果、最佳设计、提案）", mutation: "变异分数", mutationTitle: "往 RTL 注入 24 处错误（加减互换、比较翻转、使能卡死…），看行为级测试台能抓住多少：验证强度", mutationRunning: "注入中…", survived: "漏网的变异", sweep: "设计空间扫描", points: "个点", paretoPts: "个 Pareto 最优", point: "旋钮", paretoNote: "在 {a} 与 {b} 上无其他可行点同时更优", attach: "附加 RTL 文件（.sv / .v）：用你自己的设计跑同一条阶梯", tooBig: "文件超过 400 KB", attachLead: "这是我自己的 RTL，请用同一条阶梯（仿真、综合、布局布线、形式验证）评估并优化它暴露的参数。", failedCalls: "{n} 次失败", modeFast: "快", modeDeep: "深思", modeAuthor: "改生成器", proposal: "生成器改动提案", gating: "门禁中…", gatePassed: "门禁通过", gateFailed: "门禁未通过", gateSteps: ["发射 + 展开所有预设", "行为级仿真", "形式等价（未改动的 IR）", "测试台变异分数"], abRun: "A/B 实测", merged: "已合并", viewDiff: "查看 diff", lines: "行", modeTitle: "智能体模式（下一轮生效）：", pendingMode: "新对话将以此模式开始", agentSteps: "智能体过程 · {n} 次工具调用", usage: "{calls} 次模型调用 · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness 账本：这一轮的模型调用、输入/输出 token（含缓存命中）、估算费用与用时", sessUsage: "本会话 {turns} 轮 · {tok} tokens · {usd}", sessUsageTitle: "本会话累计（Agnes Harness 账本）· 当前上下文 {ctx} tokens", today: "今天", earlier: "更早", agentAt: "智能体 ·", runs: "次运行", resumed: "重启后续接", resumedTitle: "服务器重启打断了上一轮，智能体根据自己的记录继续", delConfirm: "删除这个对话？运行结果会保留在 worktable 的未归属列表里。", rename: "重命名对话：", refine: "在此基础上继续", search: "搜索对话：标题、你的提问、设计、器件", noMatch: "没有匹配的对话", trust: "验证", trustTitle: "这个设计经过了哪些验证：行为级仿真、网表仿真、多种子布局布线、形式验证、变异测试", notRun: "未跑", seeds: "{n} 粒种子", spread: "离散 {n}%", netlist: "网表仿真", tBehav: "行为级",
   stages: ["行为级仿真", "综合后功能", "综合后时序", "实现后功能", "实现后时序"], signoff: "实现后时序仿真通过",
   design: "设计", backend: "器件", constraints: "约束", objective: "目标", locked: "固定参数", start: "起点", closest: "最接近",
   secs: "秒", critical: "关键路径", startFrom: "从起点设计开始。", fork: "基于上一次的最佳设计继续。",
@@ -33,7 +33,7 @@ L.en = {
   placeholder: "Describe the hardware you want, or ask for changes to the current result…", hint: "⏎ send · ⇧⏎ newline", stop: "■ Stop", thinking: "Thinking", newChat: "New chat",
   spec: "Understood spec", progress: "Running", traj: "Trajectory", result: "Result", noResult: "No feasible design", iter: "iteration {n}", iters: "{n} iterations", feasible: "{n} feasible",
   planning: "planning", sim: "behavioral sim", synth: "synthesis", pnr: "place & route", queued: "queued", stopped: "stopped", error: "error",
-  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", covTitle: "scenarios the behavioral testbench exercised (hit counts)", formal: "Formal check", formalTitle: "SymbiYosys: bounded equivalence of the measured RTL vs the current generator + stream properties", formalRunning: "checking…", queued: "queued · sent when this turn ends", exportTitle: "export this conversation as Markdown (specs, every iteration, best design, proposals)", mutation: "Mutation score", mutationTitle: "inject 24 bugs into the RTL (add/sub swaps, flipped compares, stuck enables ...) and count how many the behavioral bench catches: the strength of the verification", mutationRunning: "mutating…", survived: "survived", sweep: "Design-space sweep", points: "points", paretoPts: "Pareto-optimal", point: "knobs", paretoNote: "no other feasible point is at least as good on both {a} and {b}", attach: "Attach RTL (.sv / .v): run your own design through the same ladder", tooBig: "file over 400 KB", attachLead: "This is my own RTL. Run it through the same ladder (simulation, synthesis, place-and-route, formal) and tune the parameters it exposes.", failedCalls: "{n} failed", modeFast: "fast", modeDeep: "deep", modeAuthor: "author", proposal: "Generator change proposal", gating: "gating…", gatePassed: "gate passed", gateFailed: "gate failed", gateSteps: ["emit + elaborate every preset", "behavioral simulation", "formal equivalence (unchanged IRs)", "testbench mutation score"], abRun: "measured A/B", merged: "merged", viewDiff: "View diff", lines: "lines", modeTitle: "agent mode (from the next turn): ", pendingMode: "a new conversation starts in this mode", agentSteps: "Agent steps · {n} tool calls", usage: "{calls} model calls · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness ledger: this turn's model calls, input/output tokens (cache hits included), estimated cost and wall time", sessUsage: "{turns} turns · {tok} tokens · {usd}", sessUsageTitle: "this conversation so far (Agnes Harness ledger) · context {ctx} tokens", today: "Today", earlier: "Earlier", agentAt: "agent ·", runs: "runs", resumed: "resumed", resumedTitle: "a server restart cut the previous turn short; the agent continued from its own records", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here",
+  pass: "pass", fail: "fail", viewRtl: "View Verilog", hideRtl: "Hide Verilog", download: "Download {f}", pkg: "Download package (zip)", worktable: "Open worktable", compare: "Compare with previous", left: "left at most", del: "Delete conversation", alts: "Also worth trying:", designs: "designs", covTitle: "scenarios the behavioral testbench exercised (hit counts)", formal: "Formal check", formalTitle: "SymbiYosys: bounded equivalence of the measured RTL vs the current generator + stream properties", formalRunning: "checking…", queued: "queued · sent when this turn ends", exportTitle: "export this conversation as Markdown (specs, every iteration, best design, proposals)", mutation: "Mutation score", mutationTitle: "inject 24 bugs into the RTL (add/sub swaps, flipped compares, stuck enables ...) and count how many the behavioral bench catches: the strength of the verification", mutationRunning: "mutating…", survived: "survived", sweep: "Design-space sweep", points: "points", paretoPts: "Pareto-optimal", point: "knobs", paretoNote: "no other feasible point is at least as good on both {a} and {b}", attach: "Attach RTL (.sv / .v): run your own design through the same ladder", tooBig: "file over 400 KB", attachLead: "This is my own RTL. Run it through the same ladder (simulation, synthesis, place-and-route, formal) and tune the parameters it exposes.", failedCalls: "{n} failed", modeFast: "fast", modeDeep: "deep", modeAuthor: "author", proposal: "Generator change proposal", gating: "gating…", gatePassed: "gate passed", gateFailed: "gate failed", gateSteps: ["emit + elaborate every preset", "behavioral simulation", "formal equivalence (unchanged IRs)", "testbench mutation score"], abRun: "measured A/B", merged: "merged", viewDiff: "View diff", lines: "lines", modeTitle: "agent mode (from the next turn): ", pendingMode: "a new conversation starts in this mode", agentSteps: "Agent steps · {n} tool calls", usage: "{calls} model calls · {tok} tokens · {usd} · {s}", usageTitle: "Agnes Harness ledger: this turn's model calls, input/output tokens (cache hits included), estimated cost and wall time", sessUsage: "{turns} turns · {tok} tokens · {usd}", sessUsageTitle: "this conversation so far (Agnes Harness ledger) · context {ctx} tokens", today: "Today", earlier: "Earlier", agentAt: "agent ·", runs: "runs", resumed: "resumed", resumedTitle: "a server restart cut the previous turn short; the agent continued from its own records", delConfirm: "Delete this conversation? Its runs stay available under the unassigned worktable.", rename: "Rename conversation:", refine: "Refine from here", search: "Search conversations: title, your requests, design, device", noMatch: "no matching conversation", trust: "Verified by", trustTitle: "what this design has been through: behavioral simulation, netlist simulation, multi-seed place-and-route, formal check, mutation test", notRun: "not run", seeds: "{n} seeds", spread: "spread {n}%", netlist: "netlist sim", tBehav: "behavioral",
   stages: ["behavioral", "post-synth func", "post-synth timing", "post-impl func", "post-impl timing"], signoff: "post-implementation timing sim passed",
   design: "design", backend: "device", constraints: "constraints", objective: "objective", locked: "locked", start: "start", closest: "closest",
   secs: "s", critical: "critical path", startFrom: "Start from the initial design.", fork: "Continue from the previous best design.",
@@ -42,7 +42,7 @@ L.en = {
 };
 let T = zh ? L.zh : L.en;
 const t = (k, v) => T[k].replace("{n}", v).replace("{f}", v);
-function setLang(isZh) { zh = isZh; T = zh ? L.zh : L.en; $("#input").placeholder = T.placeholder; $("#chint").textContent = T.hint; $("#stop").textContent = T.stop; }
+function setLang(isZh) { zh = isZh; T = zh ? L.zh : L.en; $("#input").placeholder = T.placeholder; $("#chint").textContent = T.hint; $("#stop").textContent = T.stop; const sb = $("#thread-search"); if (sb) { sb.placeholder = T.search; sb.title = T.search; } }
 const STAGE_KEYS = ["behavioral", "post_synth_func", "post_synth_time", "post_impl_func", "post_impl_time"];
 const TOP = { matmul: "matmul_top", fir: "fir_top", conv2d: "conv2d_top", fir_chain: "fir_chain_top", cordic: "cordic_top", fft: "fft_top", graph: "graph_top" };
 let DEV = { ecp5: "ECP5 LFE5U-45F", xc7s50: "Spartan-7 XC7S50", ice40: "iCE40 UP5K", gowin: "Gowin GW1NR-9" };
@@ -55,6 +55,7 @@ let threads = [], tid = null, thread = null, timer = null;
 const jobs = {};                 // job id -> {events, seen, status, summary, error, spec, max_iter}
 const open = new Set();          // "<job>:<card>" of expanded cards
 const rtlShown = new Set();
+const trustCache = new Map();   // jid -> {stages, seeds, formal, mutation, running} from GET /jobs/<id>/trust
 
 // ---------------------------------------------------------------- boot
 (async function boot() {
@@ -93,18 +94,34 @@ const rtlShown = new Set();
   const h = location.hash.slice(1);
   if (h) openThread(h);
   window.addEventListener("hashchange", () => { const id = location.hash.slice(1) || null; if (id !== tid) openThread(id); });
+  const sb = $("#thread-search"); sb.placeholder = T.search; sb.title = T.search;
+  sb.oninput = () => { threadQuery = sb.value; renderThreads(); };
+  sb.onkeydown = (e) => { if (e.key === "Escape") { sb.value = ""; threadQuery = ""; renderThreads(); sb.blur(); } if (e.key === "Enter") { const first = $("#threads li[data-id]"); if (first) openThread(first.dataset.id); } };
+  document.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); sb.focus(); sb.select(); } });
   $("#input").focus();
 })();
 
 // ---------------------------------------------------------------- rail
+let threadQuery = "";
+function threadMatches(th, q) {
+  if (!q) return true;
+  const hay = `${th.title || ""} ${th.text || ""} ${th.design || ""} ${th.backend || ""} ${th.id}`.toLowerCase();
+  return q.split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
+}
 async function refreshThreads() {
   threads = await api("/threads");
+  renderThreads();
+}
+function renderThreads() {
   const ul = $("#threads"); ul.innerHTML = "";
-  // grouped by recency: today / earlier (the list is already newest first)
+  const q = threadQuery.trim().toLowerCase();
+  const shown = threads.filter((th) => threadMatches(th, q));
+  if (q && !shown.length) { ul.appendChild(el(`<li class="group">${esc(T.noMatch)}</li>`)); return; }
+  // grouped by recency: today / earlier (the list is already newest first); a search flattens the groups
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
   let group = null;
-  for (const th of threads) {
-    const g = (th.last || th.created) * 1000 >= dayStart.getTime() ? T.today : T.earlier;
+  for (const th of shown) {
+    const g = q ? `${shown.length} / ${threads.length}` : (th.last || th.created) * 1000 >= dayStart.getTime() ? T.today : T.earlier;
     if (g !== group) { group = g; ul.appendChild(el(`<li class="group">${esc(g)}</li>`)); }
     const b = th.best?.metrics;
     const m = th.busy ? (th.agent ? `${T.agentAt} ${th.agent}` : T.thinking)
@@ -552,6 +569,28 @@ function sweepCard(jid, j, spec) {
   return d;
 }
 
+// the trust strip: one glance at how much verification stands behind the number (every pill is a fact the server
+// already holds; nothing here starts a check -- the buttons below do that, then refresh the strip)
+function trustStrip(jid, m, keys) {
+  const t = trustCache.get(jid) || {};
+  const pill = (cls, label, title) => `<span class="tp ${cls}" title="${esc(title || "")}"><i></i>${label}</span>`;
+  const out = [];
+  out.push(pill(m.sim_passed ? "ok" : "bad", T.tBehav, "cocotb + iverilog vs the Python golden model"));
+  const net = keys.filter((k) => k !== "behavioral").map((k) => (m.sim_stages || {})[k]?.passed);
+  if (net.length) out.push(pill(net.every((v) => v === true) ? "ok" : net.some((v) => v === false) ? "bad" : "na", `${T.netlist} ${net.filter((v) => v === true).length}/${net.length}`, keys.filter((k) => k !== "behavioral").map((k) => T.stages[STAGE_KEYS.indexOf(k)]).join(" · ")));
+  const seeds = m.fmax_seeds || [];
+  if (seeds.length > 1) { const lo = Math.min(...seeds), hi = Math.max(...seeds); out.push(pill("ok", `${t("seeds", seeds.length)} · ${t("spread", fmt(100 * (hi - lo) / Math.max(hi, 1), 0))}`, seeds.map((x) => fmt(x, 0) + " MHz").join(" / "))); }
+  const f = t.formal, mu = t.mutation;
+  out.push(f ? pill(f.equivalence === true && f.properties ? "ok" : "bad", `${T.formal} ${f.equivalence === true ? "≡ ✓" : f.equivalence === false ? "≡ ✗" : "≡ ?"} · ${f.properties ? "props ✓" : "props ✗"}`, `depth ${f.depth || "?"}`)
+             : pill(t.running?.formal ? "run" : "na", `${T.formal}: ${t.running?.formal ? T.formalRunning : T.notRun}`, T.formalTitle));
+  out.push(mu ? pill(mu.score >= 0.8 ? "ok" : mu.score >= 0.5 ? "warn" : "bad", `${T.mutation} ${mu.killed}/${mu.total} (${Math.round((mu.score || 0) * 100)}%)`, (mu.survived || []).length ? `${T.survived}: ${mu.survived.join(", ")}` : T.mutationTitle)
+              : pill(t.running?.mutation ? "run" : "na", `${T.mutation}: ${t.running?.mutation ? T.mutationRunning : T.notRun}`, T.mutationTitle));
+  return `<div class="trust" id="trust-${esc(jid)}" title="${T.trustTitle}"><span class="lbl">${T.trust}</span>${out.join("")}</div>`;
+}
+function refreshTrust(jid) {
+  return api(`/jobs/${jid}/trust`).then((r) => { if (!r.error) trustCache.set(jid, r); render(); }).catch(() => {});
+}
+
 function resultCard(jid, j, done, spec) {
   const best = j.summary?.best, unit = j.summary?.throughput_unit || "", top = TOP[spec.design] || "top", keys = stagesOf(spec.backend);
   const target = done.filter((r) => r.violations?.length).sort((a, b) => a.violations.length - b.violations.length || b.n - a.n)[0];
@@ -569,6 +608,7 @@ function resultCard(jid, j, done, spec) {
     const m = row.metrics;
     inner.appendChild(el(`<div class="head"><b>${fmt(m.fmax_mhz)} MHz</b>${m.fmax_seeds && m.fmax_seeds.length > 1 ? `<span title="P&R seeds">${m.fmax_seeds.map((x) => fmt(x, 0)).join(" / ")} MHz · median</span>` : ""}${m.area_um2 != null ? `<span>${m.lut} cells</span><span>${fmt(m.area_um2 / 1000, 1)}k µm²</span>` : `<span>${m.lut} LUT</span><span>${m.dsp} DSP</span>`}<span>${m.ff ?? "–"} FF</span>${m.bram ? `<span>${m.bram} BRAM</span>` : ""}${m.power_mw != null ? `<span>${m.power_mw} mW</span>` : ""}<span>${row.throughput} ${esc(unit)}</span>${row.latency_cycles != null ? `<span>latency ${row.latency_cycles} cyc</span>` : ""}</div>`));
     inner.appendChild(el(chips({ ...(spec.locked || {}), ...row.ir }, null, spec.locked)));
+    if (best) { inner.appendChild(el(trustStrip(jid, m, keys))); if (!trustCache.has(jid) && j.status !== "running") { trustCache.set(jid, {}); refreshTrust(jid); } }
     // simulation ladder
     const tbl = el(`<table class="simtable"></table>`);
     const purposes = zh ? ["RTL 逻辑 vs Python 黄金模型（cocotb + iverilog）", "综合后网表，unisim 模型，无延迟", "综合后网表 + 估算 SDF 延迟，目标周期", "布线后网表，无延迟", "布线后网表 + 真实 SDF 延迟，目标周期 — 签核"]
@@ -601,6 +641,7 @@ function resultCard(jid, j, done, spec) {
         const eq = r.equivalence?.ok, pr = r.properties?.ok;
         fm.textContent = r.status === "running" ? T.formalRunning : `${T.formal}: ${eq === true ? "≡ ✓" : eq === false ? "≡ ✗" : "≡ ?"} · ${pr ? "props ✓" : "props ✗"}`;
         fm.title = (r.equivalence?.log || "") + "\n" + (r.properties?.log || "") + (r.error ? "\n" + r.error : "");
+        if (r.status !== "running") await refreshTrust(jid);
       } catch (e) { fm.textContent = e.message.slice(0, 60); }
       fm.disabled = false;
     };
@@ -613,6 +654,7 @@ function resultCard(jid, j, done, spec) {
         for (let i = 0; i < 120; i++) { r = await api(`/jobs/${jid}/mutation`); if (r.status !== "running") break; await new Promise((ok) => setTimeout(ok, 5000)); }
         mu.textContent = r.status === "running" ? T.mutationRunning : r.error ? r.error.slice(0, 60) : `${T.mutation}: ${r.killed}/${r.total} (${Math.round((r.score || 0) * 100)}%)`;
         mu.title = (r.survived || []).length ? `${T.survived}: ${r.survived.join(", ")}` : T.mutationTitle;
+        if (r.status !== "running") await refreshTrust(jid);
       } catch (e) { mu.textContent = e.message.slice(0, 60); }
       mu.disabled = false;
     };
