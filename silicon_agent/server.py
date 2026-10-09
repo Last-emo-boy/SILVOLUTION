@@ -723,7 +723,10 @@ def _export_md(tid: str) -> str:
                 out += ["| iter | " + ("cells | area µm² " if asic else "LUT | DSP ") + "| MHz | throughput | verdict | change |", "|---|---|---|---|---|---|---|"]
                 for e in res:
                     mm = e["metrics"]
-                    out.append(f"| {e['iteration']}{'.' + str(e['slot']) if e.get('slot') else ''} | {mm['lut']} | {f'{mm.get('area_um2', 0):.0f}' if asic else mm['dsp']} | {mm['fmax_mhz']:.1f} | {e['throughput']} | {'feasible' if not e['violations'] else '; '.join(e['violations'])} | {(e.get('action') or '')[:90]} |")
+                    it_s = str(e["iteration"]) + ("." + str(e["slot"]) if e.get("slot") else "")
+                    res_s = ("%.0f" % mm.get("area_um2", 0)) if asic else str(mm["dsp"])
+                    verdict = "feasible" if not e["violations"] else "; ".join(e["violations"])
+                    out.append("| %s | %s | %s | %.1f | %s | %s | %s |" % (it_s, mm["lut"], res_s, mm["fmax_mhz"], e["throughput"], verdict, (e.get("action") or "")[:90]))
                 out.append("")
             best = (j.get("summary") or {}).get("best")
             if best:
