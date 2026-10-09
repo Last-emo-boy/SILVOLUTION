@@ -96,7 +96,12 @@ def _load_from_disk() -> None:
     for d in sorted(RESULTS.iterdir()):
         if not d.is_dir() or not (d / "spec.json").exists():
             continue
-        spec = json.loads((d / "spec.json").read_text())
+        try:
+            spec = json.loads((d / "spec.json").read_text())
+        except ValueError:
+            # a submission cut by a restart before its spec landed: nothing to resume
+            print(f"results/{d.name}: unreadable spec.json, skipped", flush=True)
+            continue
         try:
             state = json.loads((d / "state.json").read_text()) if (d / "state.json").exists() else {}
         except ValueError:
@@ -122,6 +127,12 @@ def _load_from_disk() -> None:
             job["resumed"] = True
             _queue.put(d.name)
         _jobs[d.name] = job
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
 
 
 def _save_state(job_id: str) -> None:
@@ -435,7 +446,7 @@ def _submit(spec: dict, max_iter: int, sub: str, parent: dict | None = None, thr
         _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [], "created": time.time(), "subject": sub,
                          "parent": parent, "thread": thread}
         (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
-        (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
+        _write_atomic(RESULTS / job_id / "spec.json", json.dumps(spec, indent=2))
         _save_state(job_id)
     _queue.put(job_id)
     return job_id
@@ -1581,7 +1592,7 @@ class Handler(BaseHTTPRequestHandler):
                                  "subject": sub, "parent": {"id": parts[1], "iteration": pick.get("iteration") if pick else None},
                                  "thread": body.get("thread") or src.get("thread")}
                 (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
-                (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
+                _write_atomic(RESULTS / job_id / "spec.json", json.dumps(spec, indent=2))
                 _save_state(job_id)
             _queue.put(job_id)
             tid = body.get("thread") or src.get("thread")
@@ -1629,7 +1640,7 @@ class Handler(BaseHTTPRequestHandler):
             _jobs[job_id] = {"spec": spec, "max_iter": max_iter, "status": "queued", "events": [],
                              "created": time.time(), "subject": sub, "parent": body.get("parent"), "thread": thread}
             (RESULTS / job_id).mkdir(parents=True, exist_ok=True)
-            (RESULTS / job_id / "spec.json").write_text(json.dumps(spec, indent=2))
+            _write_atomic(RESULTS / job_id / "spec.json", json.dumps(spec, indent=2))
             _save_state(job_id)
         _queue.put(job_id)
         if thread and not via_agent:
