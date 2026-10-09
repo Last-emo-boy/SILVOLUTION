@@ -590,7 +590,7 @@ function sweepCard(jid, j, spec) {
 // the trust strip: one glance at how much verification stands behind the number (every pill is a fact the server
 // already holds; nothing here starts a check -- the buttons below do that, then refresh the strip)
 function trustStrip(jid, m, keys) {
-  const t = trustCache.get(jid) || {};
+  const tc = trustCache.get(jid) || {};
   const pill = (cls, label, title) => `<span class="tp ${cls}" title="${esc(title || "")}"><i></i>${label}</span>`;
   const out = [];
   out.push(pill(m.sim_passed ? "ok" : "bad", T.tBehav, "cocotb + iverilog vs the Python golden model"));
@@ -598,11 +598,11 @@ function trustStrip(jid, m, keys) {
   if (net.length) out.push(pill(net.every((v) => v === true) ? "ok" : net.some((v) => v === false) ? "bad" : "na", `${T.netlist} ${net.filter((v) => v === true).length}/${net.length}`, keys.filter((k) => k !== "behavioral").map((k) => T.stages[STAGE_KEYS.indexOf(k)]).join(" · ")));
   const seeds = m.fmax_seeds || [];
   if (seeds.length > 1) { const lo = Math.min(...seeds), hi = Math.max(...seeds); out.push(pill("ok", `${t("seeds", seeds.length)} · ${t("spread", fmt(100 * (hi - lo) / Math.max(hi, 1), 0))}`, seeds.map((x) => fmt(x, 0) + " MHz").join(" / "))); }
-  const f = t.formal, mu = t.mutation;
+  const f = tc.formal, mu = tc.mutation;
   out.push(f ? pill(f.equivalence === true && f.properties ? "ok" : "bad", `${T.formal} ${f.equivalence === true ? "≡ ✓" : f.equivalence === false ? "≡ ✗" : "≡ ?"} · ${f.properties ? "props ✓" : "props ✗"}`, `depth ${f.depth || "?"}`)
-             : pill(t.running?.formal ? "run" : "na", `${T.formal}: ${t.running?.formal ? T.formalRunning : T.notRun}`, T.formalTitle));
+             : pill(tc.running?.formal ? "run" : "na", `${T.formal}: ${tc.running?.formal ? T.formalRunning : T.notRun}`, T.formalTitle));
   out.push(mu ? pill(mu.score >= 0.8 ? "ok" : mu.score >= 0.5 ? "warn" : "bad", `${T.mutation} ${mu.killed}/${mu.total} (${Math.round((mu.score || 0) * 100)}%)`, (mu.survived || []).length ? `${T.survived}: ${mu.survived.join(", ")}` : T.mutationTitle)
-              : pill(t.running?.mutation ? "run" : "na", `${T.mutation}: ${t.running?.mutation ? T.mutationRunning : T.notRun}`, T.mutationTitle));
+              : pill(tc.running?.mutation ? "run" : "na", `${T.mutation}: ${tc.running?.mutation ? T.mutationRunning : T.notRun}`, T.mutationTitle));
   return `<div class="trust" id="trust-${esc(jid)}" title="${T.trustTitle}"><span class="lbl">${T.trust}</span>${out.join("")}</div>`;
 }
 function refreshTrust(jid) {
