@@ -955,7 +955,13 @@ def _chat_turn(tid: str, text: str, sub: str) -> None:
         else:
             _handle_chat(tid, text, sub)
     except Exception as e:
-        _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
+        if _shutting_down.is_set() or "connection closed" in str(e) or "connection lost" in str(e):
+            # the daemon went away under us (a deploy restarts the agh service): keep the turn busy so the next start
+            # resumes it from the session's records instead of ending the conversation with an error
+            with _lock:
+                _threads[tid]["interrupted"] = True
+        else:
+            _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
     finally:
         _turn_done(tid)
 

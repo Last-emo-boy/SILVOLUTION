@@ -33,7 +33,16 @@ ssh "$HOST" 'set -e
     echo "note: an ASIC flow is in progress -- orfs service left as is"
     docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --no-deps orfs
   fi
-  docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --force-recreate --no-deps server agh
+  # the agh service is recreated only when its inputs changed (entry script, plugin, harness build): a recreate
+  # aborts every agent turn in flight; the daemon keeps the sessions, so the server resumes them after its restart
+  agh_stamp=$(cat deploy/agh-entry.sh deploy/agh-provision.mjs agh-plugin/index.mjs agh-plugin/package.json deploy/compose.yml 2>/dev/null | sha256sum | cut -c1-16; stat -c %Y /opt/agnes-harness/packages/cli/dist/local/worker.mjs 2>/dev/null)
+  if [ "$(cat /srv/sa/agh/.deploy-stamp 2>/dev/null)" != "$agh_stamp" ]; then
+    docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --force-recreate --no-deps agh
+    echo "$agh_stamp" > /srv/sa/agh/.deploy-stamp
+  else
+    echo "agh service unchanged -- left running (agent turns in flight continue)"
+  fi
+  docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --force-recreate --no-deps server
   sleep 3
   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml ps
   curl -fsS http://127.0.0.1:8765/health && echo
