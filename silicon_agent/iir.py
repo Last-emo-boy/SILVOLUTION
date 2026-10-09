@@ -201,19 +201,20 @@ def _section(k: int, a: IirArch, bq: tuple, backend: str) -> str:
     localparam logic signed [SW+1:0] SMIN = -(SW+2)'((1 << (SW-1)));
     localparam logic signed [SW+1:0] DMAX = (SW+2)'((1 << (DW-1)) - 1);
     localparam logic signed [SW+1:0] DMIN = -(SW+2)'((1 << (DW-1)));
+    // saturation by the sign bits, not by compares: a value fits in W bits iff its bits above W-1 all equal the
+    // sign; that is a small AND/OR reduction, where `v > MAX` is a full-width carry chain -- and both saturations
+    // sit inside the recursive loop, which is the critical path of any IIR
     function automatic logic signed [SW-1:0] satw(input logic signed [SW+1:0] v);
-        if (v > SMAX) return SW'(SMAX);
-        if (v < SMIN) return SW'(SMIN);
-        return SW'(v);
+        if ((&v[SW+1:SW-1]) || !(|v[SW+1:SW-1])) return v[SW-1:0];
+        return v[SW+1] ? SW'(SMIN) : SW'(SMAX);
     endfunction
     function automatic logic signed [DW-1:0] satd(input logic signed [SW+1:0] v);
-        if (v > DMAX) return DW'(DMAX);
-        if (v < DMIN) return DW'(DMIN);
-        return DW'(v);
+        if ((&v[SW+1:DW-1]) || !(|v[SW+1:DW-1])) return v[DW-1:0];
+        return v[SW+1] ? DW'(DMIN) : DW'(DMAX);
     endfunction
     wire signed [SW+1:0]  y_full = (SW+2)'(p0 >>> F) + (SW+2)'(s1);
-    wire signed [SW-1:0]  y_sat  = satw(y_full);
-    wire signed [DW-1:0]  yo     = satd((SW+2)'(y_sat));
+    // the output and the recursion take y saturated to DW directly (saturating to SW first changes nothing)
+    wire signed [DW-1:0]  yo     = satd(y_full);
     // the recursive products: combinational (pipelining them would change the filter)
     wire signed [DW+CW-1:0] ra1 = yo * {lit(a1)};
     wire signed [DW+CW-1:0] ra2 = yo * {lit(a2)};
