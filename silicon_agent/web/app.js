@@ -28,6 +28,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 // ---------------------------------------------------------------- boot
 (async function boot() {
   try { $("#who").textContent = (await api("/me")).subject; } catch { $("#who").textContent = "unauthenticated"; }
+  try { AGH_WEB = !!(await api("/health")).agh_web; } catch {}
   const llmBanner = async () => { try { const st = (await api("/health")).llm; let b = $("#llm-banner"); if (!st || st.ok !== false) { if (b) b.remove(); return; } if (!b) { b = el(`<div id="llm-banner" class="banner"></div>`); $("#main").prepend(b); } b.textContent = `model account unavailable (DeepSeek answered ${st.code || "?"}): the planner is paused, runs already started still finish; sweeps and BYO checks without a planner still work${st.balance ? ` · balance ${st.balance}` : ""}`; } catch {} };
   llmBanner(); setInterval(llmBanner, 30000);
   specs = await api("/specs");
@@ -202,7 +203,7 @@ function render() {
 }
 
 // the Agnes Harness side of a run: the chat turns that started it and the agent's tool trail (steps) with arguments
-let threadData = null;
+let threadData = null, AGH_WEB = false;
 function renderAgentTab() {
   const tab = $("#tab-agent"), p = $("#pane-agent");
   const msgs = (threadData?.messages || []).filter((m) => m.source === "agh" && (m.job === selected || (m.kind === "text" && m.tools?.some((t) => JSON.stringify(t.args || {}).includes(selected)))));
@@ -211,7 +212,8 @@ function renderAgentTab() {
   const sig = JSON.stringify(msgs.map((m) => [m.t, m.steps?.length]));
   if (p.dataset.sig === sig) return;
   p.dataset.sig = sig; p.innerHTML = "";
-  p.appendChild(el(`<div class="sec"><h3>Agent <span class="hint">Agnes Harness session · ${esc(threadData.agh_session || "")}</span></h3></div>`));
+  const sid = threadData.agh_session || "";
+  p.appendChild(el(`<div class="sec"><h3>Agent <span class="hint">Agnes Harness session · ${esc(sid)}</span>${AGH_WEB && sid ? ` <a class="aghlink" href="/agh/?session=${encodeURIComponent(sid)}" target="_blank" title="open this session in the harness workbench: full transcript, tool records, approvals">⚙ open in AGH ↗</a>` : ""}</h3></div>`));
   for (const m of msgs) {
     const sec = el(`<div class="sec agent-turn"></div>`);
     if (m.kind === "text") {

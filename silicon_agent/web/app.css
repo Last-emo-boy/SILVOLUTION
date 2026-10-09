@@ -281,3 +281,5 @@ table.bench td.bad { color: var(--bad); } table.bench a { color: inherit; text-d
 .lesson .sit .pair { font-weight: 600; color: var(--text-2); } .lesson .sit .pair.transfer { color: var(--warn); }
 .rail-foot .foot-r { display: inline-flex; align-items: center; gap: 6px; }
 .rail-foot #theme { width: 24px; height: 24px; font-size: 13px; color: var(--muted); } .rail-foot #theme:hover { color: var(--text); }
+
+.sec h3 .aghlink { margin-left: 10px; font: 500 11.5px var(--font); color: var(--muted); text-decoration: none; } .sec h3 .aghlink:hover { color: var(--text); }
