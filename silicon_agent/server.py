@@ -735,8 +735,16 @@ def _record_turn(tid: str, r: dict, lang: str) -> list[str]:
                 started.append(jid)
                 _note_agent_run(tid, jid, lang)
     by_id = {t.get("id"): t for t in r["tools"]}
+    if r.get("stop") == "cancelled" and _shutting_down.is_set():
+        # the harness aborted the turn because we are going down: leave the thread busy and record nothing, so the
+        # next start nudges the session to continue from its records (the user sees "resumed", not a dead end)
+        with _lock:
+            th["interrupted"] = True
+            th.pop("live", None); th.pop("live_note", None)
+            _save_thread(tid)
+        return started
     if r.get("stop") == "cancelled":
-        # a cancel from the stop button, or the harness aborting the turn because its client went away (a restart)
+        # a cancel from the stop button
         r["text"] = (r["text"] + "\n\n" if r["text"] else "") + ("（这一轮被中止）" if lang == "zh" else "(turn cut short)")
     with _lock:
         th.pop("live", None); th.pop("live_note", None)
@@ -842,6 +850,10 @@ def _turn_done(tid: str) -> None:
     th = _threads[tid]
     with _lock:
         th.pop("live", None); th.pop("live_note", None)
+        if th.pop("interrupted", None):
+            # a shutdown cut the turn: stay busy so _resume_turns() picks it up after the restart
+            _save_thread(tid)
+            return
         nxt = (th.get("queue") or [None]).pop(0) if th.get("queue") else None
         if nxt:
             th["messages"].append({"role": "user", "kind": "text", "text": nxt["text"], "t": time.time()})
