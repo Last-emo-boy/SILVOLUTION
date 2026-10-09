@@ -76,6 +76,7 @@ RESULTS = ROOT / "results"
 THREADS = ROOT / "threads"
 SPECS = Path(__file__).resolve().parent.parent / "specs"
 STATIC = Path(__file__).resolve().parent / "web"
+_STATIC_STAMP = hashlib.sha256(b"".join(sorted(f.read_bytes() for f in STATIC.glob("*") if f.is_file()))).hexdigest()[:10] if STATIC.exists() else "0"
 TOKEN = os.environ.get("SA_TOKEN", "")
 # Shared with sluice (GATEWAY_HMAC_KEY). When set, X-Auth-Subject is trusted only if
 # X-Auth-Sig = HMAC-SHA256(key, subject "\n" groups "\n" epoch_minute) for the current or
@@ -1209,6 +1210,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _file(self, path: Path, cache: str = "no-store") -> None:
         data = path.read_bytes()
+        if path.suffix == ".html":
+            # every /static/x.js|css reference carries the build stamp: a deploy never leaves a browser on stale UI
+            # code while the pages and the API moved on (the stamped URLs are then cached for a long time)
+            data = re.sub(rb'(/static/[\w./-]+\.(?:js|css))"', lambda m: m.group(1) + f"?v={_STATIC_STAMP}".encode() + b'"', data)
         self.send_response(200)
         self.send_header("Content-Type", MIME.get(path.suffix, "application/octet-stream"))
         self.send_header("Content-Length", str(len(data)))
@@ -1241,7 +1246,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/static/"):
             target = (STATIC / path[len("/static/"):]).resolve()
             if STATIC.resolve() in target.parents and target.is_file():
-                return self._file(target, cache="public, max-age=300")
+                return self._file(target, cache="public, max-age=31536000, immutable" if "v=" in u.query else "no-cache")
             return self._json(404, {"error": "not found"})
 
         sub = self._subject()
@@ -1278,6 +1283,24 @@ class Handler(BaseHTTPRequestHandler):
                                          "status": j["status"] if j else None, "best": (j.get("summary") or {}).get("best") if j else None,
                                          "design": j["spec"].get("design") if j else None, "backend": j["spec"].get("backend") if j else None})
                 v["rtl"] = [{"id": b["id"], "name": b.get("name"), "top": b.get("top"), "params": list((b.get("params") or {}).keys()), "files": list((b.get("files") or {}).keys()), "thread": b.get("thread"), "created": b.get("created")} for b in _project_bundles(parts[1])]
+                # the project's deliverables: per (design, device) the best feasible design any of its runs found
+                best: dict[tuple, dict] = {}
+                for t in v["threads"]:
+                    for jid in _thread_jobs(t["id"]):
+                        j = _jobs.get(jid)
+                        b = (j or {}).get("summary", {}).get("best") if j else None
+                        if not b:
+                            continue
+                        key = (j["spec"].get("design", "matmul"), j["spec"].get("backend", "ecp5"))
+                        obj = ((j["spec"].get("constraints") or {}).get("objective") or ["maximize_throughput"])[0]
+                        m = b["metrics"]
+                        rank = (-(b.get("throughput") or 0), -m.get("fmax_mhz", 0)) if obj == "maximize_throughput" else (-m.get("fmax_mhz", 0),) if obj == "maximize_fmax" else (m.get("lut", 0), -m.get("fmax_mhz", 0))
+                        cur = best.get(key)
+                        if cur is None or rank < cur["_rank"]:
+                            best[key] = {"_rank": rank, "design": key[0], "backend": key[1], "job": jid, "thread": t["id"], "title": t["title"], "task": j["spec"].get("task", "")[:120],
+                                         "fmax_mhz": m.get("fmax_mhz"), "lut": m.get("lut"), "dsp": m.get("dsp"), "area_um2": m.get("area_um2"), "throughput": b.get("throughput"),
+                                         "throughput_unit": (j.get("summary") or {}).get("throughput_unit", ""), "signoff": (m.get("sim_stages") or {}).get("post_impl_time", {}).get("passed") is True}
+                v["best"] = [{k: x[k] for k in x if k != "_rank"} for x in sorted(best.values(), key=lambda x: (x["design"], x["backend"]))]
             return self._json(200, v)
         if path == "/threads":
             with _lock:

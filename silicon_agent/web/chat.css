@@ -74,6 +74,14 @@ button:disabled { opacity: .45; cursor: default; }
 .rail-list .group.convs .hint { display: none; font: 10px var(--mono); text-transform: none; letter-spacing: 0; color: var(--accent); }
 .rail-list.dnd .group.convs .hint { display: inline; }
 .rail-list .group.convs.over { background: var(--accent-soft); border-radius: 7px; }
+.project .bestgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.project .bestcard { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.project .bestcard:hover { border-color: var(--border-2); background: var(--surface-2); }
+.project .bestcard .bh { display: flex; gap: 8px; align-items: center; font-size: 12px; } .project .bestcard .bh .mono { font-weight: 600; color: var(--text); }
+.project .bestcard .bh .dev { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; } .project .bestcard .bh .so { color: var(--good); margin-left: auto; }
+.project .bestcard .bn { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font: 11.5px var(--mono); color: var(--text-2); } .project .bestcard .bn b { font: 600 15px var(--font); color: var(--text); }
+.project .bestcard .bt { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project .bestcard .bl a { font: 11px var(--mono); color: var(--muted); text-decoration: none; } .project .bestcard .bl a:hover { color: var(--text); }
 .project .prtls { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .project .prtl { display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; border: 1px dashed var(--border); border-radius: 10px; font-size: 12.5px; }
 .project .prtl .mono { font-size: 11px; color: var(--muted); } .project .prtl .t { font-weight: 500; }
