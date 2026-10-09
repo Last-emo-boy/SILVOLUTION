@@ -34,6 +34,9 @@ def adapt(vals, ow, nw, mode):
 def node_golden(kind, ir, xs, mode_in_width):
     if kind == "fir":
         return fir_golden(xs, list(ir.coefs))
+    if kind == "decim":
+        from silicon_agent.decim import golden
+        return golden(ir, xs)
     if kind == "cordic":
         from silicon_agent.cordic import golden
         return [o[0] for o in golden(ir, xs, [0] * len(xs), [0] * len(xs))]
@@ -77,6 +80,7 @@ async def stream(dut):
     for i, nd in enumerate(a.nodes):
         if nd["kind"] == "fft": unit = max(unit, a.node_ir(i).n)
         if nd["kind"] == "conv2d": unit = max(unit, a.node_ir(i).width)
+        if nd["kind"] == "decim": unit = max(unit, a.node_ir(i).decim)
     n = max(unit * 2, (n // unit) * unit)
     xs = [rng.randint(lo, hi) for _ in range(n)]
     expected = graph_golden(a, xs)

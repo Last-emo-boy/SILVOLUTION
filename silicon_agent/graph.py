@@ -28,7 +28,7 @@ def DESIGNS_REF():
     return DESIGNS
 
 
-KINDS = ("fir", "conv2d", "cordic", "fft")
+KINDS = ("fir", "decim", "conv2d", "cordic", "fft")
 
 
 @dataclass(frozen=True)
@@ -83,6 +83,8 @@ def _io(kind: str, ir) -> dict:
     """Stream port names and widths of a node kind."""
     if kind == "fir":
         return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True}
+    if kind == "decim":
+        return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True, "decim": ir.decim}
     if kind == "conv2d":
         return {"in": ("in_data", ir.data_width), "out": ("out_data", ir.acc_width), "signed": True, "frame": ir.width}
     if kind == "cordic":
@@ -137,6 +139,8 @@ def emit_graph(a: GraphArch, backend: str = "ecp5") -> str:
         if kind == "fir":
             extra = ", .coef_we(1'b0), .coef_addr('0), .coef_data('0)" if getattr(a.node_ir(i), "coef_port", False) else ""
             inst.append(f"    n{i}_{top} u_n{i} (.clk(clk), .rst(rst), .in_valid({src_v}), .in_data({src_d}), .in_ready({rdy}), .out_valid({ov}), .out_data({od}){extra});")
+        elif kind == "decim":
+            inst.append(f"    n{i}_{top} u_n{i} (.clk(clk), .rst(rst), .in_valid({src_v}), .in_data({src_d}), .in_ready({rdy}), .out_valid({ov}), .out_data({od}));")
         elif kind == "conv2d":
             W = io["frame"]
             inst.append(f"""    // frame_start for the conv node: every {W} accepted samples starts a new row... the node needs a frame start

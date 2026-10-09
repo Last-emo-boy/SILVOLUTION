@@ -78,6 +78,27 @@ SCHEMAS = {
         "constraints_default": {"fmax_mhz": 100, "max_dsp": 16, "max_lut": 2000},
         "locked_default": {"k": 3, "width": 640, "data_width": 8, "coef_width": 8},
     },
+    "decim": {
+        "title": "decimating FIR (polyphase rate change by M: one output per M inputs, N/M multipliers at full input rate)",
+        "locked_candidates": ["taps", "decim", "data_width", "coef_width", "cutoff"],
+        "fields": [
+            {"name": "taps", "type": "int", "min": 2, "max": 256, "hint": "filter length, a multiple of decim (task parameter)"},
+            {"name": "decim", "type": "int", "min": 2, "max": 16, "hint": "rate change M: one output per M input samples (task parameter)"},
+            {"name": "data_width", "type": "choice", "choices": [8, 12, 16, 18], "hint": "sample bits"},
+            {"name": "coef_width", "type": "choice", "choices": [8, 12, 16, 18], "hint": "coefficient bits"},
+            {"name": "cutoff", "type": "float", "min": 0.005, "max": 0.49, "hint": "lowpass cutoff as a fraction of the INPUT sample rate (anti-alias: <= 0.5/decim)"},
+            {"name": "acc_width", "type": "int", "min": 16, "max": 64, "hint": "accumulator bits; min = dw+cw+log2(taps)"},
+            {"name": "fold", "type": "int", "min": 1, "max": 8, "hint": "cycles per accepted input sample (throughput 1/fold inputs/cycle); multipliers = ceil(taps / (decim*fold))"},
+            {"name": "sum_tree", "type": "bool", "hint": "register the K-way reduction of a sweep step (+1 cycle)"},
+            *SHARED,
+        ],
+        "presets": {
+            "full rate x4": {"taps": 32, "decim": 4, "data_width": 16, "coef_width": 16, "acc_width": 40, "fold": 1, "pipe_mul": 1, "reg_in": True, "dsp_regs": "in_pipe_out", "acc_in_dsp": True, "sum_tree": False},
+            "half rate x4": {"taps": 32, "decim": 4, "data_width": 16, "coef_width": 16, "acc_width": 40, "fold": 2, "pipe_mul": 1, "reg_in": True, "dsp_regs": "in_pipe_out", "acc_in_dsp": True, "sum_tree": True},
+        },
+        "constraints_default": {"fmax_mhz": 150, "max_dsp": 8, "max_lut": 3000},
+        "locked_default": {"taps": 32, "decim": 4, "data_width": 16, "coef_width": 16, "cutoff": 0.1},
+    },
     "cordic": {
         "title": "CORDIC sin/cos (rotate) or magnitude/atan2 (vector)",
         "locked_candidates": ["mode", "width"],
@@ -117,7 +138,7 @@ SCHEMAS = {
         "locked_default": {"n": 256, "data_width": 16},
     },
     "graph": {
-        "title": "datapath graph: chain of fir / conv2d / cordic / fft nodes with FIFOs",
+        "title": "datapath graph: chain of fir / decim / conv2d / cordic / fft nodes with FIFOs",
         "locked_candidates": ["nodes"],
         "nested": "nodes",
         "fields": [

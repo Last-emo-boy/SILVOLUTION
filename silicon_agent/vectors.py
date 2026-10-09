@@ -158,6 +158,24 @@ endmodule
 """
 
 
+# ---------------------------------------------------------------- decim (same bench shape as fir; one output per M inputs)
+def decim_vectors(ir, seed: int = 1, n_frames: int = 30) -> tuple[list[str], list[str]]:
+    from silicon_agent.decim import golden as decim_golden
+    DW, AW, M = ir.data_width, ir.acc_width, ir.decim
+    rng = random.Random(seed)
+    lo, hi = -(1 << (DW - 1)), (1 << (DW - 1)) - 1
+    n = n_frames * M
+    xs = [hi] * M + [lo] * M + [rng.randint(lo, hi) for _ in range(n - 2 * M)]
+    ys = decim_golden(ir, xs)
+    gaps = [0 if i >= len(xs) // 2 else rng.choice([0, 0, 1, 3]) for i in range(len(xs))]
+    stim = [f"{g:x} {x & ((1 << DW) - 1):0{max(1, DW // 4)}x}" for g, x in zip(gaps, xs)]
+    exp = [f"{y & ((1 << AW) - 1):0{max(1, (AW + 3) // 4)}x}" for y in ys]
+    return stim, exp
+
+
+TB_DECIM = TB_FIR.replace("fir_top dut", "decim_top dut").replace("{COEF_TIE}", "").replace("repeat (300) @(posedge clk);", "repeat (400) @(posedge clk);")
+
+
 # ---------------------------------------------------------------- conv2d
 def conv_vectors(ir, seed: int = 1, n_rows: int | None = None) -> tuple[list[str], list[str]]:
     K, W, DW, AW = ir.k, ir.width, ir.data_width, ir.acc_width
@@ -358,6 +376,7 @@ def graph_vectors(ir, seed: int = 1, n: int = 160) -> tuple[list[str], list[str]
     for i, nd in enumerate(ir.nodes):
         if nd["kind"] == "fft": unit = max(unit, ir.node_ir(i).n)
         if nd["kind"] == "conv2d": unit = max(unit, ir.node_ir(i).width)
+        if nd["kind"] == "decim": unit = max(unit, ir.node_ir(i).decim)
     n = max(unit * 2, (n // unit) * unit)
     lo, hi = -(1 << (DW - 2)), (1 << (DW - 2)) - 1
     xs = [rng.randint(lo, hi) for _ in range(n)]

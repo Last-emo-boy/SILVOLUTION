@@ -167,6 +167,36 @@ FIR facts below applies per stage.\n""" + FIR_FACTS["ecp5"],
 }
 
 
+DECIM_WHAT = "a polyphase decimating FIR (anti-alias lowpass + downsample by M in one block: one output per M input samples)"
+
+DECIM_IR = """IR fields and legal ranges (taps, decim, data_width, coef_width, cutoff and the coefficients are fixed by the task):
+  acc_width  int MIN..64  accumulator width; MIN = data_width+coef_width+ceil(log2 taps). Carry-chain length.
+  fold       int 1..8     cycles per accepted input sample (throughput = 1/fold input samples per cycle; the output
+                          rate is that / decim). The N taps of one output are swept over decim*fold cycles on
+                          K = ceil(taps / (decim*fold)) multipliers, so fold trades input rate for multipliers.
+  pipe_mul   int 0..3     fabric register stages after the multipliers
+  reg_in     bool         register the input sample
+  dsp_regs   str in {"none","out","in_out","in_pipe_out"}  DSP-internal pipeline registers
+  acc_in_dsp bool         xc7s50 only
+  sum_tree   bool         register the K-way reduction of one sweep step (+1 cycle); the knob when the critical
+                          path runs from the multiplier outputs through the K-input adder into the accumulator
+
+Structure summary: a delay line of the last N inputs; at each frame end (every M accepts) it is snapshotted and
+the N products are swept over S = ceil(N/K) steps while the next frame streams in. Per output: N multiplications
+on K multipliers -- the polyphase saving is that K is 1/M of a full-rate FIR's multiplier count at the same fold.
+Critical paths: the K-way adder into the accumulator (sum_tree), the accumulator carry chain (acc_width), the
+snapshot mux into the multipliers (pipe_mul/dsp_regs do not touch it)."""
+
+DECIM_IR_JSON = '{"acc_width":..,"fold":..,"pipe_mul":..,"reg_in":..,"dsp_regs":"..","acc_in_dsp":..,"sum_tree":..}'
+
+DECIM_FACTS = {
+    "ecp5": """ECP5, measured on a 32-tap decimate-by-4, 12x12, acc 30, fold 1, dsp_regs in_pipe_out: 8 MULT18X18D, 845 LUT,
+105.9 MHz; the critical path is the 8-way adder (LUT4 + carry chain) from the DSP outputs into out_data/acc --
+sum_tree is the first move, then acc_width.""",
+    "ice40": """iCE40, measured on a 32-tap decimate-by-4, 12x12, acc 30, fold 2, sum_tree, dsp_regs out: 4 SB_MAC16, 610 LC,
+43.6 MHz; limiter is the registered 4-way sum (psum) -- the accumulator carry chain and the LUT4 adder tree.""",
+}
+
 CORDIC_WHAT = "a fixed-point CORDIC engine (rotation: sin/cos; vectoring: magnitude/atan2) as a streaming pipeline or an iterative unit"
 
 CORDIC_IR = """IR fields and legal ranges:
@@ -233,9 +263,9 @@ BRAM (26 BSRAM). Do not retry a cmul=four shape that was reported as not fitting
 }
 
 
-GRAPH_WHAT = "a datapath: a chain of 2-6 heterogeneous stream nodes (fir, conv2d, cordic, fft) connected by valid/ready FIFOs"
+GRAPH_WHAT = "a datapath: a chain of 2-6 heterogeneous stream nodes (fir, decim, conv2d, cordic, fft) connected by valid/ready FIFOs"
 
-GRAPH_IR = """IR: {"nodes": [{"kind": "fir"|"conv2d"|"cordic"|"fft", "ir": <that design's IR>}, ...], "fifo_depth": 4..64, "adapt": "truncate"|"round"|"saturate"}
+GRAPH_IR = """IR: {"nodes": [{"kind": "fir"|"decim"|"conv2d"|"cordic"|"fft", "ir": <that design's IR>}, ...], "fifo_depth": 4..64, "adapt": "truncate"|"round"|"saturate"}
 The node kinds and each node's task-defining fields are fixed; you edit each node's architecture knobs (the same
 knobs those designs expose on their own: fold/symmetric/dsp_regs/... for fir, par_rows/tree_regs/line_mem for conv2d,
 unroll/fold/guard_bits for cordic, mul_regs/bf_regs/growth/delay_mem for fft), plus fifo_depth and adapt.
@@ -254,6 +284,7 @@ cordic's two chained adders per stage limit. Gowin GW1NR-9 same graph: 124 MHz, 
 PROMPTS = {
     "matmul": {"what": MATMUL_WHAT, "ir": MATMUL_IR, "ir_json": MATMUL_IR_JSON, "facts": MATMUL_FACTS},
     "graph": {"what": GRAPH_WHAT, "ir": GRAPH_IR, "ir_json": GRAPH_IR_JSON, "facts": GRAPH_FACTS},
+    "decim": {"what": DECIM_WHAT, "ir": DECIM_IR, "ir_json": DECIM_IR_JSON, "facts": DECIM_FACTS},
     "cordic": {"what": CORDIC_WHAT, "ir": CORDIC_IR, "ir_json": CORDIC_IR_JSON, "facts": CORDIC_FACTS},
     "fft": {"what": FFT_WHAT, "ir": FFT_IR, "ir_json": FFT_IR_JSON, "facts": FFT_FACTS},
     "fir_chain": {"what": CHAIN_WHAT, "ir": CHAIN_IR, "ir_json": CHAIN_IR_JSON, "facts": CHAIN_FACTS},

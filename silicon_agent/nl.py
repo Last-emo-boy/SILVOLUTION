@@ -33,6 +33,10 @@ Available designs:
           locked: taps, data_width, coef_width, cutoff, coef_port (true when the user wants to change/load/program the
           coefficients at runtime, e.g. "configurable", "programmable taps", "load coefficients over AXI").
           Throughput is 1/fold samples per cycle.
+  decim   polyphase decimating FIR: anti-alias lowpass + downsample by M in one block (one output per M inputs),
+          taps/M multipliers at full input rate. locked: taps (multiple of decim), decim (2-16), data_width, coef_width,
+          cutoff (fraction of the INPUT rate, <= 0.5/decim). Use it for "decimate", "downsample", "抽取", "降采样",
+          "sample-rate reduction"; throughput is 1/fold input samples per cycle.
   conv2d  streaming single-channel K x K 2-D convolution (image filter / blur / edge kernel) with line buffers.
           locked: k (3/5/7), width (image width in pixels), data_width (8/12/16), coef_width (8/12/16).
           Throughput is par_rows/k pixels per cycle. A pixel rate R MHz means fmax >= R*k/par_rows.
@@ -40,7 +44,7 @@ Available designs:
           Pipelined 1 sample/cycle or iterative (fold = iterations) for tiny area. Precision ~ iterations bits.
   fft     streaming N-point complex FFT, radix-2 SDF pipeline, 1 sample/cycle. locked: n (power of 2), data_width.
           4 DSPs per stage; natural-order output needs bit_reverse=true (+N latency).
-  graph   a datapath of 2-6 heterogeneous stream nodes in series (any of fir / conv2d / cordic / fft) with FIFOs.
+  graph   a datapath of 2-6 heterogeneous stream nodes in series (any of fir / decim / conv2d / cordic / fft) with FIFOs.
           locked: {"nodes": [{"kind": ..., "ir": {<that node's task fields>}}, ...]}; initial_ir: {"nodes": [{"kind", "ir": <full IR>}], "fifo_depth": 32, "adapt": "truncate"}.
           Use it when the user describes a pipeline of different blocks ("filter then FFT", "CORDIC then low-pass").
   fir_chain  a cascade of 2-4 FIR stages with FIFOs between them (e.g. anti-alias then shaping, or decimation

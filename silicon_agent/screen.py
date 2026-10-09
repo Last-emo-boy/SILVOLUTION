@@ -127,6 +127,26 @@ def estimate_chain(ir: dict, backend: str) -> dict:
             "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
 
 
+def estimate_decim(ir: dict, backend: str) -> dict:
+    taps, M, fold, aw = ir["taps"], ir.get("decim", 4), ir.get("fold", 1), ir["acc_width"]
+    K = math.ceil(taps / (M * fold))
+    if _style(backend) == "vivado":
+        dsp = K
+        lut = K * 10 + aw * 2 + taps * ir["data_width"] / 8 + 60
+        fmax = 300 - 6 * K
+        if ir.get("dsp_regs", "none") == "none":
+            fmax -= 60
+    else:
+        dsp = K
+        lut = taps * ir["data_width"] / 2 + K * aw * 0.4 + aw * 3 + 60   # the snapshot register + products + adder
+        fmax = (170 if ir.get("dsp_regs", "none") != "none" else 120) - 7 * K - 0.5 * max(aw - 32, 0)
+        fmax *= _scale(backend)
+    if ir.get("sum_tree") and K > 1:
+        fmax *= 1.2
+        lut += aw
+    return {"fmax_mhz": fmax, "lut": int(lut), "dsp": dsp, "throughput": round(1 / fold, 4)}
+
+
 def estimate_cordic(ir: dict, backend: str) -> dict:
     W = ir["width"] + ir.get("guard_bits", 2); N = ir["iterations"]; U = ir.get("unroll", 1); fold = ir.get("fold", 1)
     dsp = 1 if ir.get("scale_comp") else 0
@@ -172,7 +192,7 @@ def estimate_graph(ir: dict, backend: str) -> dict:
             "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
 
 
-ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft}
+ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft, "decim": estimate_decim}
 ESTIMATORS["graph"] = estimate_graph
 
 
@@ -209,6 +229,9 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
         f += [math.log2(ir["taps"]), math.log2(ir.get("fold", 1)), 1.0 if ir.get("symmetric") else 0.0, ir["acc_width"] / 40,
               1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0),
               1.0 if (ir.get("fold", 1) > 1 and ir.get("sum_tree")) else 0.0, 1.0 if (ir.get("fold", 1) > 1 and ir.get("pipe_in")) else 0.0]
+    elif design == "decim":
+        f += [math.log2(ir["taps"]), math.log2(ir.get("decim", 4)), math.log2(ir.get("fold", 1)), ir["acc_width"] / 40,
+              1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, 1.0 if ir.get("sum_tree") else 0.0, ir.get("pipe_mul", 0)]
     elif design == "cordic":
         f += [ir["width"] / 16, ir["iterations"] / 16, math.log2(ir.get("unroll", 1) + 0.0) if ir.get("unroll", 1) > 0 else 0, 1.0 if ir.get("fold", 1) > 1 else 0.0,
               ir.get("guard_bits", 0) / 4, 1.0 if ir.get("scale_comp") else 0.0, 0.0]
