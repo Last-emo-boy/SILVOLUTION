@@ -1017,7 +1017,15 @@ def _chat_turn(tid: str, text: str, sub: str) -> None:
             with _lock:
                 _threads[tid]["interrupted"] = True
         else:
-            _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": f"Something went wrong: {e}", "t": time.time()})
+            msg = str(e)
+            if "QUOTA" in msg or "402" in msg or "Insufficient Balance" in msg:
+                lang = nl._lang(text)
+                msg = ("模型账户余额不足（DeepSeek 返回 402）：请给 DeepSeek 账户充值后重发这条消息；已启动的运行不受影响，只是规划器和对话暂停。"
+                       if lang == "zh" else
+                       "The model account is out of credit (DeepSeek answered 402). Top up the DeepSeek account and resend this message; runs already started keep their results, only the planner and the chat pause.")
+            else:
+                msg = f"Something went wrong: {msg[:600]}"
+            _threads[tid]["messages"].append({"role": "assistant", "kind": "text", "text": msg, "t": time.time(), "source": "agh"})
     finally:
         _turn_done(tid)
 

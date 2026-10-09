@@ -93,6 +93,9 @@ def chat_json(system: str, user: str, max_tokens: int | None = None, retries: in
             return parsed
         except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError) as e:
             last_err = e
+            if isinstance(e, urllib.error.HTTPError) and e.code in (401, 402, 403):
+                # no credit / bad key: retrying with less reasoning does not help
+                raise RuntimeError(f"LLM account error: HTTP {e.code} ({'insufficient balance' if e.code == 402 else 'unauthorized'})")
             print(f"     llm attempt {attempt + 1}/{retries} (effort={body['reasoning_effort']}) failed: {e}", flush=True)
             time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"LLM call failed after {retries} attempts: {last_err}")
