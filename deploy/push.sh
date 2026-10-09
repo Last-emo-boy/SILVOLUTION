@@ -20,7 +20,11 @@ ssh "$HOST" 'set -e
   # cache on start); stop_grace_period in compose.yml gives it the time. Tell the operator what is running.
   running=$(curl -sS http://127.0.0.1:8765/api/jobs -H "Authorization: Bearer $(grep ^SA_TOKEN= /opt/silicon-agent/.env | cut -d= -f2-)" 2>/dev/null | python3 -c "import sys,json; print(\",\".join(j[\"id\"] for j in json.load(sys.stdin) if j[\"status\"] in (\"running\",\"queued\")))" 2>/dev/null || true)
   [ -n "$running" ] && echo "note: $running in flight -- will finish the current iteration, then resume after restart"
-  docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --force-recreate
+  # the orfs runner is recreated only when idle: a flow in progress would be killed and the job would wait for it
+  svcs="server agh"
+  if ! ls /srv/sa/asic/queue/*/running >/dev/null 2>&1; then svcs="$svcs orfs"; else echo "note: an ASIC flow is in progress -- orfs service left as is"; fi
+  docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d --force-recreate $svcs
+  docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml up -d orfs
   sleep 3
   docker compose --env-file /opt/silicon-agent/.env -f deploy/compose.yml ps
   curl -fsS http://127.0.0.1:8765/health && echo

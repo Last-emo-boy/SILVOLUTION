@@ -7,6 +7,8 @@ set -uo pipefail
 : "${SA_ASIC_QUEUE:=/srv/sa/asic/queue}"
 : "${ORFS:=/OpenROAD-flow-scripts/flow}"
 mkdir -p "$SA_ASIC_QUEUE"
+# a `running` marker left by a previous runner (the container was recreated mid-flow) is ours to redo
+for stale in "$SA_ASIC_QUEUE"/*/running; do [ -e "$stale" ] && { echo "orfs-runner: redoing $(dirname "$stale")"; rm -f "$stale"; }; done
 echo "orfs-runner: watching $SA_ASIC_QUEUE (platforms: $(ls $ORFS/platforms | tr '\n' ' '))"
 while true; do
   for req in "$SA_ASIC_QUEUE"/*/request.json; do
