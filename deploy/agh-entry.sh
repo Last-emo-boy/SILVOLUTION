@@ -55,7 +55,7 @@ AGH_WEB_ORIGIN="${AGNES_WEB_ORIGIN:-http://127.0.0.1:4178}"
   sleep 5
   cd /opt/silicon-agent/app
   # the launcher binds the loopback only (its origin contract); the relay exposes it on the compose network
-  AGH_WEB_RELAY_LISTEN=0.0.0.0:4177 AGH_WEB_RELAY_TARGET=127.0.0.1:4178 node /opt/silicon-agent/app/deploy/agh-web-relay.mjs &
+  AGH_WEB_RELAY_LISTEN=0.0.0.0:4177 node /opt/silicon-agent/app/deploy/agh-web-relay.mjs &
   while true; do
     AGNES_WEB_ORIGIN="$AGH_WEB_ORIGIN" node "$AGH_DIST/agnes.mjs" serve --profile "$AGNES_PROFILE" --data-dir "$AGH_HOME/data" --cwd /opt/silicon-agent/app \
       || echo "agh: web serve exited ($?), restarting in 10 s" >&2

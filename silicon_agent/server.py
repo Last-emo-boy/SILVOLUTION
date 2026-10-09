@@ -1304,16 +1304,23 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "silicon-agent/0.3"
 
     def _agh_proxy(self) -> None:
-        """Forward this request to the harness web launcher with the loopback Host/Origin it insists on."""
+        """Forward this request into the agh container with the loopback Host/Origin the harness insists on.
+        Pages and assets go to the web launcher; the browser websocket goes to the daemon's loopback websocket
+        port, which the page's config names (rewritten to /agh/ws/<port>/ on the way out)."""
         import socket as _socket
         from urllib.parse import urlsplit as _urlsplit
         host, port = AGH_WEB.rsplit(":", 1)
         loop = _urlsplit(AGH_WEB_ORIGIN)
         path = self.path[len("/agh"):] or "/"
+        target = loop.netloc
+        m = re.match(r"^/ws/(\d{2,5})(/.*)?$", path)
+        if m:
+            target = f"127.0.0.1:{m.group(1)}"
+            path = m.group(2) or "/"
         # headers: Host and Origin rewritten; hop-by-hop and the gateway's identity headers dropped; the
         # websocket handshake headers pass through untouched
         drop = {"host", "origin", "x-auth-subject", "x-auth-sig", "x-auth-groups", "authorization", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "x-real-ip", "cookie"}
-        lines = [f"{self.command} {path} HTTP/1.1", f"Host: {loop.netloc}"]
+        lines = [f"{self.command} {path} HTTP/1.1", f"Host: {target}"]
         if "origin" in self.headers:
             lines.append(f"Origin: {AGH_WEB_ORIGIN}")
         if "referer" in self.headers:
@@ -1332,7 +1339,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             return self._json(502, {"error": f"harness web unreachable: {e}"})
         try:
-            up.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body)
+            up.sendall(f"TARGET {target}\n".encode() + ("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body)
             if upgrade:
                 # tunnel: after the 101 both sides speak websocket frames; copy bytes until either closes
                 up.settimeout(None)
@@ -1364,7 +1371,8 @@ class Handler(BaseHTTPRequestHandler):
             ctype = (hdr.get("content-type") or [""])[0]
             if any(t in ctype for t in ("text/html", "javascript", "text/css", "application/json")):
                 txt = data.decode("utf-8", "replace")
-                txt = txt.replace(AGH_WEB_ORIGIN.replace("http://", "ws://"), f"{'wss' if self.headers.get('X-Forwarded-Proto', 'http') == 'https' else 'ws'}://{self.headers.get('Host', '')}/agh")
+                scheme = "wss" if self.headers.get("X-Forwarded-Proto", "http") == "https" else "ws"
+                txt = re.sub(r"ws://127\.0\.0\.1:(\d{2,5})/?", lambda mm: f"{scheme}://{self.headers.get('Host', '')}/agh/ws/{mm.group(1)}/", txt)
                 txt = txt.replace(AGH_WEB_ORIGIN, "/agh")
                 data = txt.encode("utf-8")
             code = int(status.split()[1]) if len(status.split()) > 1 else 502
@@ -1379,7 +1387,7 @@ class Handler(BaseHTTPRequestHandler):
             csp = (hdr.get("content-security-policy") or [""])[0]
             if csp:
                 # the harness pins connect-src to its loopback ws origin; through the proxy the page connects back here
-                self.send_header("Content-Security-Policy", csp.replace(AGH_WEB_ORIGIN.replace("http://", "ws://"), "'self' ws: wss:").replace(AGH_WEB_ORIGIN, "'self'"))
+                self.send_header("Content-Security-Policy", re.sub(r"ws://127\.0\.0\.1:\d{2,5}", "'self' ws: wss:", csp).replace(AGH_WEB_ORIGIN, "'self'"))
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
