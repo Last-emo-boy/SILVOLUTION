@@ -7,6 +7,11 @@
 set -euo pipefail
 HOST="${1:-netcup}"
 cd "$(dirname "$0")/.."
+# the server runs oss-cad-suite's Python 3.11: a syntax that only 3.12+ accepts would take the deployment down
+PY311=tools/oss-cad-suite/py3bin/python3
+if [ -x "$PY311" ]; then
+  for f in silicon_agent/*.py silicon_agent/backends/*.py silicon_agent/tb/*.py; do "$PY311" -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$f" || { echo "syntax check failed on $f (Python 3.11)" >&2; exit 1; }; done
+fi
 rsync -az --delete \
   --exclude tools/ --exclude cache/ --exclude runs/ --exclude results/ --exclude '__pycache__/' --exclude .git/ \
   ./ "$HOST:/opt/silicon-agent/app/"
