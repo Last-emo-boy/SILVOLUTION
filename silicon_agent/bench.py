@@ -234,9 +234,18 @@ def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_i
             return {"name": name, "job": None, "design": spec["design"], "backend": spec["backend"], "status": "no-golden", "feasible": False,
                     "first_feasible": None, "rounds": 0, "planner_calls": 0, "eda_seconds": 0, "wall_seconds": 0.0, "best": None,
                     "ok": True, "skipped": "no measured design meets the case yet", "expect": expect, "error": None}
-        ir = {k: v for k, v in g["ir"].items() if k not in (spec.get("locked") or {})}
+        # the point's design = its ir plus what its own run had locked (bit_reverse, cmul ... may be task fields
+        # there and knobs here); the case's locked scalars re-apply through merge_locked, so they are left out;
+        # per-node / per-stage lists stay whole in initial_ir (merge_locked merges them node by node) and the
+        # one-point sweep runs over the scalar knobs
+        full = {**(g.get("locked") or {}), **g["ir"]}
+        ir = {k: v for k, v in full.items() if k not in (spec.get("locked") or {}) or isinstance(v, (list, dict))}
         spec["initial_ir"] = ir
-        spec["sweep"] = {k: [v] for k, v in ir.items()}
+        spec["sweep"] = {k: [v] for k, v in ir.items() if not isinstance(v, (list, dict))}
+        if not spec["sweep"]:
+            return {"name": name, "job": None, "design": spec["design"], "backend": spec["backend"], "status": "no-golden", "feasible": False,
+                    "first_feasible": None, "rounds": 0, "planner_calls": 0, "eda_seconds": 0, "wall_seconds": 0.0, "best": None,
+                    "ok": True, "skipped": "the design has no scalar knob to sweep", "expect": expect, "error": None}
         spec["fresh"] = True   # through the toolchain again, not the EDA cache: that is what the night checks
         spec["golden"] = {"job": g["job"], "iteration": g["iteration"], "fmax_mhz": g["fmax_mhz"], "lut": g["lut"], "dsp": g["dsp"]}
         max_iter = 1
