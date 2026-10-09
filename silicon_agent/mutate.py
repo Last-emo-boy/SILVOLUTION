@@ -31,12 +31,12 @@ OPERATORS: list[tuple[str, str, str, int]] = [
     ("drop_enable", r"else if \((\w+)\) ", r"else if (1'b1) ", 3),
     ("stuck_enable", r"else if \((\w+)\) ", r"else if (1'b0) ", 2),
     ("invert_valid", r"out_valid\s*<=\s*(\w+);", r"out_valid <= ~\1;", 1),
-    ("index_off_by_one", r"\[(\w+)-1\]", r"[\1]", 3),
+    ("index_off_by_one", r"<= (\w+)\[(\w+)-1\];", r"<= \1[\2];", 3),
 ]
 
 # lines the mutants must leave alone: declarations, ports, parameters, loop headers (their bounds are structure,
 # not datapath), and the header comment that carries the IR
-_SKIP = re.compile(r"^\s*(//|`|typedef|module|endmodule|input|output|parameter|localparam|logic|wire|reg|for\s*\(|generate|endgenerate|assign\s+\w+_ext)")
+_SKIP = re.compile(r"^\s*(//|`|typedef|module|endmodule|input|output|parameter|localparam|logic|wire|reg|for\s*\(|generate|endgenerate|assign\s+\w+_ext|.*begin\s*:\s*g_)")
 
 
 def mutants(rtl: str, limit: int = 24) -> list[tuple[str, str]]:
