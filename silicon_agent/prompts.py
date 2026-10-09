@@ -283,6 +283,40 @@ CORDIC_FACTS = {
 fold=iterations cuts LUTs ~iterations-fold but throughput too.""",
 }
 
+
+CIC_WHAT = "a CIC (Cascaded Integrator-Comb) decimating filter (Hogenauer): N integrators at the input rate, decimate by R, N combs with differential delay 1"
+
+CIC_IR = """IR fields and legal ranges (data_width, stages, decim, out_width are fixed by the task):
+  data_width int 2..32  input sample bits (task)
+  stages     int 1..5   integrator/comb stages N (task)
+  decim      int 2..64  rate change R: one output per R input samples (task)
+  out_width  int 1..B   output bits = the top bits of the B-bit register (task), where
+                        B = data_width + ceil(N*log2(R)) is the register width (Hogenauer)
+  pipe_integ bool       register between the integrator stages (default true): stage j adds the previous
+                        stage's *registered* output, the standard FPGA CIC form -- the critical path is ONE
+                        B-bit adder. false = a combinational chain (stage j adds i_next[j-1]), an N-deep
+                        B-bit adder chain (poor Fmax for large N). pipe_integ is the knob when the critical
+                        path runs through the integrator section
+  pipe_comb  bool       register between the comb stages: the comb runs freely by the clock with a valid shift
+                        chain, +N+2 *cycles* latency, no throughput change. The knob when the critical path runs
+                        through the comb section (subtractor carry chains back to back)
+  reg_in     bool       register the input sample (+1 cycle)
+
+Structure summary: no multipliers at all (DSP is always 0); the datapath is N integrator adders and N comb
+subtractors, every register B bits wide, so the critical paths are carry chains of B-bit adders. The integrator
+section runs at the full input rate; the comb section runs at 1/R the rate. Resources scale ~ 2*N*B registers
++ the adder/subtractor LUTs (B each)."""
+
+CIC_IR_JSON = '{"pipe_integ":..,"pipe_comb":..,"reg_in":..}'
+
+CIC_FACTS = {
+    "ecp5": """ECP5: no DSPs; the datapath is N integrator adders (full input rate) plus N comb subtractors (1/R rate),
+each B = data_width + ceil(N*log2 R) bits. With pipe_integ the integrator critical path is a single B-bit carry
+chain (~0.07 ns/bit), the standard CIC form; pipe_integ=false chains all N adders into one path and is the Fmax
+wall for large N. pipe_comb breaks only the comb section, so it helps when the comb subtractors are critical
+(large N, small R), not when the integrator chain is.""",
+}
+
 FFT_WHAT = "a streaming N-point complex FFT (radix-2 single-path delay feedback pipeline, one sample per cycle)"
 
 FFT_IR = """IR fields and legal ranges:
@@ -347,6 +381,7 @@ PROMPTS = {
     "nco": {"what": NCO_WHAT, "ir": NCO_IR, "ir_json": NCO_IR_JSON, "facts": NCO_FACTS},
     "iir": {"what": IIR_WHAT, "ir": IIR_IR, "ir_json": IIR_IR_JSON, "facts": IIR_FACTS},
     "cordic": {"what": CORDIC_WHAT, "ir": CORDIC_IR, "ir_json": CORDIC_IR_JSON, "facts": CORDIC_FACTS},
+    "cic": {"what": CIC_WHAT, "ir": CIC_IR, "ir_json": CIC_IR_JSON, "facts": CIC_FACTS},
     "fft": {"what": FFT_WHAT, "ir": FFT_IR, "ir_json": FFT_IR_JSON, "facts": FFT_FACTS},
     "fir_chain": {"what": CHAIN_WHAT, "ir": CHAIN_IR, "ir_json": CHAIN_IR_JSON, "facts": CHAIN_FACTS},
     "fir": {"what": FIR_WHAT, "ir": FIR_IR, "ir_json": FIR_IR_JSON, "facts": FIR_FACTS},

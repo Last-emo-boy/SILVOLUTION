@@ -219,7 +219,25 @@ def estimate_graph(ir: dict, backend: str) -> dict:
             "dsp": sum(e["dsp"] for e in ests), "throughput": min(e["throughput"] for e in ests)}
 
 
-ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft, "decim": estimate_decim, "nco": estimate_nco, "iir": estimate_iir}
+def estimate_cic(ir: dict, backend: str) -> dict:
+    DW, N, R, OW = ir.get("data_width", 16), ir.get("stages", 3), ir.get("decim", 8), ir.get("out_width", 16)
+    B = DW + int(math.ceil(N * math.log2(R)))
+    lut = 2 * N * B + 60
+    pipe_integ = ir.get("pipe_integ", True)
+    # integrator: pipe_integ = one B-bit adder on the critical path; false = an N-deep B-bit adder chain
+    fmax = 240 - 1.0 * max(B - 24, 0)
+    if not pipe_integ:
+        fmax -= 22 * N
+    # comb section (1/R rate) only matters when combinational and N is large
+    if not ir.get("pipe_comb") and N >= 3:
+        fmax -= 10 * (N - 2)
+    if ir.get("pipe_comb"):
+        lut += (N - 1) * B
+    fmax *= _scale(backend)
+    return {"fmax_mhz": fmax, "lut": int(lut), "dsp": 0, "throughput": 1.0}
+
+
+ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate_conv, "fir_chain": estimate_chain, "cordic": estimate_cordic, "fft": estimate_fft, "decim": estimate_decim, "nco": estimate_nco, "iir": estimate_iir, "cic": estimate_cic}
 ESTIMATORS["graph"] = estimate_graph
 
 
@@ -280,6 +298,9 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
         st = ir["stages"]
         f += [math.log2(sum(s["taps"] for s in st)), math.log2(max(s.get("fold", 1) for s in st)), sum(1.0 for s in st if s.get("symmetric")) / len(st),
               max(s["acc_width"] for s in st) / 40, sum(1.0 for s in st if s.get("dsp_regs", "none") != "none") / len(st), float(len(st)), max(s.get("pipe_mul", 0) for s in st)]
+    elif design == "cic":
+        f += [ir["data_width"] / 16, float(ir["stages"]), math.log2(ir["decim"]), ir["out_width"] / 16,
+              1.0 if ir.get("pipe_comb") else 0.0, 1.0 if ir.get("reg_in") else 0.0, 1.0 if ir.get("pipe_integ", True) else 0.0]
     else:
         f += [math.log2(ir["k"] * ir.get("par_rows", ir["k"])), math.log2(ir["width"]), 1.0 if ir.get("line_mem") == "bram" else 0.0,
               ir["acc_width"] / 32, ir.get("tree_regs", 0), 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0, ir.get("pipe_mul", 0)]

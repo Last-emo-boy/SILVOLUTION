@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from . import chain, conv, cordic, decim, fft, fir, graph, iir, nco, vectors
+from . import chain, cic, conv, cordic, decim, fft, fir, graph, iir, nco, vectors
 from .emit import drain_latency, emit_matmul, min_k_full_rate
 from .ir import MatmulArch, throughput_macs_per_cycle
 
@@ -142,6 +142,20 @@ DESIGNS: dict[str, Design] = {
         extra_sim_sources=("mult18x18d_sim.v",),
         vectors=vectors.cordic_vectors,
         tb=lambda a, period: vectors.TB_CORDIC.format(W=a.width, period=period),
+    ),
+    "cic": Design(
+        kind="cic",
+        ir_cls=cic.CicArch,
+        top="cic_top",
+        emit=cic.emit_cic,
+        test_module="test_cic",
+        sim_env=lambda a: {"SA_SAMPLES": "200"},
+        throughput=cic.throughput,
+        throughput_unit="input samples/cycle",
+        latency=cic.latency_cycles,
+        extra_sim_sources=(),
+        vectors=vectors.cic_vectors,
+        tb=lambda a, period: vectors.TB_CIC.format(DW=a.data_width, OW=a.out_width, period=period),
     ),
     "fft": Design(
         kind="fft",

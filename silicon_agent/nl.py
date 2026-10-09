@@ -37,6 +37,9 @@ Available designs:
           taps/M multipliers at full input rate. locked: taps (multiple of decim), decim (2-16), data_width, coef_width,
           cutoff (fraction of the INPUT rate, <= 0.5/decim). Use it for "decimate", "downsample", "抽取", "降采样",
           "sample-rate reduction"; throughput is 1/fold input samples per cycle.
+  cic     CIC (Cascaded Integrator-Comb) decimating filter (Hogenauer): N integrators -> decimate by R -> N combs,
+          no multipliers (DSP 0). locked: data_width (2-32), stages N (1-5), decim R (2-64), out_width.
+          Use it for "CIC", "积分梳状", "CIC 抽取", "Hogenauer"; one output per R inputs.
   nco     NCO / DDS with complex mixer: phase accumulator + sine table + I/Q multiply (digital down-converter front end,
           "mixer", "DDC", "数控振荡器", "混频"). locked: data_width, phase_width (16-48), sin_width, out_width. 1 sample/cycle.
   iir     IIR lowpass (Butterworth biquad cascade, exact fixed point; "IIR", "biquad", "recursive filter", "无限冲激响应").

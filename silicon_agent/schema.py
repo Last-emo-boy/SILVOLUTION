@@ -160,6 +160,25 @@ SCHEMAS = {
         "constraints_default": {"fmax_mhz": 150, "max_dsp": 2, "max_lut": 3000},
         "locked_default": {"mode": "rotate", "width": 16},
     },
+    "cic": {
+        "title": "CIC (Hogenauer) decimating filter: N integrators -> decimate by R -> N combs, signed fixed point, no multipliers",
+        "locked_candidates": ["data_width", "stages", "decim", "out_width"],
+        "fields": [
+            {"name": "data_width", "type": "int", "min": 2, "max": 32, "hint": "input sample bits (task parameter)"},
+            {"name": "stages", "type": "int", "min": 1, "max": 5, "hint": "integrator/comb stages N (task parameter)"},
+            {"name": "decim", "type": "int", "min": 2, "max": 64, "hint": "rate change R: one output per R inputs (task parameter)"},
+            {"name": "out_width", "type": "int", "min": 1, "max": 32, "hint": "output bits = top bits of the B-bit register (task parameter)"},
+            {"name": "pipe_integ", "type": "bool", "hint": "register between the integrator stages (default true): one B-bit adder per cycle on the critical path"},
+            {"name": "pipe_comb", "type": "bool", "hint": "register between the comb stages: valid shift chain, +N+2 cycles latency"},
+            {"name": "reg_in", "type": "bool", "hint": "register the input sample (+1 cycle)"},
+        ],
+        "presets": {
+            "combinational comb": {"data_width": 16, "stages": 3, "decim": 8, "out_width": 16, "pipe_comb": False, "reg_in": False, "pipe_integ": True},
+            "pipelined comb": {"data_width": 16, "stages": 3, "decim": 8, "out_width": 16, "pipe_comb": True, "reg_in": True, "pipe_integ": True},
+        },
+        "constraints_default": {"fmax_mhz": 150, "max_lut": 3000},
+        "locked_default": {"data_width": 16, "stages": 3, "decim": 8, "out_width": 16},
+    },
     "fft": {
         "title": "streaming N-point FFT (radix-2 SDF pipeline)",
         "locked_candidates": ["n", "data_width"],

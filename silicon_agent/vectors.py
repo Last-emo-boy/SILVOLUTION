@@ -176,6 +176,34 @@ def decim_vectors(ir, seed: int = 1, n_frames: int = 30) -> tuple[list[str], lis
 TB_DECIM = TB_FIR.replace("fir_top dut", "decim_top dut").replace("{COEF_TIE}", "").replace("repeat (300) @(posedge clk);", "repeat (400) @(posedge clk);")
 
 
+# ---------------------------------------------------------------- cic (same bench shape as fir; one output per R inputs)
+def cic_vectors(ir, seed: int = 1, n: int = 200) -> tuple[list[str], list[str]]:
+    from silicon_agent.cic import golden as cic_golden
+    DW, OW, R = ir.data_width, ir.out_width, ir.decim
+    rng = random.Random(seed)
+    lo, hi = -(1 << (DW - 1)), (1 << (DW - 1)) - 1
+    xs = [hi, lo] * R + [rng.randint(lo, hi) for _ in range(max(0, n - 2 * R))]
+    ys = cic_golden(ir, xs)
+    gaps = []
+    for i in range(len(xs)):
+        if i == R - 1:
+            gaps.append(12)   # a dec boundary just happened, then a long pause
+        elif i >= len(xs) // 2:
+            gaps.append(0)
+        else:
+            gaps.append(rng.choice([0, 0, 1, 3, 8, 12, 20]))
+    stim = [f"{g:x} {x & ((1 << DW) - 1):0{max(1, (DW + 3) // 4)}x}" for g, x in zip(gaps, xs)]
+    exp = [f"{y & ((1 << OW) - 1):0{max(1, (OW + 3) // 4)}x}" for y in ys]
+    return stim, exp
+
+
+TB_CIC = TB_FIR.replace("fir_top dut", "cic_top dut").replace("{COEF_TIE}", "").replace(
+    "parameter int DW = {DW}, AW = {AW};", "parameter int DW = {DW}, OW = {OW};").replace(
+    "wire [AW-1:0] out_data;", "wire [OW-1:0] out_data;").replace(
+    "logic [AW-1:0] expv [0:8191];", "logic [OW-1:0] expv [0:8191];").replace(
+    "repeat (300) @(posedge clk);", "repeat (800) @(posedge clk);")
+
+
 # ---------------------------------------------------------------- nco
 def nco_vectors(ir, seed: int = 1, n: int = 240) -> tuple[list[str], list[str]]:
     from silicon_agent.nco import golden as nco_golden
