@@ -262,3 +262,8 @@ table.bench { border-collapse: collapse; font-size: 12.5px; }
 table.bench th, table.bench td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.bench.catalog a { color: var(--text); } table.bench.catalog a.muted { color: var(--muted); }
 table.bench td.bad { color: var(--bad, #e5484d); } table.bench a { color: inherit; text-decoration: none; }
+.memsearch { display: flex; gap: 8px; padding: 10px 16px 0; }
+.memsearch input { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; outline: 0; }
+.memsearch input:focus { border-color: var(--accent); }
+.memsearch select { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+.lesson .sit .pair { font-weight: 600; color: var(--text-2); } .lesson .sit .pair.transfer { color: var(--warn); }

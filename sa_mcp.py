@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 SERVER = os.environ.get("SA_SERVER", "http://127.0.0.1:8765").rstrip("/")
@@ -88,6 +89,7 @@ TOOLS = [
     {"name": "sa_rtl_list", "description": "RTL bundles uploaded so far.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "sa_propose", "description": "Propose a change to silicon-agent's generators as a unified diff (paths silicon_agent/...). Gated: emit/elaborate, behavioral sims, formal equivalence of unchanged IRs, mutation score, optional A/B run. Never merged automatically.", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "rationale": {"type": "string"}, "diff": {"type": "string"}, "designs": {"type": "array", "items": {"type": "string"}}, "irs": {"type": "array"}, "ab_spec": {"type": "object"}, "ab_max_iter": {"type": "integer"}, "reference": {"type": "string", "description": "for a new design kind: an independent Python model reference(ir, xs) -> outputs"}}, "required": ["title", "rationale", "diff", "designs"]}},
     {"name": "sa_proposal", "description": "Gate verdict of a proposal (per step) and its A/B run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "sa_memory", "description": "Search the design memory: scored one-sentence lessons from measured planner moves on every generator / device (text search, same design / device preferred; other pairs marked transfer).", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "design": {"type": "string"}, "backend": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}},
     {"name": "sa_bench", "description": "Last nightly regression result.", "inputSchema": {"type": "object", "properties": {}}},
 ]
 
@@ -151,6 +153,9 @@ def call(name: str, a: dict):
         r = api("GET", f"/proposals/{a['id']}")
         r.pop("diff", None)
         return r
+    if name == "sa_memory":
+        q = "&".join(f"{k}={urllib.parse.quote(str(a[k]))}" for k in ("query", "design", "backend", "k") if a.get(k) is not None).replace("query=", "q=", 1)
+        return api("GET", f"/memory/search?{q}")
     if name == "sa_bench":
         return api("GET", "/bench")
     return {"error": f"unknown tool {name}"}

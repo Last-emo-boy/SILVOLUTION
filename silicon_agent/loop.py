@@ -324,10 +324,12 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
         best = pick_best(history, c)
         last = history[-1]
         sit = memory.situation(design.kind, last["ir"], last["metrics"], last["violations"])
-        shown_lessons = [] if spec.get("no_memory") else memory.retrieve(design.kind, backend, sit, exclude_run=run_id)
+        # the text side of the query: what just happened, in the planner's own words plus the measured facts
+        query = " ".join([last.get("diagnosis", "") or "", " ".join(last["violations"]), " ".join(str(seg.get("kind", "")) for seg in (last["metrics"].get("critical_path") or [])[1:5]), design.kind, backend])
+        shown_lessons = [] if spec.get("no_memory") else memory.retrieve(design.kind, backend, sit, exclude_run=run_id, query=query)
         if shown_lessons:
             emit({"kind": "memory", "iteration": it + 1, "situation": sit,
-                  "lessons": [{"id": l["id"], "text": l["text"], "score": memory.score(l)} for l in shown_lessons]})
+                  "lessons": [{"id": l["id"], "text": l["text"], "score": memory.score(l), **({"from": f"{l['design']}/{l['backend']}"} if l.get("transfer") else {})} for l in shown_lessons]})
         user = (f"## Constraints\n{json.dumps(asdict(c))}\n"
                 f"## Task-fixed parameters (never change these)\n{json.dumps({k: v for k, v in locked.items() if k != 'coefs'})}\n\n"
                 f"## History\n{fmt_history(history, c, design.throughput_unit, locked)}\n\n"

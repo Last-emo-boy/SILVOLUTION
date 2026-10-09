@@ -21,6 +21,7 @@ API
                                  a change to the generators: gated on a scratch copy (emit/sim/formal/mutation), then an A/B run
   GET  /api/proposals[/<id>]     gate verdict per step; POST /api/proposals/<id>/merge records the operator's decision (token only)
   GET  /api/memory               lessons per (design, backend), scored
+  GET  /api/memory/search?q=[&design=&backend=&k=]   lessons by text relevance (BM25 over every lesson) + same design / device preference
   GET  /api/bench                last nightly regression status + report
   GET  /api/pareto?design=&backend=[&fmax_mhz=&max_dsp=&max_lut=]   every measured point, the Pareto front, best under constraints
   GET  /api/catalog              every (design, device) measured so far: verified points, fastest / smallest on the front, last run
@@ -375,15 +376,39 @@ def _project_view(pid: str) -> dict:
             "n_threads": len(ths), "last": last, "busy": any(t.get("busy") for t in ths)}
 
 
+def _project_bundles(pid: str) -> list[dict]:
+    """The RTL bundles uploaded in this project's conversations (or filed under it directly); read from disk, the
+    bundle files are the store."""
+    ths = {t["id"] for t in _threads.values() if t.get("project") == pid}
+    out = []
+    for d in sorted(RTL_DIR.iterdir()) if RTL_DIR.exists() else []:
+        f = d / "bundle.json"
+        if not f.exists():
+            continue
+        try:
+            b = json.loads(f.read_text())
+        except ValueError:
+            continue
+        if b.get("project") == pid or b.get("thread") in ths:
+            out.append(b)
+    return out
+
+
 def _project_prompt(th: dict) -> str:
     """The standing instructions of the conversation's project, as a block for the agent / interpreter; empty
-    when the conversation stands alone or the project has no instructions."""
+    when the conversation stands alone or the project has no instructions. Names the project's RTL bundles so a
+    later conversation can build on them (design "rtl:<id>")."""
     pr = _projects.get(th.get("project") or "")
     if not pr:
         return ""
     ins = (pr.get("instructions") or "").strip()
-    head = f"Project: {pr.get('name', '')}"
-    return head + (f"\nStanding instructions for every request in this project:\n{ins[:2500]}" if ins else "")
+    out = f"Project: {pr.get('name', '')}"
+    if ins:
+        out += f"\nStanding instructions for every request in this project:\n{ins[:2500]}"
+    bs = _project_bundles(pr["id"])
+    if bs:
+        out += "\nRTL already uploaded in this project (usable as design \"rtl:<id>\"): " + "; ".join(f"rtl:{b['id']} = {b.get('name') or b.get('top')} (top {b.get('top')}, parameters {', '.join((b.get('params') or {}).keys()) or 'none'})" for b in bs[:8])
+    return out
 
 
 SHARED = os.environ.get("SA_SHARED", "") == "1"  # 1: every login sees every conversation (single-team mode)
@@ -1252,6 +1277,7 @@ class Handler(BaseHTTPRequestHandler):
                                          "last": max([m.get("t", 0) for m in t["messages"]] + [t["created"]]), "n_runs": len(_thread_jobs(t["id"])),
                                          "status": j["status"] if j else None, "best": (j.get("summary") or {}).get("best") if j else None,
                                          "design": j["spec"].get("design") if j else None, "backend": j["spec"].get("backend") if j else None})
+                v["rtl"] = [{"id": b["id"], "name": b.get("name"), "top": b.get("top"), "params": list((b.get("params") or {}).keys()), "files": list((b.get("files") or {}).keys()), "thread": b.get("thread"), "created": b.get("created")} for b in _project_bundles(parts[1])]
             return self._json(200, v)
         if path == "/threads":
             with _lock:
@@ -1353,6 +1379,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/calibration":
             from . import screen as _screen
             return self._json(200, {f"{d}/{b}": _screen.calibration_report(d, b) for d in DESIGNS for b in BACKENDS})
+        if path == "/memory/search":
+            # hybrid lesson search: text (BM25 over every lesson) + same design / device preference
+            q = parse_qs(u.query)
+            query = q.get("q", [""])[0][:500]
+            if not query.strip():
+                return self._json(400, {"error": "q"})
+            hits = memory.search(query, q.get("design", [None])[0], q.get("backend", [None])[0], k=min(int(q.get("k", ["8"])[0]), 30))
+            return self._json(200, [{"id": l["id"], "design": l["design"], "backend": l["backend"], "transfer": l["transfer"], "rank": l["rank"], "text": l["text"],
+                                     "score": memory.score(l), "situation": l.get("situation"), "action": l.get("action"), "effect": l.get("effect"), "run_id": l.get("run_id"), "retrieved": l.get("retrieved", 0)} for l in hits])
         if path == "/memory":
             out = []
             for f in sorted(memory.MEM_DIR.glob("*.jsonl")):
@@ -1741,7 +1776,9 @@ class Handler(BaseHTTPRequestHandler):
             bundle = {"id": bid, "name": str(body.get("name") or top)[:120], "top": top, "files": files, "tb": tb, "params": params,
                       "port_widths": body.get("port_widths") or {}, "latency": body.get("latency"), "throughput": body.get("throughput"),
                       "throughput_unit": body.get("throughput_unit", "items/cycle"), "description": str(body.get("description", ""))[:2000],
-                      "notes": str(body.get("notes", ""))[:4000], "subject": sub, "created": time.time()}
+                      "notes": str(body.get("notes", ""))[:4000], "subject": sub, "created": time.time(),
+                      "thread": body.get("thread") if body.get("thread") in _threads else None,
+                      "project": (_threads.get(body.get("thread") or "") or {}).get("project") or body.get("project")}
             bundle["hash"] = _rtl.bundle_hash(bundle)
             try:
                 chk = _rtl_check(bundle)

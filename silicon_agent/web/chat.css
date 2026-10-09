@@ -56,6 +56,15 @@ button:disabled { opacity: .45; cursor: default; }
 .rail-list .folder .items .row { padding: 5px 8px; }
 .rail-foot { border-top: 1px solid var(--border); padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
 .rail-foot .wb { font: 500 12px var(--font); color: var(--text-2); text-decoration: none; } .rail-foot .wb:hover { color: var(--text); }
+/* drag a conversation onto a folder (or the conversations header) to move it */
+.rail-list .row.thread.dragging { opacity: .4; }
+.rail-list .row.proj.over, .rail-list .folder .items.over { background: var(--accent-soft); outline: 1px dashed var(--accent); border-radius: 7px; }
+.rail-list .group.convs .hint { display: none; font: 10px var(--mono); text-transform: none; letter-spacing: 0; color: var(--accent); }
+.rail-list.dnd .group.convs .hint { display: inline; }
+.rail-list .group.convs.over { background: var(--accent-soft); border-radius: 7px; }
+.project .prtls { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.project .prtl { display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; border: 1px dashed var(--border); border-radius: 10px; font-size: 12.5px; }
+.project .prtl .mono { font-size: 11px; color: var(--muted); } .project .prtl .t { font-weight: 500; }
 /* the popup menu */
 .menu { position: fixed; z-index: 50; min-width: 180px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 4px; box-shadow: 0 12px 32px rgba(0,0,0,.45); display: flex; flex-direction: column; }
 .menu button { border: 0; border-radius: 6px; text-align: left; padding: 7px 10px; font-size: 13px; font-weight: 400; color: var(--text); background: transparent; }

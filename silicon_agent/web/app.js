@@ -629,8 +629,31 @@ async function renderProposalsView() {
   if (rows.some((p) => p.status === "gating")) setTimeout(() => { if (view === "proposals") renderProposalsView(); }, 8000);
 }
 
+let memWired = false;
+async function memSearch() {
+  const q = $("#mem-q").value.trim(), list = $("#memory-list");
+  if (!q) return renderMemoryView();
+  const qs = new URLSearchParams({ q, k: "20", ...($("#mem-design").value ? { design: $("#mem-design").value } : {}), ...($("#mem-backend").value ? { backend: $("#mem-backend").value } : {}) });
+  const hits = await api(`/memory/search?${qs}`);
+  if ($("#mem-q").value.trim() !== q) return;
+  list.innerHTML = "";
+  if (!hits.length) { list.appendChild(el(`<div class="muted">no lesson matches</div>`)); return; }
+  for (const l of hits) {
+    const card = lessonCard(l, l.design, l.backend, true);
+    card.querySelector(".sit").insertAdjacentHTML("afterbegin", `<span class="pair ${l.transfer ? "transfer" : ""}">${esc(l.design)} / ${esc(l.backend)}${l.transfer ? " · transfer" : ""}</span> · `);
+    list.appendChild(card);
+  }
+}
 async function renderMemoryView() {
   const list = $("#memory-list"); list.innerHTML = `<div class="muted">loading…</div>`;
+  if (!memWired) {
+    memWired = true;
+    try { const sc = await api("/schema"); for (const d of Object.keys(sc.designs || {})) $("#mem-design").appendChild(el(`<option value="${esc(d)}">${esc(d)}</option>`)); for (const b of Object.keys(sc.backends || {})) $("#mem-backend").appendChild(el(`<option value="${esc(b)}">${esc(b)}</option>`)); } catch {}
+    let tmr = null;
+    const go = () => { clearTimeout(tmr); tmr = setTimeout(memSearch, 250); };
+    $("#mem-q").oninput = go; $("#mem-design").onchange = go; $("#mem-backend").onchange = go;
+  }
+  if ($("#mem-q").value.trim()) return memSearch();
   const mem = await api("/memory");
   list.innerHTML = "";
   if (!mem.length) { list.appendChild(el(`<div class="muted">empty — lessons appear after the first run with two or more iterations</div>`)); return; }

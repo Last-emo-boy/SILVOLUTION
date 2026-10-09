@@ -270,7 +270,7 @@ export const siliconAgent = {
     agnes.registerTool({
       name: 'sa_rtl_upload',
       description: 'Bring your own RTL: register the user\'s SystemVerilog as a design kind. Needs the files ({name: text}), the top module, a self-checking SystemVerilog bench (instantiates the top, drives clk/rst, prints "RESULT PASS" or "RESULT FAIL ..."), and the parameters the planner may tune ({NAME: {default, min, max | choices, hint}}); optional port_widths ({port: "[hi:lo]"} for ports whose width depends on a parameter), latency and throughput as expressions of the parameters, a description. The server elaborates and runs the bench once; a failing bundle is refused with the log. Returns the design id "rtl:<id>" to use in a spec (locked = {}, initial_ir = parameter values).',
-      parameters: obj({ name: str({ maxLength: 120 }), top: str({ maxLength: 64 }), files: any(), tb: str({ maxLength: 400000 }), params: any(), port_widths: any(), latency: str({ maxLength: 200 }), throughput: str({ maxLength: 200 }), throughput_unit: str({ maxLength: 32 }), description: str({ maxLength: 2000 }), notes: str({ maxLength: 4000 }) }, ['top', 'files', 'tb', 'params']),
+      parameters: obj({ name: str({ maxLength: 120 }), top: str({ maxLength: 64 }), files: any(), tb: str({ maxLength: 400000 }), params: any(), port_widths: any(), latency: str({ maxLength: 200 }), throughput: str({ maxLength: 200 }), throughput_unit: str({ maxLength: 32 }), description: str({ maxLength: 2000 }), notes: str({ maxLength: 4000 }), thread: str({ maxLength: 64 }) }, ['top', 'files', 'tb', 'params']),
       meta: { ...starts, costHint: { wallMs: 120000 } },
       async execute(args, tctx) {
         try { return text(await api('POST', '/rtl', args, tctx?.signal)) } catch (e) { return fail(e) }
@@ -346,6 +346,17 @@ export const siliconAgent = {
     })
 
     agnes.registerTool({
+      name: 'sa_memory',
+      description: 'Search the design memory: one-sentence lessons distilled from measured planner moves on every generator and device ("when X was the critical path, doing Y gave Z"), each with a score from later confirmations. Text search over all lessons with a preference for the given design / device; hits from another pair are marked transfer. Use it to answer "what have we learned about ...", before proposing an unusual architecture, or to explain a result with precedent.',
+      parameters: obj({ query: str({ maxLength: 400 }), design: str({ maxLength: 32 }), backend: str({ maxLength: 32 }), k: num() }, ['query']),
+      meta: readOnly,
+      async execute({ query, design, backend, k }, tctx) {
+        const qs = new URLSearchParams({ q: query, ...(design ? { design } : {}), ...(backend ? { backend } : {}), k: String(k ?? 8) })
+        try { return text(await api('GET', `/memory/search?${qs}`, undefined, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
       name: 'sa_bench',
       description: 'Last nightly regression result of the benchmark suite (which cases converged, in how many rounds, and what regressed).',
       parameters: obj({}),
@@ -366,7 +377,8 @@ export const siliconAgent = {
       '5. While a run is in flight, a user instruction about the design is an sa_steer; a question is answered from sa_job data.',
       '5b. "Sweep", "compare all", "how does X scale with Y", "Pareto": sa_sweep with the knob values -- it measures every point instead of searching, and the card shows the Pareto set. Keep sweeps small (<= 12 points on an FPGA, <= 4 on sky130).',
       '6. A follow-up that only asks about results you already have (critical path, why it stopped, numbers) is answered from your own tool records or one sa_job call: do not start another run, do not re-estimate, do not re-read artifacts you have read. Start a new run only when the user asks for a change, a retry, or a different design.',
-      '7. The user may bring their own RTL (they paste SystemVerilog, or describe a block that no generator covers but they have code for). Then: ask for (or write from what they pasted) a self-checking bench that prints RESULT PASS/FAIL, decide with them which parameters the planner may move, call sa_rtl_upload, and run the spec with design "rtl:<id>" (locked {}, initial_ir = the parameter defaults). The ladder (behavioral sim, synthesis, P&R, netlist sims, formal properties) is the same; the planner tunes only the exposed parameters. sa_schema does not list rtl designs; sa_rtl_list does.',
+      '7. The user may bring their own RTL (they paste SystemVerilog, or describe a block that no generator covers but they have code for). Then: ask for (or write from what they pasted) a self-checking bench that prints RESULT PASS/FAIL, decide with them which parameters the planner may move, call sa_rtl_upload (pass the conversation `thread`: the bundle is then listed under that conversation\'s project and later conversations there can use it), and run the spec with design "rtl:<id>" (locked {}, initial_ir = the parameter defaults). The ladder (behavioral sim, synthesis, P&R, netlist sims, formal properties) is the same; the planner tunes only the exposed parameters. sa_schema does not list rtl designs; sa_rtl_list does.',
+      '7b. sa_memory searches the lessons of every earlier run (text + design/device preference). Use it when the user asks what was learned, when a run stalls and you want precedent for the next move (then sa_steer with the lesson), or to explain a result; cite the lesson id.',
       '8. Devices: the FPGAs plus `sky130` (OpenROAD ASIC standard cells, 2-10 min per flow): no DSP/LUT there -- the numbers are cells, area in um2 (max_area_um2 is the budget, minimize_area the objective) and the STA critical path through fa_1/ha_1 adder cells.',
       'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',
       'Answer in the user\'s language.',

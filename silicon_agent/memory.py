@@ -10,14 +10,20 @@ A lesson records one planner move and what actually happened:
   score      -> confirmations - contradictions, updated automatically whenever a later run
                 takes a matching action in a matching situation (and by human votes)
 
-Retrieval is a plain feature overlap on (design, backend, situation); no embeddings.
+Retrieval is hybrid: a BM25 text index over every lesson (its sentence, situation, action, design and device
+tokens -- so a carry-chain lesson learned on an iCE40 FIR can surface for an ECP5 decimator) combined with the
+structured situation overlap and the lesson's score; same design / same device get a boost, other pairs are
+labelled as transfer when shown. Pure Python, rebuilt on demand when a memory file changes; no embedding model
+(the provider has none) -- a few hundred one-sentence lessons do not need one.
 Storage is one JSONL file per (design, backend) under SA_ROOT/memory/.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import secrets
 import threading
 import time
@@ -174,6 +180,109 @@ def score(l: dict) -> float:
     return l.get("confirmations", 0) - 1.5 * l.get("contradictions", 0) + 0.5 * l.get("votes", 0)
 
 
+# ---------------------------------------------------------------- text index (BM25 over every lesson)
+_STOP = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "is", "it", "its", "for", "with", "by", "from", "that", "this", "as",
+         "be", "was", "are", "not", "do", "does", "no", "so", "but", "than", "then", "when", "while", "into", "because", "which", "while"}
+
+
+def _tokens(text: str) -> list[str]:
+    out = []
+    for w in re.split(r"[^0-9A-Za-z_\u4e00-\u9fff]+", text or ""):
+        if not w:
+            continue
+        for part in w.lower().split("_"):          # snake_case knobs: pipe_mul -> pipe, mul (and the whole knob)
+            if len(part) >= 2 and part not in _STOP:
+                out.append(part)
+        if "_" in w:
+            out.append(w.lower())
+    return out
+
+
+def _doc(design: str, backend: str, l: dict) -> list[str]:
+    sit = l.get("situation") or {}
+    parts = [design, backend, l.get("text", ""), " ".join(sit.get("violations") or []), str(sit.get("critical") or ""),
+             " ".join(sit.get("structure") or []), " ".join(l.get("action") or {})]
+    return _tokens(" ".join(parts))
+
+
+class _Index:
+    """BM25 over all lessons; rebuilt when any memory file changed."""
+    def __init__(self):
+        self.stamp = None
+        self.docs: list[tuple[str, str, dict, list[str]]] = []
+        self.df: dict[str, int] = {}
+        self.avg = 1.0
+
+    def _files(self):
+        return sorted(p for p in MEM_DIR.glob("*.jsonl") if not p.name.startswith("obs_")) if MEM_DIR.exists() else []
+
+    def refresh(self) -> None:
+        files = self._files()
+        stamp = tuple((p.name, p.stat().st_mtime_ns) for p in files)
+        if stamp == self.stamp:
+            return
+        docs, df = [], {}
+        for p in files:
+            design, backend = p.stem.split("_", 1)
+            for l in load(design, backend):
+                toks = _doc(design, backend, l)
+                docs.append((design, backend, l, toks))
+                for t in set(toks):
+                    df[t] = df.get(t, 0) + 1
+        self.docs, self.df, self.stamp = docs, df, stamp
+        self.avg = (sum(len(d[3]) for d in docs) / len(docs)) if docs else 1.0
+
+    def bm25(self, q: list[str], toks: list[str], k1: float = 1.2, b: float = 0.75) -> float:
+        n = len(self.docs)
+        if not toks or not n:
+            return 0.0
+        tf: dict[str, int] = {}
+        for t in toks:
+            tf[t] = tf.get(t, 0) + 1
+        s = 0.0
+        for t in set(q):
+            f = tf.get(t)
+            if not f:
+                continue
+            idf = math.log(1 + (n - self.df.get(t, 0) + 0.5) / (self.df.get(t, 0) + 0.5))
+            s += idf * f * (k1 + 1) / (f + k1 * (1 - b + b * len(toks) / self.avg))
+        return s
+
+
+_index = _Index()
+
+
+def search(query: str, design: str | None = None, backend: str | None = None, sit: dict | None = None, k: int = TOP_K,
+           exclude_run: str | None = None, min_score: float = -2.0) -> list[dict]:
+    """Lessons ranked by text relevance to `query` (BM25), the structured situation overlap when `sit` is given, the
+    lesson's own score, and a preference for the same design / device. Each hit carries its design, backend and
+    the rank score; lessons from another (design, device) are transfer and are labelled so by the caller."""
+    with _lock:
+        _index.refresh()
+        docs = list(_index.docs)
+    q = _tokens(query)
+    cands = []
+    for d, b, l, toks in docs:
+        if l.get("run_id") == exclude_run or score(l) <= min_score:
+            continue
+        text_rel = _index.bm25(q, toks) if q else 0.0
+        sit_rel = similarity(sit, l) if sit else 0.0
+        if text_rel <= 0 and sit_rel <= 0:
+            continue
+        cands.append((d, b, l, text_rel, sit_rel))
+    if not cands:
+        return []
+    # text relevance normalized to 0..1 within the candidate set, then the structural signals: same design and
+    # device (a lesson from the same pair outranks an equally worded one from elsewhere), situation overlap, score
+    tmax = max(c[3] for c in cands) or 1.0
+    out = []
+    for d, b, l, text_rel, sit_rel in cands:
+        rel = text_rel / tmax + 0.35 * (d == design) + 0.2 * (b == backend) + 0.12 * min(sit_rel, 4) + 0.05 * max(min(score(l), 6), -2) + 0.1 * float(l.get("confidence") or 0)
+        out.append({**l, "design": d, "backend": b, "rank": round(rel, 3), "transfer": not (d == design and b == backend)})
+    out.sort(key=lambda l: (-l["rank"], -l["created"]))
+    return out[:k]
+
+
 # ---------------------------------------------------------------- retrieval
 def similarity(sit: dict, l: dict) -> float:
     ls = l.get("situation", {})
@@ -184,22 +293,32 @@ def similarity(sit: dict, l: dict) -> float:
     return s
 
 
-def retrieve(design: str, backend: str, sit: dict, k: int = TOP_K, exclude_run: str | None = None) -> list[dict]:
+def retrieve(design: str, backend: str, sit: dict, k: int = TOP_K, exclude_run: str | None = None, query: str = "") -> list[dict]:
+    """What the planner sees before its next move: the same-pair lessons that match the situation (as before), and,
+    when a `query` (the last diagnosis, violations, critical-path cells) is given, text matches from every pair --
+    at most a third of the slots go to transfer lessons from other designs / devices."""
     ls = [l for l in load(design, backend) if l.get("run_id") != exclude_run and score(l) > -2]
     ranked = sorted(ls, key=lambda l: (similarity(sit, l), score(l), l["created"]), reverse=True)
-    picked = [l for l in ranked[:k] if similarity(sit, l) > 0]
+    picked = [{**l, "design": design, "backend": backend, "transfer": False} for l in ranked[:k] if similarity(sit, l) > 0]
+    if query:
+        seen = {l["id"] for l in picked}
+        extra = [l for l in search(query, design, backend, sit, k=k * 2, exclude_run=exclude_run) if l["id"] not in seen]
+        room = max(k - len(picked), 0)
+        same = [l for l in extra if not l["transfer"]][:room]
+        picked += same
+        picked += [l for l in extra if l["transfer"]][:max(min(k // 3, k - len(picked)), 0)]
     for l in picked:
-        update(design, backend, l["id"], retrieved=1)
+        update(l["design"], l["backend"], l["id"], retrieved=1)
     return picked
 
 
 def fmt_lessons(lessons: list[dict]) -> str:
     if not lessons:
         return ""
-    lines = ["## Lessons from earlier runs on this device (measured; newest evidence first)"]
+    lines = ["## Lessons from earlier runs (measured; newest evidence first)"]
     for l in lessons:
         sc = score(l)
-        tag = f"[{l['id']} score {sc:+.1f}, used {l.get('retrieved', 0)}x]"
+        tag = f"[{l['id']} score {sc:+.1f}, used {l.get('retrieved', 0)}x" + (f", from {l['design']}/{l['backend']} -- transfer, check it applies" if l.get("transfer") else "") + "]"
         lines.append(f"- {l['text']} {tag}")
     lines.append("Cite a lesson id in your action when you follow one; contradict it explicitly if your diagnosis disagrees.")
     return "\n".join(lines)
@@ -228,8 +347,10 @@ def reconcile(design: str, backend: str, retrieved: list[dict], taken: dict, out
     touched = []
     for l in retrieved:
         if action_matches(l.get("action", {}), taken):
+            # a transfer lesson is confirmed in its own file: evidence from another device still counts
+            d, b = l.get("design") or design, l.get("backend") or backend
             if outcome == "helped":
-                touched.append(update(design, backend, l["id"], confirmations=1))
+                touched.append(update(d, b, l["id"], confirmations=1))
             elif outcome == "hurt":
-                touched.append(update(design, backend, l["id"], contradictions=1))
+                touched.append(update(d, b, l["id"], contradictions=1))
     return [t for t in touched if t]

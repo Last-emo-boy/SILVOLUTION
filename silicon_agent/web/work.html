@@ -138,7 +138,8 @@
 
     <!-- memory browser -->
     <section id="memory" class="memview" hidden>
-      <div class="bar"><h1>Design memory</h1><span class="muted small-text">lessons distilled from every planner move, scored by what happened when later runs followed them</span></div>
+      <div class="bar"><h1>Design memory</h1><span class="muted small-text">lessons distilled from every planner move, scored by what happened when later runs followed them. The planner retrieves them by situation and by text (BM25 over every lesson, same generator / device first; hits from elsewhere are transfer).</span></div>
+      <div class="memsearch"><input id="mem-q" type="search" placeholder="search the lessons: e.g. carry chain accumulator, BRAM table read, DSP budget fold" spellcheck="false"><select id="mem-design"><option value="">any generator</option></select><select id="mem-backend"><option value="">any device</option></select></div>
       <div id="memory-list" class="memlist"></div>
     </section>
     <section id="bench" class="memview" hidden>

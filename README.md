@@ -257,7 +257,13 @@ with estimates / critical path / lesson behind a per-turn disclosure), and a
 composer that steers the planner before its next proposal. **Details ▸** opens the
 inspector: architecture sketch + IR knobs (click to draft a steer) + critical
 path, trajectory charts, the simulation ladder with logs, generated RTL, and
-memory recalled/learned. Lessons take 👍/👎 votes. Events persist per job.
+memory recalled/learned. Lessons take 👍/👎 votes. Events persist per job. The Memory view has a search box:
+retrieval is hybrid — a BM25 text index over every lesson of every generator × device
+(no embedding model is needed for a few hundred one-sentence lessons) combined with
+the structured situation overlap and the lesson's score; the planner gets its
+same-pair situation matches first and at most a third of the slots as *transfer*
+lessons from other pairs, labelled as such so it checks they apply. The same search
+is `GET /api/memory/search?q=`, the AGH tool `sa_memory` and the MCP tool `sa_memory`.
 
 Actions on a run (⋯ menu): **Fork** — start a new run from any iteration's design
 with edited constraints (the new run links back to its parent); **Compare** —
