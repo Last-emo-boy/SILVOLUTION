@@ -5,6 +5,7 @@ Adding a design = one entry here + an IR dataclass + an emitter + a cocotb test.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Callable
 
@@ -19,7 +20,7 @@ class Design:
     ir_cls: type
     top: str                                  # RTL top module name
     emit: Callable                            # (ir, backend) -> SystemVerilog text
-    test_module: str                          # cocotb module under silicon_agent/tb/
+    test_module: str | None                   # cocotb module under silicon_agent/tb/; None = the design's own SV bench (tb) runs under iverilog
     sim_env: Callable                         # ir -> extra env for the testbench
     throughput: Callable                      # ir -> number (higher is better)
     throughput_unit: str
@@ -129,6 +130,26 @@ DESIGNS: dict[str, Design] = {
         tb=lambda a, period: vectors.TB_GRAPH.format(DW=graph.data_width(a), OW=graph.out_width(a), N=64, period=period),
     ),
 }
+
+
+def register_rtl(bundle: dict) -> Design:
+    """A bring-your-own-RTL bundle as a design kind `rtl:<id>`: the user's files are the generator (parameters are the
+    IR), the user's SystemVerilog bench is the testbench on every rung (test_module None selects the iverilog path)."""
+    from . import rtl as _rtl
+    kind = f"rtl:{bundle['id']}"
+    A = _rtl.arch_class(bundle)
+    top = bundle["top"]
+
+    def tb(a, period):
+        t = bundle.get("tb") or ""
+        # the bench may read the period from a parameter named PERIOD
+        return re.sub(r"parameter\s+real\s+PERIOD\s*=\s*[\d.]+", f"parameter real PERIOD = {period}", t)
+
+    d = Design(kind=kind, ir_cls=A, top=top, emit=lambda a, backend="ecp5": _rtl.emit(bundle, a, backend), test_module=None,
+               sim_env=lambda a: {}, throughput=lambda a: _rtl.throughput(bundle, a), throughput_unit=bundle.get("throughput_unit", "items/cycle"),
+               latency=lambda a: _rtl.latency_cycles(bundle, a), extra_sim_sources=(), vectors=None, tb=tb)
+    DESIGNS[kind] = d
+    return d
 
 
 def design_for(spec: dict) -> Design:

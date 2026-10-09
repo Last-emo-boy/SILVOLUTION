@@ -184,3 +184,6 @@ pre.code { margin: 0; font: 11px/1.45 var(--mono); color: var(--text-2); backgro
 .gate-steps { margin: 6px 0; } .gstep { margin: 3px 0; } .gstep .v { color: var(--good); } .gstep .x { color: var(--bad, #e5484d); }
 .small { font-size: 12px; } pre.log { font: 11px var(--mono); white-space: pre-wrap; background: var(--surface-2); padding: 8px; border-radius: 6px; max-height: 320px; overflow: auto; }
 pre.diff { max-height: 480px; }
+#attach { align-self: flex-end; margin-bottom: 1px; }
+.attached { margin-top: 6px; font-size: 12px; } .attached summary { cursor: pointer; color: var(--muted); font-family: var(--mono); }
+.attached pre { font: 11px var(--mono); white-space: pre; overflow: auto; max-height: 260px; background: var(--surface); padding: 8px; border-radius: 6px; margin: 4px 0 0; }

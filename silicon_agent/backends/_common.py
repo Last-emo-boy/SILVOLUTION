@@ -101,10 +101,12 @@ def iverilog_netlist_sim(d, arch, work: Path, fmax_target: float, netlist: Path,
     vector testbench. Open-source P&R outputs have no simulation model / SDF, so stages 3-5 stay unavailable."""
     sim = work / "nsim"
     sim.mkdir(parents=True, exist_ok=True)
-    stim, exp = d.vectors(arch)
-    (sim / "stim.hex").write_text("\n".join(stim) + "\n")
-    (sim / "exp.hex").write_text("\n".join(exp) + "\n")
     period = 1000.0 / fmax_target
+    if d.vectors is not None:
+        stim, exp = d.vectors(arch)
+        (sim / "stim.hex").write_text("\n".join(stim) + "\n")
+        (sim / "exp.hex").write_text("\n".join(exp) + "\n")
+    # BYO-RTL designs have no vector generator: their own self-checking bench runs against the netlist
     (sim / "tb.sv").write_text(d.tb(arch, period))
     label = "Post-synthesis functional"
     if not netlist.exists():

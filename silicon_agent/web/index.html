@@ -34,7 +34,8 @@
     </div>
     <div class="composer">
       <div class="col">
-        <div class="inputbox"><textarea id="input" rows="1" placeholder="描述你要的硬件，或者对当前结果提要求…"></textarea><button id="send" class="primary icon" title="Send (⏎)">↑</button></div>
+        <div class="inputbox"><button id="attach" class="ghost icon" title="Attach RTL (.sv / .v)">＋</button><textarea id="input" rows="1" placeholder="描述你要的硬件，或者对当前结果提要求…"></textarea><button id="send" class="primary icon" title="Send (⏎)">↑</button></div>
+        <input id="attach-file" type="file" accept=".sv,.v,.svh,.vh" multiple hidden>
         <div class="chint"><span id="chint">⏎ 发送 · ⇧⏎ 换行</span><span id="modes" class="modes" hidden></span></div>
       </div>
     </div>

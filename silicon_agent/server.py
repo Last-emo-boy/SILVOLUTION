@@ -48,6 +48,7 @@ import hmac
 import json
 import os
 import queue
+import re
 import secrets
 import shutil
 import signal
@@ -522,6 +523,39 @@ def _formal_start(job_id: str, job: dict, k: int, fresh_req: bool) -> dict:
     return {"status": "running", "depth": k, "note": "formal check started; call again in a minute"}
 
 
+# ---------------------------------------------------------------- bring-your-own RTL bundles
+RTL_DIR = ROOT / "rtl"
+
+
+def _load_rtl_bundles() -> None:
+    from .designs import register_rtl
+    if not RTL_DIR.exists():
+        return
+    for d in sorted(RTL_DIR.iterdir()):
+        f = d / "bundle.json"
+        if f.exists():
+            try:
+                register_rtl(json.loads(f.read_text()))
+            except Exception as e:
+                print(f"rtl bundle {d.name}: {e}", flush=True)
+
+
+def _rtl_check(bundle: dict) -> dict:
+    """Elaborate the user's files + wrapper with iverilog and run the bench once on the behavioral RTL (defaults), so a
+    broken upload is refused with the tool's message instead of failing every run."""
+    import tempfile
+    from . import rtl as _rtl, eda
+    from .designs import Design
+    A = _rtl.arch_class(bundle)
+    a = A.from_dict({})
+    text = _rtl.emit(bundle, a)
+    w = Path(tempfile.mkdtemp(prefix="sa_rtl_")); (w / "rtl").mkdir(); (w / "rtl" / f"{bundle['top']}.sv").write_text(text)
+    d = Design(kind="rtl:check", ir_cls=A, top=bundle["top"], emit=lambda x, backend="ecp5": _rtl.emit(bundle, x, backend), test_module=None,
+               sim_env=lambda x: {}, throughput=lambda x: 1.0, throughput_unit="", latency=lambda x: 1, tb=lambda x, period: bundle.get("tb", ""))
+    ok, log, _ = eda.simulate(d, a, w, timeout=300)
+    return {"ok": ok, "log": log[-2000:], "ports": [{"dir": dd, "type": t, "name": n} for dd, t, n in _rtl._ports(bundle)]}
+
+
 # ---------------------------------------------------------------- proposals (changes to the generators, gated)
 PROPOSALS = ROOT / "proposals"
 _proposals: dict[str, dict] = {}
@@ -962,6 +996,24 @@ class Handler(BaseHTTPRequestHandler):
                 out.append({"design": design, "backend": backend, "count": len(ls),
                             "lessons": sorted(({**l, "score": memory.score(l)} for l in ls), key=lambda l: -l["score"])})
             return self._json(200, out)
+        if path == "/rtl":
+            out = []
+            for d in sorted(RTL_DIR.iterdir()) if RTL_DIR.exists() else []:
+                f = d / "bundle.json"
+                if f.exists():
+                    b = json.loads(f.read_text())
+                    if _visible({"subject": b.get("subject", "")}, sub):
+                        out.append({"id": b["id"], "design": f"rtl:{b['id']}", "name": b.get("name"), "top": b["top"], "files": sorted(b["files"]), "params": b.get("params"),
+                                    "description": b.get("description", ""), "created": b.get("created"), "check": b.get("check", {}).get("ok")})
+            return self._json(200, out)
+        if len(parts) == 2 and parts[0] == "rtl":
+            f = RTL_DIR / parts[1] / "bundle.json"
+            if not f.exists():
+                return self._json(404, {"error": "no such bundle"})
+            b = json.loads(f.read_text())
+            if not _visible({"subject": b.get("subject", "")}, sub):
+                return self._json(404, {"error": "no such bundle"})
+            return self._json(200, b)
         if path == "/proposals":
             with _lock:
                 rows = [_proposal_view(pid) for pid in _proposals]
@@ -1157,7 +1209,9 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "threads" and parts[2] == "chat":
             try:
                 body = json.loads(self.rfile.read(n) or b"{}")
-                text = str(body.get("text", "")).strip()[:4000]
+                text = str(body.get("text", "")).strip()
+                # a message carrying attached RTL (fenced blocks) may be long; plain prose is capped
+                text = text[:400_000] if "```" in text else text[:4000]
             except json.JSONDecodeError:
                 return self._json(400, {"error": "bad json"})
             if not text:
@@ -1212,6 +1266,46 @@ class Handler(BaseHTTPRequestHandler):
                     th["messages"].append({"role": "assistant", "kind": "proposal", "proposal": pid, "text": pr["title"], "t": time.time(), "source": "agh"})
                     _save_thread(pr["thread"])
             return self._json(200, {"id": pid, "status": "gating", "note": "the gate takes 1-10 minutes; poll GET /proposals/<id>"})
+        if path == "/rtl":
+            # upload a bring-your-own-RTL bundle: files + a self-checking SV bench + the parameters the planner may move
+            from . import rtl as _rtl
+            from .designs import register_rtl
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            files = body.get("files") or {}
+            if not isinstance(files, dict) or not files or not all(isinstance(v, str) for v in files.values()):
+                return self._json(400, {"error": "files: {name: text} of SystemVerilog sources"})
+            if sum(len(v) for v in files.values()) > 2_000_000:
+                return self._json(400, {"error": "bundle too large (2 MB)"})
+            top = str(body.get("top", "")).strip()
+            if not re.match(r"^[A-Za-z_]\w*$", top):
+                return self._json(400, {"error": "top: the top module name"})
+            tb = body.get("tb")
+            if not isinstance(tb, str) or "RESULT" not in tb:
+                return self._json(400, {"error": "tb: a self-checking SystemVerilog bench that instantiates the top and prints RESULT PASS or RESULT FAIL"})
+            params = body.get("params") or {}
+            if not isinstance(params, dict) or any(not isinstance(v, dict) for v in params.values()):
+                return self._json(400, {"error": "params: {NAME: {default, min, max | choices, hint}}"})
+            bid = time.strftime("%Y%m%d-%H%M%S") + "-r" + secrets.token_hex(2)
+            bundle = {"id": bid, "name": str(body.get("name") or top)[:120], "top": top, "files": files, "tb": tb, "params": params,
+                      "port_widths": body.get("port_widths") or {}, "latency": body.get("latency"), "throughput": body.get("throughput"),
+                      "throughput_unit": body.get("throughput_unit", "items/cycle"), "description": str(body.get("description", ""))[:2000],
+                      "notes": str(body.get("notes", ""))[:4000], "subject": sub, "created": time.time()}
+            bundle["hash"] = _rtl.bundle_hash(bundle)
+            try:
+                chk = _rtl_check(bundle)
+            except Exception as e:
+                return self._json(400, {"error": f"bundle check failed: {e}"})
+            if not chk["ok"]:
+                return self._json(400, {"error": "the bench does not pass on the behavioral RTL with default parameters", "log": chk["log"], "ports": chk["ports"]})
+            bundle["check"] = chk
+            (RTL_DIR / bid).mkdir(parents=True, exist_ok=True)
+            (RTL_DIR / bid / "bundle.json").write_text(json.dumps(bundle, ensure_ascii=False, indent=1))
+            register_rtl(bundle)
+            return self._json(200, {"id": bid, "design": f"rtl:{bid}", "ports": chk["ports"], "params": params,
+                                    "note": f"use design \"rtl:{bid}\" in a spec; locked = {{}}; initial_ir = parameter values"})
         if path == "/author/check":
             # the author's inner loop: emit + elaborate + behavioral sim of one IR on the conversation's working copy
             from . import proposals as P
@@ -1418,6 +1512,7 @@ def main():
     host = os.environ.get("SA_HOST", "127.0.0.1")
     port = int(os.environ.get("SA_PORT", "8765"))
     RESULTS.mkdir(parents=True, exist_ok=True)
+    _load_rtl_bundles()
     _load_from_disk()
     _load_threads()
     _load_proposals()

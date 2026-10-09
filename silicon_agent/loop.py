@@ -18,7 +18,7 @@ from . import llm, memory, screen
 from .designs import Design, design_for
 from .eda import BACKENDS, ROOT, evaluate
 from .ir import Constraints, Metrics
-from .prompts import PROMPTS, device_facts
+from .prompts import PROMPTS, device_facts, prompts_for
 
 SYSTEM = """You are a senior FPGA architect running an autonomous design-space exploration loop.
 The hardware is @WHAT@ on @DEVICE_NAME@.
@@ -52,7 +52,7 @@ Respond with a JSON object:
 
 
 def build_system(design: Design, backend: str) -> str:
-    p = PROMPTS[design.kind]
+    p = prompts_for(design.kind)
     return (SYSTEM.replace("@WHAT@", p["what"]).replace("@DEVICE_NAME@", BACKENDS[backend]["name"])
             .replace("@IR_SCHEMA@", p["ir"]).replace("@DEVICE_FACTS@", device_facts(design.kind, backend)).replace("@IR_JSON@", p["ir_json"]))
 
@@ -98,7 +98,8 @@ def fmt_history(history: list[dict], c: Constraints, unit: str, locked: dict) ->
         lines.append(f"### iteration {h['iteration']}  ir={json.dumps(shown)}")
         seeds = f" (median of {len(m.fmax_seeds)} P&R seeds: {min(m.fmax_seeds):.1f}-{max(m.fmax_seeds):.1f})" if len(m.fmax_seeds) > 1 else ""
         pw = f" power={m.power_mw}mW" if m.power_mw is not None else ""
-        lines.append(f"fmax={m.fmax_mhz:.1f}MHz{seeds} lut={m.lut} ff={m.ff} dsp={m.dsp} bram={m.bram}{pw} "
+        res = f"cells={m.lut} ff={m.ff} area={m.area_um2:.0f}um2" if m.area_um2 is not None else f"lut={m.lut} ff={m.ff} dsp={m.dsp} bram={m.bram}"
+        lines.append(f"fmax={m.fmax_mhz:.1f}MHz{seeds} {res}{pw} "
                      f"throughput={h['throughput']} {unit}  latency={h['latency_cycles']} cycles  "
                      f"sim={'pass' if m.sim_passed else 'FAIL'}  -> {status}")
         if m.critical_path:

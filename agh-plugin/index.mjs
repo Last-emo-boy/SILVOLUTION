@@ -252,6 +252,26 @@ export const siliconAgent = {
     })
 
     agnes.registerTool({
+      name: 'sa_rtl_upload',
+      description: 'Bring your own RTL: register the user\'s SystemVerilog as a design kind. Needs the files ({name: text}), the top module, a self-checking SystemVerilog bench (instantiates the top, drives clk/rst, prints "RESULT PASS" or "RESULT FAIL ..."), and the parameters the planner may tune ({NAME: {default, min, max | choices, hint}}); optional port_widths ({port: "[hi:lo]"} for ports whose width depends on a parameter), latency and throughput as expressions of the parameters, a description. The server elaborates and runs the bench once; a failing bundle is refused with the log. Returns the design id "rtl:<id>" to use in a spec (locked = {}, initial_ir = parameter values).',
+      parameters: obj({ name: str({ maxLength: 120 }), top: str({ maxLength: 64 }), files: any(), tb: str({ maxLength: 400000 }), params: any(), port_widths: any(), latency: str({ maxLength: 200 }), throughput: str({ maxLength: 200 }), throughput_unit: str({ maxLength: 32 }), description: str({ maxLength: 2000 }), notes: str({ maxLength: 4000 }) }, ['top', 'files', 'tb', 'params']),
+      meta: { ...starts, costHint: { wallMs: 120000 } },
+      async execute(args, tctx) {
+        try { return text(await api('POST', '/rtl', args, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
+      name: 'sa_rtl_list',
+      description: 'The RTL bundles uploaded so far (id, top, parameters, description): a spec can target any of them with design "rtl:<id>".',
+      parameters: obj({}),
+      meta: readOnly,
+      async execute(_args, tctx) {
+        try { return text(await api('GET', '/rtl', undefined, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
+    agnes.registerTool({
       name: 'sa_propose',
       description: 'Submit a change to silicon-agent\'s own generators (silicon_agent/*.py) as a unified diff. The job server applies it to a scratch copy and gates it: every preset still emits and elaborates, the bench cases\' behavioral simulations pass, the RTL of unchanged IRs stays formally equivalent to the current generator, the testbench\'s mutation score does not drop; then, if ab_spec is given, a measured A/B run on the device. Nothing is merged: the operator decides from the report. Returns the proposal id; poll with sa_proposal.',
       parameters: obj({ title: str({ maxLength: 160 }), rationale: str({ maxLength: 4000 }), diff: str({ maxLength: 400000 }), designs: any(), irs: any(), ab_spec: any(), ab_max_iter: int({ minimum: 1, maximum: 8 }), thread: str({ maxLength: 64 }) }, ['title', 'rationale', 'diff', 'designs']),
@@ -311,6 +331,8 @@ export const siliconAgent = {
       '4. When it finishes, explain why it stopped (stop_reason or the budget), the final design, and one caveat if there is one (thin timing margin, low throughput, noisy seeds). Offer the next step: fork with tighter constraints, sa_formal, or the delivery package (the chat shows a download button on the result card; you cannot build or attach files yourself).',
       '5. While a run is in flight, a user instruction about the design is an sa_steer; a question is answered from sa_job data.',
       '6. A follow-up that only asks about results you already have (critical path, why it stopped, numbers) is answered from your own tool records or one sa_job call: do not start another run, do not re-estimate, do not re-read artifacts you have read. Start a new run only when the user asks for a change, a retry, or a different design.',
+      '7. The user may bring their own RTL (they paste SystemVerilog, or describe a block that no generator covers but they have code for). Then: ask for (or write from what they pasted) a self-checking bench that prints RESULT PASS/FAIL, decide with them which parameters the planner may move, call sa_rtl_upload, and run the spec with design "rtl:<id>" (locked {}, initial_ir = the parameter defaults). The ladder (behavioral sim, synthesis, P&R, netlist sims, formal properties) is the same; the planner tunes only the exposed parameters. sa_schema does not list rtl designs; sa_rtl_list does.',
+      '8. Devices: the FPGAs plus `sky130` (OpenROAD ASIC standard cells, 2-10 min per flow): no DSP/LUT there -- the numbers are cells, area in um2 (max_area_um2 is the budget, minimize_area the objective) and the STA critical path through fa_1/ha_1 adder cells.',
       'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',
       'Answer in the user\'s language.',
     ].join('\n')

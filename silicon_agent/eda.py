@@ -49,6 +49,9 @@ def simulate(d: Design, arch, work: Path, seed: int = 1, timeout: int = 1800) ->
     rtl = work / "rtl" / f"{d.top}.sv"
     sim_dir = work / "sim"
     sim_dir.mkdir(parents=True, exist_ok=True)
+    if d.test_module is None:
+        # BYO-RTL: the user's self-checking SystemVerilog bench (prints RESULT PASS / RESULT FAIL) under iverilog
+        return _simulate_sv_bench(d, arch, rtl, sim_dir, timeout)
     env = tool_env()
     env.update({"SA_ARCH": json.dumps(arch.to_dict()), "SA_SEED": str(seed), "PYTHONPATH": str(TB_DIR), **d.sim_env(arch)})
     sources = [rtl] + [TB_DIR / f for f in d.extra_sim_sources]
@@ -87,6 +90,24 @@ raise SystemExit(1 if failed else 0)
     return passed, tail, cov
 
 
+def _simulate_sv_bench(d: Design, arch, rtl: Path, sim_dir: Path, timeout: int) -> tuple[bool, str, dict]:
+    (sim_dir / "tb.sv").write_text(d.tb(arch, 10.0))
+    srcs = [str(sim_dir / "tb.sv"), str(rtl)] + [str(TB_DIR / f) for f in d.extra_sim_sources]
+    log = sim_dir / "sim.log"
+    with log.open("w") as f:
+        c = subprocess.run(["iverilog", "-g2012", "-o", "tb.vvp", *srcs], cwd=sim_dir, env=tool_env(), stdout=f, stderr=subprocess.STDOUT, text=True, timeout=600)
+        r = None
+        if c.returncode == 0:
+            try:
+                r = subprocess.run(["vvp", "tb.vvp"], cwd=sim_dir, env=tool_env(), stdout=f, stderr=subprocess.STDOUT, text=True, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                f.write(f"\nSIM TIMEOUT after {timeout} s: the testbench did not finish\nRESULT FAIL timeout\n")
+    text = log.read_text()
+    passed = c.returncode == 0 and r is not None and "RESULT PASS" in text and "RESULT FAIL" not in text
+    tail = "\n".join(line for line in text.splitlines() if re.search(r"(RESULT|FAIL|ERROR|Error|error:|MISMATCH|assert)", line))[-4000:]
+    return passed, tail, {}
+
+
 # ---------------------------------------------------------------- top-level evaluate
 def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str = "ecp5", on_stage=None) -> Metrics:
     b = _REG[backend]
@@ -109,7 +130,7 @@ def evaluate(d: Design, arch, fmax_target: float, runs_dir: Path, backend: str =
     else:
         r = b.synth_pnr(work, fmax_target, d.top)
         stages = {}
-        if r.get("fits") and d.vectors is not None and b.netlist_sims is not None:
+        if r.get("fits") and d.tb is not None and b.netlist_sims is not None:
             stages = b.netlist_sims(d, arch, work, fmax_target, on_stage=on_stage)
         m = Metrics(**r, sim_passed=True, sim_log=sim_log, sim_stages=stages, sim_coverage=cov)
     cached.write_text(json.dumps(asdict(m)))

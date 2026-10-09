@@ -357,6 +357,8 @@ def package(job: dict, results_dir: Path, runs_dir: Path) -> bytes:
     ir = d.ir_cls.from_dict(best["ir"])
     rtl = d.emit(ir, backend=backend)
     unit = (job.get("summary") or {}).get("throughput_unit", "")
+    import hashlib
+    h = hashlib.sha256(f"{backend}\n{rtl}".encode()).hexdigest()[:16]
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"rtl/{d.top}.sv", rtl)
@@ -370,9 +372,17 @@ def package(job: dict, results_dir: Path, runs_dir: Path) -> bytes:
             z.writestr("sim/tb.sv", d.tb(ir, period))
             z.writestr("sim/stim.hex", "\n".join(stim) + "\n")
             z.writestr("sim/exp.hex", "\n".join(exp) + "\n")
+        elif d.tb:
+            # BYO-RTL: the user's own self-checking bench
+            z.writestr("sim/tb.sv", d.tb(ir, 1000.0 / job["spec"]["constraints"]["fmax_mhz"]))
+        if backend == "sky130":
+            # the ASIC deliverable: the routed netlist and the GDS of the best iteration, from the run's pnr/ directory
+            for name in ("6_final.v", "6_final.gds", "6_finish.rpt", "6_report.json"):
+                f = runs_dir / h / "pnr" / name
+                if f.exists():
+                    z.write(f, f"asic/{name}")
         # reports from the run directory (hash of backend + RTL, as evaluate() names it)
-        import hashlib
-        h = hashlib.sha256(f"{backend}\n{rtl}".encode()).hexdigest()[:16]
+
         work = runs_dir / h
         for sub in ("pnr", "vivado"):
             for f in (work / sub).glob("*") if (work / sub).exists() else []:

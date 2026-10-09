@@ -281,16 +281,30 @@ CTS, route, STA) takes 2-10 minutes; the SDC asks for the run's target so the re
 }
 
 
+def prompts_for(kind: str) -> dict:
+    """PROMPTS entry for a design kind; BYO-RTL kinds get one built from the bundle's parameter declarations."""
+    if kind in PROMPTS:
+        return PROMPTS[kind]
+    if kind.startswith("rtl:"):
+        from .designs import DESIGNS
+        from . import rtl as _rtl
+        b = DESIGNS[kind].ir_cls._bundle_ref
+        return {"what": f"the user's own RTL `{b['top']}` ({b.get('name', kind)}): " + str(b.get("description", ""))[:300],
+                "ir": _rtl.ir_schema(b), "ir_json": "{" + ", ".join(f'"{k}":..' for k in (b.get("params") or {})) + "}", "facts": {}}
+    raise KeyError(kind)
+
+
 def device_facts(kind: str, backend: str) -> str:
     """Measured facts when we have them for this (design, device); otherwise a generic paragraph built from the
     backend record, with the device numbers the planner needs to reason about budgets. Artix-7 shares the
     Spartan-7 fabric (LUT6, DSP48E1, -1 speed grade), so its measured facts apply with a capacity caveat."""
     from .backends import BACKENDS
     b = BACKENDS[backend]
-    text = PROMPTS[kind]["facts"].get(backend)
-    if not text and backend == "xc7a35t" and PROMPTS[kind]["facts"].get("xc7s50"):
+    facts = prompts_for(kind)["facts"]
+    text = facts.get(backend)
+    if not text and backend == "xc7a35t" and facts.get("xc7s50"):
         text = (f"{b.name}: same LUT6 / DSP48E1 fabric and speed grade as the Spartan-7 below but smaller "
-                f"({b.lut} LUT6, {b.dsp} DSP48E1, {b.bram} BRAM). Measured Spartan-7 facts:\n" + PROMPTS[kind]["facts"]["xc7s50"])
+                f"({b.lut} LUT6, {b.dsp} DSP48E1, {b.bram} BRAM). Measured Spartan-7 facts:\n" + facts["xc7s50"])
     if text:
         return text
     style = "asic" if b.vendor == "skywater" else b.emit_style

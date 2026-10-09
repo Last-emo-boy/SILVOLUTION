@@ -176,6 +176,18 @@ ESTIMATORS = {"matmul": estimate_matmul, "fir": estimate_fir, "conv2d": estimate
 ESTIMATORS["graph"] = estimate_graph
 
 
+def estimate_rtl(ir: dict, backend: str) -> dict:
+    """BYO-RTL has no closed form: a neutral prior that the calibration (nearest measured parameter sets of the same
+    bundle) corrects after the first run. Fmax = the device's band midpoint, cells unknown, dsp 0."""
+    from .backends import BACKENDS
+    lo, hi = (float(x.split()[0]) for x in BACKENDS[backend].fmax_range.split("-")) if backend in BACKENDS else (50.0, 250.0)
+    return {"fmax_mhz": (lo + hi) / 2, "lut": 1000, "dsp": 0, "throughput": 1.0}
+
+
+def estimator(design: str):
+    return ESTIMATORS.get(design, estimate_rtl)
+
+
 # ---------------------------------------------------------------- calibration from measured runs
 # Every EDA result is recorded as (features, measured). The closed-form estimate is then corrected
 # per (design, backend, metric) by a ridge-regularized linear fit of  measured / estimate  on a
@@ -185,6 +197,11 @@ ESTIMATORS["graph"] = estimate_graph
 def _features(design: str, ir: dict, backend: str) -> list[float]:
     """Small, design-specific feature vector; the first entry is the bias."""
     f = [1.0]
+    if design.startswith("rtl:"):
+        # the exposed parameters themselves, in declaration order (log2 for anything > 8), padded to 7
+        vals = [float(v) for k, v in sorted(ir.items()) if isinstance(v, (int, float)) and not isinstance(v, bool)][:7]
+        f += [math.log2(v) if v > 8 else v for v in vals] + [0.0] * (7 - len(vals))
+        return f
     if design == "matmul":
         f += [math.log2(ir["pe_rows"] * ir["pe_cols"]), ir["acc_width"] / 32, 1.0 if ir.get("dsp_regs", "none") != "none" else 0.0,
               1.0 if ir.get("acc_in_dsp", True) else 0.0, ir.get("pipe_mul", 0), 1.0 if ir.get("reg_in") else 0.0, math.log2(max(ir["pe_rows"], 1))]
@@ -214,7 +231,7 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
 
 def record(design: str, backend: str, ir: dict, measured: dict) -> None:
     """Append one observation; called after every EDA evaluation."""
-    e = ESTIMATORS[design](ir, backend)
+    e = estimator(design)(ir, backend)
     rec = {"t": time.time(), "features": _features(design, ir, backend),
            "estimate": {k: e[k] for k in ("fmax_mhz", "lut", "dsp")},
            "measured": {k: measured[k] for k in ("fmax_mhz", "lut", "dsp")}}
@@ -307,7 +324,7 @@ def calibrated(design: str, backend: str, ir: dict) -> dict:
     designs: each neighbour contributes its own measured/estimate ratio, weighted by 1/(d+0.3), and the
     neighbour term dominates when the nearest point is close (d < 1 in standardized units). An exact
     feature match (d ~ 0) therefore returns the measured value -- the same design under another spec."""
-    e = ESTIMATORS[design](ir, backend)
+    e = estimator(design)(ir, backend)
     if backend == "sky130":
         # standard cells: every multiplier the FPGA estimate would put in a DSP becomes ~250 adder cells; the area
         # follows the cell count (sky130hd cells average ~9 um2 incl. the ~0.46 utilisation measured on a FIR)

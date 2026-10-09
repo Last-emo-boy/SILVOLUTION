@@ -190,9 +190,10 @@ def netlist_sims(d, arch, work: Path, fmax_target: float, on_stage=None) -> dict
     out = work / "vivado"
     sim = work / "xsim"
     sim.mkdir(parents=True, exist_ok=True)
-    stim, exp = d.vectors(arch)
-    (sim / "stim.hex").write_text("\n".join(stim) + "\n")
-    (sim / "exp.hex").write_text("\n".join(exp) + "\n")
+    if d.vectors is not None:
+        stim, exp = d.vectors(arch)
+        (sim / "stim.hex").write_text("\n".join(stim) + "\n")
+        (sim / "exp.hex").write_text("\n".join(exp) + "\n")
     period = 1000.0 / fmax_target
     (sim / "tb.sv").write_text(d.tb(arch, period))
     env = dict(os.environ)
