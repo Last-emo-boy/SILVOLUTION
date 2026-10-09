@@ -144,6 +144,13 @@ balanced tree — became the `sum_tree` knob of the FIR generator; measured A/B 
 at the input side — pre-adder carry chain → tap mux → DSP input — and became `pipe_in`; with both knobs
 the planner measured 219.0 MHz at 445 LUT (from 515), formal PASS (`fir-ecp5-200-4dsp`).
 
+## Other agents: the MCP server
+
+`sa_mcp.py` is a stdio MCP server exposing the same tools the AGH plugin has (interpret, estimate, run, job,
+steer, stop, pareto, job_file, formal, package URL, RTL upload, proposals, bench), so Claude Code, Claude
+Desktop or any MCP client can drive silicon-agent: `claude mcp add silicon-agent -- python3 /path/to/sa_mcp.py`
+(reads `SA_SERVER`, default the SSH-tunnelled job server, and `SA_TOKEN` or the Keychain item).
+
 ## Chat
 
 `https://silicon.w33d.xyz` — behind sluice SSO (route `silicon-agent-root`,
