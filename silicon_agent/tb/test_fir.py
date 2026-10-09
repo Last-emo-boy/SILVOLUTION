@@ -76,13 +76,13 @@ async def stream(dut):
 
     cocotb.start_soon(collector())
 
-    cov = Coverage("fir", ["sample:max", "sample:min", "sample:zero", "stim:gap", "stim:back-to-back", "stall:ready-low", "coef:runtime-write"])
+    cov = Coverage("fir", ["sample:max", "sample:min", "sample:zero", "stim:gap", "stim:long-gap", "stim:back-to-back", "stall:ready-low", "coef:runtime-write"])
     if arch.get("coef_port"):
         cov.hit("coef:runtime-write", U)
     burst_from = len(xs) - n_samples // 2
     for i, x in enumerate(xs):
-        gap = 0 if i >= burst_from else rng.choice([0, 0, 1, 3])
-        cov.hit("stim:gap" if gap else "stim:back-to-back")
+        gap = 0 if i >= burst_from else 24 if i == len(xs) // 4 else rng.choice([0, 0, 1, 3, 8])
+        cov.hit("stim:long-gap" if gap >= 8 else "stim:gap" if gap else "stim:back-to-back")
         if x == hi: cov.hit("sample:max")
         elif x == lo: cov.hit("sample:min")
         elif x == 0: cov.hit("sample:zero")

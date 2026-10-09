@@ -49,7 +49,7 @@ async def stream(dut):
     cov = Coverage("iir", ["stim:step", "stim:impulse", "stim:tone", "stim:random", "stim:gap", "stim:back-to-back", "stall:ready-low"])
     for i, x in enumerate(xs):
         cov.hit("stim:step" if i < 40 else "stim:impulse" if i < 91 else "stim:tone" if i < 151 else "stim:random")
-        gap = rng.choice([0, 0, 0, 1, 2]) if i > 151 and i % 6 == 0 else 0
+        gap = 24 if i == 40 else rng.choice([0, 0, 0, 1, 2]) if i > 151 and i % 6 == 0 else 0
         cov.hit("stim:gap" if gap else "stim:back-to-back")
         if gap:
             dut.in_valid.value = 0

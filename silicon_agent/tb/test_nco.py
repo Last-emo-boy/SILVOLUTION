@@ -48,7 +48,7 @@ async def stream(dut):
     cocotb.start_soon(collector())
     cov = Coverage("nco", ["sample:max", "sample:min", "stim:gap", "stim:back-to-back", "fcw:tone", "fcw:random", "quadrant:all"])
     for i, (x, f) in enumerate(zip(xs, fcws)):
-        gap = rng.choice([0, 0, 0, 1, 2]) if i % 5 == 0 else 0
+        gap = 24 if i == 40 else rng.choice([0, 0, 0, 1, 2]) if i % 5 == 0 else 0
         cov.hit("stim:gap" if gap else "stim:back-to-back")
         cov.hit("fcw:tone" if i < n // 2 else "fcw:random")
         if x == hi: cov.hit("sample:max")

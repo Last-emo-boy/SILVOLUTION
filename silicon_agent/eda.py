@@ -19,7 +19,7 @@ from .backends._common import CACHE, ROOT, TB_DIR, TOOLS, tool_env, run  # noqa:
 from .designs import DESIGNS, Design
 from .ir import Metrics
 
-CACHE_VERSION = "15"  # bump when report parsing, the vector benches or the sim libraries change (10: time-0 eval of constant cells after flop init)
+CACHE_VERSION = "16"  # bump when report parsing, the vector benches or the sim libraries change (16: long valid gaps in the stream benches)
 
 
 class _BackendView(dict):

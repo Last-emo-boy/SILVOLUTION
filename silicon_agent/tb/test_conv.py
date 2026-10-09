@@ -82,7 +82,7 @@ async def stream(dut):
         cov.hit("frame:checkerboard" if f == 0 else "frame:random")
         if f > 0: cov.hit("frame:restart")
         for i, x in enumerate(px):
-            gap = rng.choice([0, 0, 0, 1, 2]) if i % 7 == 0 else 0
+            gap = 24 if i == 3 * W + 1 else rng.choice([0, 0, 0, 1, 2]) if i % 7 == 0 else 0
             cov.hit("stim:gap" if gap else "stim:back-to-back")
             if x == (1 << (DW - 1)) - 1: cov.hit("pixel:max")
             elif x == -(1 << (DW - 1)): cov.hit("pixel:min")

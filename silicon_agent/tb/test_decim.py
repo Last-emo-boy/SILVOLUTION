@@ -55,11 +55,11 @@ async def stream(dut):
                 got.append(to_signed(int(dut.out_data.value), AW))
 
     cocotb.start_soon(collector())
-    cov = Coverage("decim", ["sample:max", "sample:min", "stim:gap", "stim:back-to-back", "stall:ready-low", "frame:complete"])
+    cov = Coverage("decim", ["sample:max", "sample:min", "stim:gap", "stim:long-gap", "stim:back-to-back", "stall:ready-low", "frame:complete"])
     burst_from = len(xs) // 2
     for i, x in enumerate(xs):
-        gap = 0 if i >= burst_from else rng.choice([0, 0, 1, 3])
-        cov.hit("stim:gap" if gap else "stim:back-to-back")
+        gap = 0 if i >= burst_from else 24 if i == M * (len(xs) // (4 * M)) else rng.choice([0, 0, 1, 3, 8])
+        cov.hit("stim:long-gap" if gap >= 8 else "stim:gap" if gap else "stim:back-to-back")
         if x == hi: cov.hit("sample:max")
         elif x == lo: cov.hit("sample:min")
         if gap:

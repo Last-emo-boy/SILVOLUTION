@@ -59,7 +59,7 @@ async def stream(dut):
     cocotb.start_soon(collector())
     burst_from = len(xs) - n_samples // 2
     for i, x in enumerate(xs):
-        gap = 0 if i >= burst_from else rng.choice([0, 0, 1, 3])
+        gap = 0 if i >= burst_from else 24 if i == len(xs) // 4 else rng.choice([0, 0, 1, 3, 8])
         if gap:
             dut.in_valid.value = 0; await ClockCycles(dut.clk, gap)
         dut.in_valid.value = 1; dut.in_data.value = x & ((1 << DW) - 1)
