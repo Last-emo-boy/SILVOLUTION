@@ -606,7 +606,7 @@ def _start_proposal(pid: str) -> None:
 
     def run():
         try:
-            rep = P.gate(pr["diff"], PROPOSALS / pid / "gate", designs=pr["designs"], irs=pr.get("irs") or [], timeout=5400)
+            rep = P.gate(pr["diff"], PROPOSALS / pid / "gate", designs=pr["designs"], irs=pr.get("irs") or [], timeout=5400, reference=pr.get("reference"))
         except Exception as e:
             rep = {"ok": False, "steps": [], "log": f"gate crashed: {e}"}
         with _lock:
@@ -1308,12 +1308,15 @@ class Handler(BaseHTTPRequestHandler):
             errs = P.check_scope(diff)
             if errs:
                 return self._json(400, {"error": "out of scope", "scope_errors": errs})
-            designs = [d for d in (body.get("designs") or []) if d in DESIGNS]
+            # a proposal may add a design kind: names not in the registry yet are accepted as new (the gate verifies they
+            # exist in the patched tree and asks for an independent reference model)
+            designs = [str(d) for d in (body.get("designs") or []) if re.match(r"^[a-z][a-z0-9_]{0,31}$", str(d))]
             if not designs:
-                return self._json(400, {"error": f"designs: which generators the change touches, from {list(DESIGNS)}"})
+                return self._json(400, {"error": f"designs: which generators the change touches (existing: {list(DESIGNS)}; a new kind by its name)"})
             pid = time.strftime("%Y%m%d-%H%M%S") + "-p" + secrets.token_hex(2)
             pr = {"id": pid, "title": str(body.get("title", ""))[:160], "rationale": str(body.get("rationale", ""))[:4000], "diff": diff,
                   "designs": designs, "irs": body.get("irs") or [], "ab_spec": body.get("ab_spec"), "ab_max_iter": body.get("ab_max_iter"),
+                  "reference": str(body.get("reference"))[:60000] if body.get("reference") else None,
                   "thread": body.get("thread"), "subject": sub, "created": time.time(), "status": "gating", "files": P._files_in_diff(diff)}
             if pr["ab_spec"] and pr["ab_spec"].get("design") not in designs:
                 return self._json(400, {"error": "ab_spec.design must be one of the proposal's designs"})

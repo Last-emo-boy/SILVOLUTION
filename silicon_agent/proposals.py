@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent  # the checkout: silicon_agent/, agh-plugin/, deploy/ ...
-ALLOWED = ("silicon_agent/",)                # a proposal may touch only these subtrees
+ALLOWED = ("silicon_agent/",)                # a proposal may touch only these subtrees (new files included: a new generator + its tb/test_*.py)
 FORBIDDEN = ("silicon_agent/server.py", "silicon_agent/agh.py", "silicon_agent/proposals.py", "silicon_agent/llm.py")
 
 
@@ -164,11 +164,55 @@ def mutation():
         res.append({"design": kind, **r})
     return {"mutation": res, "ok": True}
 step("mutation score of the testbench", mutation)
+# a NEW design kind: the proposal's generator and testbench came from the same author, so the gate asks for an
+# independent reference (spec["reference"]: Python source defining `reference(ir: dict, xs: list[int]) -> list[int]`
+# written separately from the generator's golden) and checks the generator's RTL against it through the vector
+# bench on random stimulus -- the two models must agree on every output, or the proposal fails
+def independent_reference():
+    import importlib.util, random as _r
+    base = Path(spec["base_tree"])
+    sys.path.insert(0, str(base))
+    from silicon_agent.designs import DESIGNS as BASE_DESIGNS
+    sys.path.pop(0)
+    new_kinds = [k for k in DESIGNS if k not in BASE_DESIGNS and not k.startswith("rtl:")]
+    if not new_kinds:
+        return {"new_designs": [], "ok": True, "note": "no new design kind"}
+    if not spec.get("reference"):
+        return {"new_designs": new_kinds, "ok": False, "error": "a new design kind needs an independent reference model (proposal field `reference`: Python with reference(ir, xs) -> outputs)"}
+    rp = Path(tempfile.mkdtemp()) / "reference.py"; rp.write_text(spec["reference"])
+    specm = importlib.util.spec_from_file_location("sa_reference", rp); mod = importlib.util.module_from_spec(specm); specm.loader.exec_module(mod)
+    res = []
+    for kind in new_kinds:
+        d = DESIGNS[kind]
+        irs = [x["ir"] for x in spec.get("irs", []) if x["design"] == kind] or [{}]
+        for ir in irs[:3]:
+            a = d.ir_cls.from_dict(ir)
+            if a.validate():
+                res.append({"design": kind, "ir": ir, "ok": False, "error": a.validate()}); continue
+            if d.vectors is None:
+                res.append({"design": kind, "ir": ir, "ok": False, "error": "the design has no vector generator"}); continue
+            stim, exp = d.vectors(a, seed=7)
+            # the reference sees the same stimulus (the last field of each stim line is the sample; first is a gap)
+            xs = [int(l.split()[-1], 16) for l in stim]
+            dw = getattr(a, "data_width", None)
+            if dw:
+                xs = [v - (1 << dw) if v >> (dw - 1) else v for v in xs]
+            try:
+                ref = mod.reference(a.to_dict(), xs)
+            except Exception as e:
+                res.append({"design": kind, "ir": ir, "ok": False, "error": f"reference raised: {e}"}); continue
+            got = [int(l, 16) for l in exp]
+            aw = getattr(a, "acc_width", None) or getattr(a, "out_width", None) or dw
+            refm = [v & ((1 << aw) - 1) for v in ref] if aw else ref
+            same = len(refm) == len(got) and all(x == y for x, y in zip(refm, got))
+            res.append({"design": kind, "ir": ir, "ok": same, "n": len(got), **({} if same else {"error": f"golden and reference differ (len {len(got)} vs {len(refm)}, first mismatch at {next((i for i, (x, y) in enumerate(zip(refm, got)) if x != y), None)})"})})
+    return {"new_designs": new_kinds, "checks": res, "ok": all(r["ok"] for r in res)}
+step("independent reference for a new design kind", independent_reference)
 out_path.write_text(json.dumps(rep, indent=1))
 '''
 
 
-def gate(diff: str, work: Path, designs: list[str], irs: list[dict] | None = None, base_tree: Path | None = None, timeout: int = 3600) -> dict:
+def gate(diff: str, work: Path, designs: list[str], irs: list[dict] | None = None, base_tree: Path | None = None, timeout: int = 3600, reference: str | None = None) -> dict:
     """Apply the diff to a scratch copy and run the gate program on it. Returns the report (also written to work/report.json)."""
     work.mkdir(parents=True, exist_ok=True)
     errs = check_scope(diff)
@@ -180,7 +224,7 @@ def gate(diff: str, work: Path, designs: list[str], irs: list[dict] | None = Non
         return {"ok": False, "apply_error": log}
     base = base_tree or scratch_copy(work / "base")
     (tree / "root").mkdir(exist_ok=True)
-    spec = {"designs": designs, "irs": irs or [], "base_tree": str(base)}
+    spec = {"designs": designs, "irs": irs or [], "base_tree": str(base), "reference": reference}
     (work / "gate_spec.json").write_text(json.dumps(spec))
     (work / "gate.py").write_text(GATE)
     out = work / "report.json"
