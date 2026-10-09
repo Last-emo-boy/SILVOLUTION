@@ -198,8 +198,14 @@ button:disabled { opacity: .45; cursor: default; }
 .cpbar .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--bad); }
 
 /* result card */
-.result .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: 13px; }
-.result .head b { font-size: 16px; color: var(--text); font-weight: 600; } .result .head span { color: var(--text-2); font-family: var(--mono); font-size: 12px; }
+.result .hero { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: flex-end; }
+.result .hero .fmax { display: flex; flex-direction: column; gap: 2px; padding-right: 24px; border-right: 1px solid var(--border); }
+.result .hero .fmax b { font-size: 28px; font-weight: 600; color: var(--text); letter-spacing: -.02em; line-height: 1.1; }
+.result .hero .fmax span { font: 11px var(--mono); color: var(--muted); }
+.result .hero .stats { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: flex-end; }
+.result .hero .stat { display: flex; flex-direction: column; gap: 2px; }
+.result .hero .stat b { font-size: 16px; font-weight: 500; color: var(--text); line-height: 1.1; } .result .hero .stat span { font: 10.5px var(--mono); color: var(--muted); }
+@media (max-width: 800px) { .result .hero .fmax { padding-right: 0; border-right: 0; } }
 .trust { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11.5px; }
 .trust .lbl { color: var(--muted); margin-right: 2px; }
 .trust .tp { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); font-family: var(--mono); font-size: 11px; }
@@ -295,3 +301,4 @@ table.tour td.op { width: 24px; text-align: right; } table.tour td.op a { text-d
 table.tour tr.lead td.lb { color: var(--good); font-weight: 500; }
 table.tour .x { color: var(--bad); }
 .rail-foot .wb.agh { margin-left: 10px; color: var(--muted); } .rail-foot .wb.agh:hover { color: var(--text); }
+.tprog { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 8px; font: 11px var(--mono); } .tprog .stages { margin: 0; }
