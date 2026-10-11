@@ -290,7 +290,7 @@ def check(rec: dict, params: dict | None = None, files: dict | None = None, tag:
         return rep
     d = Design(kind=f"rtl:{sid}", ir_cls=A, top=bundle["top"], emit=lambda x, backend="ecp5": _rtl.emit(bundle, x, backend), test_module=None,
                sim_env=lambda x: {}, throughput=lambda x: _rtl.throughput(bundle, x), throughput_unit=bundle.get("throughput_unit", ""),
-               latency=lambda x: _rtl.latency_cycles(bundle, x), extra_sim_sources=(),
+               latency=lambda x: _rtl.latency_cycles(bundle, x), extra_sim_sources=("mult18x18d_sim.v",),
                vectors=(lambda x, seed=1: _rtl.vectors(bundle, x, seed=seed, cwd=_dir(sid) / "ref-cache")) if bundle.get("stream") else None,
                tb=(lambda x, period: _rtl.stream_tb(bundle, x, period)) if bundle.get("stream") else (lambda x, period: bundle["tb"]))
     text = d.emit(a)
@@ -340,11 +340,45 @@ def check(rec: dict, params: dict | None = None, files: dict | None = None, tag:
     return rep
 
 
+def knob_points(bundle: dict, limit: int = 6) -> list[dict]:
+    """A few parameter sets besides the defaults that the declared ranges allow: each tunable knob at its other
+    choices / its min and max, one knob at a time. The planner will try these; they must work before registration."""
+    decl = bundle.get("params") or {}
+    base = {k: int(v.get("default", 0)) for k, v in decl.items()}
+    pts: list[dict] = []
+    for k, d in decl.items():
+        vals = [v for v in (d.get("choices") or []) if v != base[k]]
+        if not vals and "min" in d and "max" in d and d["min"] != d["max"]:
+            vals = sorted({d["min"], d["max"]} - {base[k]})
+        for v in vals[:2]:
+            pts.append({**base, k: v})
+    return pts[:limit]
+
+
+def check_knobs(rec: dict, files: dict | None = None, tag: str = "knobs") -> dict:
+    """Elaborate + simulate (no properties) at the other declared knob values: a knob the RTL does not really
+    implement fails here instead of in every run that tries it."""
+    b = bundle_of(rec, files)
+    out = {"ok": True, "points": []}
+    for i, p in enumerate(knob_points(b)):
+        rep = check(rec, params=p, files=files, tag=f"{tag}{i}", properties=False)
+        out["points"].append({"params": {k: v for k, v in p.items() if v != (b["params"][k].get("default"))}, "ok": rep["ok"],
+                              **({} if rep["ok"] else {"failed": next((s for s in rep["steps"] if not s.get("ok")), {}).get("name"), "log": str(next((s.get("log") or s.get("error") or s.get("mismatch") for s in rep["steps"] if not s.get("ok")), ""))[-600:]})})
+        out["ok"] = out["ok"] and rep["ok"]
+    return out
+
+
 def register(rec: dict, note: str = "initial design") -> dict:
-    """The working directory becomes revision 0 of a registered bundle (design kind rtl:<id>); its check must pass."""
+    """The working directory becomes revision 0 of a registered bundle (design kind rtl:<id>); its check must pass
+    at the defaults and at the other declared knob values."""
     from .designs import register_rtl
     files = work_files(rec["id"])
     rep = check(rec, files=files, tag="register")
+    if rep["ok"]:
+        kn = check_knobs(rec, files=files, tag="register-knob")
+        rep["steps"].append({"name": "declared knobs (each tunable parameter at its other values)", "ok": kn["ok"], "points": kn["points"],
+                             **({} if kn["ok"] else {"error": "a declared knob value does not pass: fix the RTL/golden for it, or narrow the parameter's range in design.json: " + "; ".join(f"{p['params']} -> {p.get('failed')}" for p in kn["points"] if not p["ok"])})})
+        rep["ok"] = rep["ok"] and kn["ok"]
     if not rep["ok"]:
         return {"ok": False, "check": rep}
     b = bundle_of(rec, files)
@@ -377,6 +411,11 @@ def add_revision(rec: dict, note: str) -> dict:
         return {"ok": False, "error": "the working copy is identical to an existing revision"}
     n = len(b["revisions"])
     rep = check(rec, files=files, tag=f"rev{n}")
+    if rep["ok"]:
+        kn = check_knobs(rec, files=files, tag=f"rev{n}-knob")
+        rep["steps"].append({"name": "declared knobs (each tunable parameter at its other values)", "ok": kn["ok"], "points": kn["points"],
+                             **({} if kn["ok"] else {"error": "a declared knob value does not pass: " + "; ".join(f"{p['params']} -> {p.get('failed')}" for p in kn["points"] if not p["ok"])})})
+        rep["ok"] = rep["ok"] and kn["ok"]
     if not rep["ok"]:
         return {"ok": False, "check": rep}
     # the designer may have changed design.json too (new knobs, latency); the bundle follows it
@@ -416,7 +455,8 @@ explains the files). Write the RTL for the block SPEC.md describes, a bit-exact 
 sa_studio_check and submit with sa_studio_submit. Rules: synthesizable SystemVerilog-2012 that iverilog, yosys and Vivado accept
 (no interfaces, no classes, no unpacked-array ports); the stream contract in README-studio.md; parameters as top-level
 `parameter`s and listed in design.json params with ranges (these are the knobs the planner will tune -- expose pipelining and
-sharing choices as parameters when they are cheap to make switchable); golden.py standard library only, integer arithmetic,
+sharing choices as parameters when they are cheap to make switchable -- but every value in a declared range is checked at
+submit: declare only knobs the RTL and golden.py really implement, narrow the range otherwise); golden.py standard library only, integer arithmetic,
 exactly the RTL's truncation/rounding/wrap. The expected outputs in the check come from an independent reference written from
 SPEC.md by a session that never sees your code: read SPEC.md as that session will, and if it is ambiguous, make SPEC.md precise
 (state the arithmetic) before you write RTL. A failed check comes back to you with the log; fix and check again."""

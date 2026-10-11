@@ -205,9 +205,11 @@ def register_rtl(bundle: dict) -> Design:
         return re.sub(r"parameter\s+real\s+PERIOD\s*=\s*[\d.]+", f"parameter real PERIOD = {period}", t)
 
     vectors = (lambda a, seed=1: _rtl.vectors(bundle, a, seed=seed)) if bundle.get("stream") else None
+    # synthesis maps a `*` to the device's multiplier primitive; the netlist sims (and formal) then need its
+    # simulation model, exactly as the generators' designs do
     d = Design(kind=kind, ir_cls=A, top=top, emit=lambda a, backend="ecp5": _rtl.emit(bundle, a, backend), test_module=None,
                sim_env=lambda a: {}, throughput=lambda a: _rtl.throughput(bundle, a), throughput_unit=bundle.get("throughput_unit", "items/cycle"),
-               latency=lambda a: _rtl.latency_cycles(bundle, a), extra_sim_sources=(), vectors=vectors, tb=tb)
+               latency=lambda a: _rtl.latency_cycles(bundle, a), extra_sim_sources=("mult18x18d_sim.v",), vectors=vectors, tb=tb)
     DESIGNS[kind] = d
     return d
 
