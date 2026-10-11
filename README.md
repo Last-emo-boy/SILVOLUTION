@@ -195,7 +195,9 @@ Measured on the production host (2026-10-11): a 32-tap FIR forked out of its kno
 (no generator) was designed, independently referenced (648 samples), rewritten three times at the planner's request
 and closed at 212.8 MHz / 356 LUT / 0 DSP. Designer cost ≈ $1-2 per studio. API: `POST /api/studio`,
 `GET /api/studio[/<id>]`, `POST /api/studio/<id>/{check,submit,revise,resume}`; tools `sa_studio_{open,fork,status,
-revise,list,resume}` for the chat agent, `sa_studio_{check,submit}` for the designer; the worktable's 设计工作室 view.
+revise,list,resume}` for the chat agent, `sa_studio_{check,submit}` for the designer; the worktable's 设计工作室 view;
+`sa studio open|fork|list|status|spec|file|revise|resume` from a terminal. A designer turn is bounded
+(`SA_STUDIO_TURN_S`, 40 min): a designer that keeps searching is cancelled and the run continues on its knobs.
 
 ## Bring your own RTL
 
