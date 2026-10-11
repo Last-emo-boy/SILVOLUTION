@@ -22,6 +22,9 @@ fi
 python3 -m silicon_agent.bench run --tag nightly --only ecp5,ice40,gowin,sky130 --max-iter 6 --out /srv/sa/bench || status=REGRESSION
 # the same four cases driven through the chat: measures the harness agent (interpret -> run -> report) end to end
 python3 -m silicon_agent.bench run --tag agent --agent --only fir-ecp5-120-6dsp,conv3-ice40-60,matmul-gowin-120,cordic-ecp5-200 --max-iter 6 --out /srv/sa/bench || status=REGRESSION
+# the studio end to end: a block no generator covers, designed by the designer session, checked against an
+# independent reference, run on the device (deep model: the most expensive case of the night, ~$1-2)
+python3 -m silicon_agent.bench run --tag studio --agent --only median5-ecp5-150-studio --max-iter 6 --out /srv/sa/bench || status=REGRESSION
 # planner A/B: the same three cases under the stronger model (default planner is deepseek-flash); compared in /bench
 python3 -m silicon_agent.bench run --tag planner-pro --planner deepseek-v4-pro --only fir-ecp5-120-6dsp,conv3-ice40-60,cordic-ecp5-200 --max-iter 6 --out /srv/sa/bench || true
 if [ "$status" = OK ]; then

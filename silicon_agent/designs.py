@@ -5,7 +5,6 @@ Adding a design = one entry here + an IR dataclass + an emitter + a cocotb test.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Callable
 
@@ -189,28 +188,12 @@ DESIGNS: dict[str, Design] = {
 
 
 def register_rtl(bundle: dict) -> Design:
-    """A bring-your-own-RTL bundle as a design kind `rtl:<id>`: the user's files are the generator (parameters are the
-    IR), the user's SystemVerilog bench is the testbench on every rung (test_module None selects the iverilog path)."""
+    """A bring-your-own-RTL or studio bundle as a design kind `rtl:<id>`: the files are the generator (parameters
+    and the revision are the IR); the bench is the user's own, the generic replay bench on the reference's
+    vectors, or -- for a design forked from a generator -- that generator's bench (rtl.design_of)."""
     from . import rtl as _rtl
-    kind = f"rtl:{bundle['id']}"
-    A = _rtl.arch_class(bundle)
-    top = bundle["top"]
-
-    def tb(a, period):
-        if bundle.get("stream"):
-            # an authored stream design: the generic replay bench, expected values from the bundle's reference
-            return _rtl.stream_tb(bundle, a, period)
-        t = bundle.get("tb") or ""
-        # the bench may read the period from a parameter named PERIOD
-        return re.sub(r"parameter\s+real\s+PERIOD\s*=\s*[\d.]+", f"parameter real PERIOD = {period}", t)
-
-    vectors = (lambda a, seed=1: _rtl.vectors(bundle, a, seed=seed)) if bundle.get("stream") else None
-    # synthesis maps a `*` to the device's multiplier primitive; the netlist sims (and formal) then need its
-    # simulation model, exactly as the generators' designs do
-    d = Design(kind=kind, ir_cls=A, top=top, emit=lambda a, backend="ecp5": _rtl.emit(bundle, a, backend), test_module=None,
-               sim_env=lambda a: {}, throughput=lambda a: _rtl.throughput(bundle, a), throughput_unit=bundle.get("throughput_unit", "items/cycle"),
-               latency=lambda a: _rtl.latency_cycles(bundle, a), extra_sim_sources=("mult18x18d_sim.v",), vectors=vectors, tb=tb)
-    DESIGNS[kind] = d
+    d = _rtl.design_of(bundle)
+    DESIGNS[d.kind] = d
     return d
 
 

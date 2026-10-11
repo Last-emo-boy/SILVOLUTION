@@ -47,7 +47,9 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   $("#open-bench").onclick = () => show("bench");
   $("#open-proposals").onclick = () => show("proposals");
   $("#open-catalog").onclick = () => show("catalog");
+  $("#open-studios").onclick = () => show("studios");
   refreshPropCount();
+  refreshStudioCount();
   $("#send").onclick = sendSteer;
   $("#steer").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendSteer(); });
   $("#steer").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px"; });
@@ -78,7 +80,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   const tabQ = new URLSearchParams(location.search).get("tab");   // ?tab=design|trajectory|sim|rtl|memory|agent
   if (tabQ) switchTab(tabQ);
   const hash = location.hash.slice(1);
-  if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "proposals" || hash.startsWith("proposals/")) show("proposals"); else if (hash === "catalog") show("catalog"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
+  if (hash === "memory") show("memory"); else if (hash === "bench") show("bench"); else if (hash === "proposals" || hash.startsWith("proposals/")) show("proposals"); else if (hash === "studios" || hash.startsWith("studios/")) show("studios"); else if (hash === "catalog") show("catalog"); else if (hash === "new") show("new"); else if (hash.startsWith("compare/")) { const [, a, b] = hash.split("/"); ext.openCompare(a, b); }
   else if (hash && (!THREAD || jobs.some((j) => j.id === hash))) select(hash);
   else if ((THREAD || PROJECT) && jobs.length) select(jobs[0].id);
   else show("empty");
@@ -86,12 +88,13 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
 
 function show(v) {
   view = v;
-  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare"; $("#bench").hidden = v !== "bench"; $("#proposals").hidden = v !== "proposals"; $("#catalog").hidden = v !== "catalog";
+  $("#empty").hidden = v !== "empty"; $("#new-form").hidden = v !== "new"; $("#run").hidden = v !== "run"; $("#memory").hidden = v !== "memory"; $("#compare").hidden = v !== "compare"; $("#bench").hidden = v !== "bench"; $("#proposals").hidden = v !== "proposals"; $("#catalog").hidden = v !== "catalog"; $("#studios").hidden = v !== "studios";
   if (v !== "run") { selected = null; clearTimeout(pollTimer); document.querySelectorAll("#runs li").forEach((li) => li.classList.remove("sel")); }
   if (v === "memory") { location.hash = "memory"; renderMemoryView(); }
   if (v === "bench") { location.hash = "bench"; renderBenchView(); }
   if (v === "catalog") { location.hash = "catalog"; renderCatalogView(); }
   if (v === "proposals") { if (!location.hash.startsWith("#proposals")) location.hash = "proposals"; renderProposalsView(); }
+  if (v === "studios") { if (!location.hash.startsWith("#studios")) location.hash = "studios"; renderStudiosView(); }
   if (v === "new") location.hash = "new";
 }
 function toggleInspector(force) {
@@ -102,6 +105,9 @@ function toggleInspector(force) {
 }
 async function refreshPropCount() {
   try { const p = await api("/proposals"); $("#prop-count").textContent = p.length || ""; } catch {}
+}
+async function refreshStudioCount() {
+  try { const r = await api("/studio"); $("#studio-count").textContent = r.length || ""; } catch {}
 }
 async function refreshMemCount() {
   try { const m = await api("/memory"); $("#mem-count").textContent = m.reduce((a, g) => a + g.count, 0); } catch {}
@@ -752,6 +758,37 @@ async function renderProposalsView() {
   }
   if (want) document.getElementById(`prop-${want}`)?.scrollIntoView({ block: "start" });
   if (rows.some((p) => p.status === "gating")) setTimeout(() => { if (view === "proposals") renderProposalsView(); }, 8000);
+}
+
+// ---------------------------------------------------------------- the design studio: every studio, its pipeline, its revisions
+const STUDIO_ZH = { new: "待开始", designing: "设计师编写中", referencing: "生成独立参考模型", checking: "检查中", revising: "设计师修订中", registered: "已注册", failed: "未通过", interrupted: "被打断" };
+async function renderStudiosView() {
+  const box = $("#studios-view"); box.innerHTML = `<div class="muted">加载中…</div>`;
+  const rows = await api("/studio");
+  box.innerHTML = "";
+  if (!rows.length) { box.appendChild(el(`<div class="muted">还没有工作室 — 在对话里要一个生成器没有的块，或在某次运行的 ⋯ 菜单里「分叉到设计工作室」</div>`)); return; }
+  const want = location.hash.startsWith("#studios/") ? location.hash.slice("#studios/".length) : null;
+  box.appendChild(el(`<div class="muted small-text" style="margin-bottom:10px">${rows.length} 个工作室 · ${rows.filter((r) => r.status === "registered").length} 已注册</div>`));
+  for (const r of rows) {
+    const busy = ["designing", "referencing", "checking", "revising"].includes(r.status) || r.running;
+    const stat = busy ? `<span class="live">${esc(STUDIO_ZH[r.status] || r.status)}</span>` : r.status === "registered" ? `<span class="ok">已注册</span>` : `<span class="bad">${esc(STUDIO_ZH[r.status] || r.status)}</span>`;
+    const refk = r.reference?.kind === "generator" ? `生成器向量（${esc(r.reference.origin?.design || "")}）` : r.reference?.kind === "independent" ? "独立参考模型" : r.reference?.kind === "self-check" ? "自带自检台" : "";
+    const revs = r.bundle?.revisions || [];
+    const g = el(`<div class="memgroup prop${want === r.id ? " sel" : ""}" id="studio-${esc(r.id)}">
+      <h3>${esc(r.name || r.id)} <span class="muted">${new Date((r.created || 0) * 1000).toLocaleString()}${r.thread ? ` · <a href="/?thread=${encodeURIComponent(r.thread)}" target="_blank">对话</a>` : ""}</span></h3>
+      <div class="small-text">${stat}${refk ? ` · ${refk}` : ""}${r.design ? ` · <span class="mono">${esc(r.design)}</span>` : ""}${r.origin ? ` · 分叉自 ${esc(r.origin.design)} <a href="#${esc(r.origin.job)}">${esc(r.origin.job)}</a> ${esc(r.origin.label || "")}` : ""}${r.usage?.usd_micros != null ? ` · 设计师 $${(r.usage.usd_micros / 1e6).toFixed(2)}` : ""}</div>
+      ${r.brief && !r.origin ? `<p class="muted small-text">${esc(r.brief.slice(0, 500))}</p>` : ""}
+      <div class="gate-steps">${(r.steps || []).map((s) => `<div class="gstep"><span class="${s.ok ? "ok" : s.ok === false ? "bad" : "muted"}">${s.ok ? "✓" : s.ok === false ? "✕" : "·"}</span> ${esc(s.name)}${s.rev != null ? ` → rev ${s.rev}` : ""}${s.instruction ? `<div class="muted small-text">${esc(s.instruction.slice(0, 300))}</div>` : ""}${s.report?.steps ? `<div class="muted small-text">${s.report.steps.map((x) => `${x.ok ? "✓" : "✕"} ${esc(x.name)}${x.samples ? ` (${x.samples})` : ""}${x.score != null ? ` ${x.killed}/${x.total}` : ""}`).join(" · ")}</div>` : ""}${(() => { const bad = (s.report?.steps || []).find((x) => !x.ok); return bad && (bad.log || bad.error || bad.mismatch) ? `<pre class="log">${esc(String(bad.error || bad.log || JSON.stringify(bad.mismatch)).slice(0, 900))}</pre>` : ""; })()}${s.error && !s.report ? `<pre class="log">${esc(String(s.error).slice(0, 600))}</pre>` : ""}</div>`).join("")}</div>
+      ${revs.length ? `<div class="small-text"><b>修订</b>${revs.map((x) => `<div class="muted small-text">rev ${x.rev} · ${esc(x.note || "")}${x.check?.mutation?.score != null ? ` · 变异 ${x.check.mutation.killed}/${x.check.mutation.total}` : ""}${x.check?.golden_vs_reference?.samples ? ` · 参考一致 ${x.check.golden_vs_reference.samples} 样本` : ""}</div>`).join("")}</div>` : ""}
+      <div class="row gap"><a class="small" href="/api/studio/${encodeURIComponent(r.id)}/spec" target="_blank">SPEC.md</a>${(r.files || []).filter((f) => !f.path.startsWith("README")).map((f) => `<a class="small" href="/api/studio/${encodeURIComponent(r.id)}/file/${encodeURIComponent(f.path)}" target="_blank">${esc(f.path)}</a>`).join("")}${r.status === "interrupted" ? `<button class="ghost small resume">继续</button>` : ""}${r.status === "registered" ? `<button class="ghost small torun">用它新建运行</button>` : ""}</div>
+    </div>`);
+    g.querySelector("button.resume")?.addEventListener("click", async () => { await post(`/studio/${r.id}/resume`, {}); renderStudiosView(); });
+    g.querySelector("button.torun")?.addEventListener("click", () => { show("new"); ext.fromDesign?.(r.design); });
+    g.querySelectorAll("a[href^='#']").forEach((x) => { x.onclick = (ev) => { ev.preventDefault(); const id = x.getAttribute("href").slice(1); location.hash = id; select(id); }; });
+    box.appendChild(g);
+  }
+  if (want) document.getElementById(`studio-${want}`)?.scrollIntoView({ block: "start" });
+  if (rows.some((r) => ["designing", "referencing", "checking", "revising"].includes(r.status) || r.running)) setTimeout(() => { if (view === "studios") renderStudiosView(); }, 8000);
 }
 
 let memWired = false;

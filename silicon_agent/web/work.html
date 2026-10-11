@@ -21,6 +21,7 @@
       <button id="open-catalog" class="nav">▦ 设计目录</button>
       <button id="open-bench" class="nav">▤ 回归基准</button>
       <button id="open-proposals" class="nav">⎇ 生成器提案 <span id="prop-count" class="muted"></span></button>
+      <button id="open-studios" class="nav">✎ 设计工作室 <span id="studio-count" class="muted"></span></button>
       <button id="open-memory" class="nav">◎ 设计记忆 <span id="mem-count" class="muted"></span></button>
     </nav>
     <div class="group">运行</div>
@@ -99,6 +100,7 @@
             <div class="menu-list" id="menu-list" hidden>
               <button id="act-fork">从最佳设计分叉…</button>
               <button id="act-compare">与其他运行比较…</button>
+              <button id="act-fork-studio">分叉到设计工作室…</button>
               <button id="act-package">下载交付包 (zip)</button>
               <button id="act-rerun">按同一规格重跑</button>
               <button id="act-delete" class="danger">删除运行</button>
@@ -151,6 +153,10 @@
       <div class="bar"><h1>设计目录</h1><span class="muted small-text">到目前为止实测过的每个生成器 × 器件：已验证的点（行为级 + 网表仿真通过、能放下）、Pareto 前沿上最快和最小的设计、最近一次运行。在对话里要一个已有器件上的设计，它会从这些点起步。</span></div>
       <div id="catalog-view" class="memlist"></div>
     </section>
+    <section id="studios" class="memview" hidden>
+      <div class="bar"><h1>设计工作室</h1><span class="muted small-text">生成器覆盖不到的块，或从某次运行的设计出发、在旋钮之外重构：设计师会话写 RTL 与 golden 模型，另一个看不到 RTL 的会话按规格写独立参考模型；RTL 必须在随机激励上与参考逐位一致、通过流协议属性、每个声明的旋钮值都通过、变异分数达标，才注册为 rtl:&lt;id&gt; 供运行使用。</span></div>
+      <div id="studios-view" class="memlist"></div>
+    </section>
     <section id="proposals" class="memview" hidden>
       <div class="bar"><h1>生成器提案</h1><span class="muted small-text">智能体以 diff 形式提出的生成器改动；每一份都经过门禁（发射并展开所有预设、行为级仿真、未改动 IR 的形式等价、变异分数），可选 A/B 实测。不会自动合并：由操作员执行 deploy/merge-proposal.sh &lt;id&gt;</span></div>
       <div id="proposals-view" class="memlist"></div>
@@ -158,6 +164,12 @@
   </main>
 </div>
 
+<dialog id="studio-dlg">
+  <h2>分叉到设计工作室</h2>
+  <div class="frow"><label class="f grow">从第几轮开始 <div class="iters" id="sf-iters"></div></label></div>
+  <div class="frow"><label class="f grow">目标（给设计师的简报：要改什么、为什么，带上实测数字） <textarea id="sf-brief" rows="4" spellcheck="false"></textarea></label></div>
+  <div class="actions"><button id="sf-cancel">取消</button><button id="sf-go" class="primary">分叉</button></div>
+</dialog>
 <dialog id="fork-dlg">
   <h2>分叉这个运行</h2>
   <div class="frow"><label class="f grow">从第几轮开始 <div class="iters" id="fk-iters"></div></label></div>

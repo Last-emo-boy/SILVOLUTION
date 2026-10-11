@@ -168,6 +168,16 @@ def _ports(bundle: dict, rev: int = 0) -> list[tuple[str, str, str]]:
     return out
 
 
+def _clog2(x) -> int:
+    """Verilog's $clog2 (its argument may be a true-division result such as 16/F)."""
+    x = int(round(x))
+    return 0 if x <= 1 else (x - 1).bit_length()
+
+
+# Verilog-flavoured helpers a bundle's expressions may use (the designer writes them like RTL parameters)
+_EXPR_FNS = {"clog2": _clog2, "max": max, "min": min, "abs": abs, "int": int, "ceil": lambda v: int(-(-v // 1)), "log2": lambda v: _clog2(v)}
+
+
 def header_params(text: str, top: str) -> dict:
     """{name: value} of the `parameter int X = <literal>` list in the top's header."""
     m = re.search(rf"\bmodule\s+{re.escape(top)}\b\s*#\s*\(((?:[^()]|\([^()]*\))*)\)", text, re.S)
@@ -188,8 +198,8 @@ def _resolve_width(t: str, env: dict) -> str:
         return t
     hi, _, lo = m.group(1).partition(":")
     try:
-        h = int(eval(hi, {"__builtins__": {}}, dict(env)))
-        l = int(eval(lo, {"__builtins__": {}}, dict(env))) if lo.strip() else 0
+        h = int(eval(hi.replace("$clog2", "clog2"), {"__builtins__": {}}, {**_EXPR_FNS, **env}))
+        l = int(eval(lo.replace("$clog2", "clog2"), {"__builtins__": {}}, {**_EXPR_FNS, **env})) if lo.strip() else 0
     except Exception:
         return t
     return t[:m.start()] + f"[{h}:{l}]" + t[m.end():]
@@ -198,16 +208,6 @@ def _resolve_width(t: str, env: dict) -> str:
 def _env(bundle: dict, a: RtlArch) -> dict:
     """The parameter values an expression of the bundle may refer to (defaults, then this IR's values)."""
     return {**{k: int(v.get("default", 0)) for k, v in (bundle.get("params") or {}).items()}, **a.params}
-
-
-def _clog2(x) -> int:
-    """Verilog's $clog2 (its argument may be a true-division result such as 16/F)."""
-    x = int(round(x))
-    return 0 if x <= 1 else (x - 1).bit_length()
-
-
-# Verilog-flavoured helpers a bundle's expressions may use (the designer writes them like RTL parameters)
-_EXPR_FNS = {"clog2": _clog2, "max": max, "min": min, "abs": abs, "int": int, "ceil": lambda v: int(-(-v // 1)), "log2": lambda v: _clog2(v)}
 
 
 def expr_value(expr, env: dict, default):
@@ -234,30 +234,62 @@ def throughput(bundle: dict, a: RtlArch) -> float:
 
 # ---------------------------------------------------------------- authored bundles: the reference and the generic bench
 def stream_of(bundle: dict, a: RtlArch) -> dict | None:
-    """The stream interface with widths and rate resolved for this IR, or None for a design that is not one stream."""
+    """The stream interface with widths and rate resolved for this IR, or None for a design that is not a stream.
+
+    The general form is a list of input fields and a list of output fields, each {"name", "width", "signed"}, all
+    presented on one accepted beat (inputs) / one valid beat (outputs): a complex sample is two fields, a
+    frame_start bit is an unsigned 1-bit field, a side-band coefficient is another field. The shorthand
+    {"in": "in_data", "out": "out_data", "in_width", "out_width"} is the one-field case.
+    """
     st = bundle.get("stream")
     if not st:
         return None
     env = _env(bundle, a)
-    return {"in": st.get("in", "in_data"), "out": st.get("out", "out_data"),
-            "in_width": int(expr_value(st.get("in_width"), env, 16)), "out_width": int(expr_value(st.get("out_width"), env, 16)),
-            "rate": int(expr_value(st.get("rate"), env, 1))}
+    def fields(key_list, key_one, key_w, dflt):
+        if st.get(key_list):
+            return [{"name": f.get("name", dflt), "width": int(expr_value(f.get("width"), env, 16)), "signed": bool(f.get("signed", True))} for f in st[key_list]]
+        return [{"name": st.get(key_one, dflt), "width": int(expr_value(st.get(key_w), env, 16)), "signed": True}]
+    ins = fields("inputs", "in", "in_width", "in_data")
+    outs = fields("outputs", "out", "out_width", "out_data")
+    return {"in": ins[0]["name"], "out": outs[0]["name"], "in_width": ins[0]["width"], "out_width": outs[0]["width"],
+            "inputs": ins, "outputs": outs, "in_bits": sum(f["width"] for f in ins), "out_bits": sum(f["width"] for f in outs),
+            "rate": int(expr_value(st.get("rate"), env, 1)), "valid_in": st.get("valid_in", "in_valid"), "ready": st.get("ready", "in_ready"),
+            "valid_out": st.get("valid_out", "out_valid")}
 
 
-def stimulus(a: RtlArch, dw: int, seed: int = 1, n: int = 200) -> tuple[list[int], list[int]]:
-    """Signed input samples and the idle gaps before each (the vectors.fir_vectors shape: extremes first, then random,
-    gaps in the first half only so the back-to-back half catches full-rate bugs)."""
+def _rand_field(rng, f: dict, extreme: int | None = None) -> int:
+    w = f["width"]
+    if f["signed"]:
+        lo, hi = -(1 << (w - 1)), (1 << (w - 1)) - 1
+    else:
+        lo, hi = 0, (1 << w) - 1
+    if extreme is not None:
+        return hi if extreme > 0 else lo
+    return rng.randint(lo, hi)
+
+
+def stimulus(st: dict | int, seed: int = 1, n: int = 200) -> tuple[list, list[int]]:
+    """Input beats and the idle gaps before each (the vectors.fir_vectors shape: extremes first, then random, gaps
+    in the first half only so the back-to-back half catches full-rate bugs). One field: a list of ints; several
+    fields: a list of dicts {name: value} (what the models receive)."""
     import random
     rng = random.Random(seed)
-    lo, hi = -(1 << (dw - 1)), (1 << (dw - 1)) - 1
-    xs = [hi] * 8 + [lo] * 8 + [rng.randint(lo, hi) for _ in range(n)]
+    if isinstance(st, int):
+        st = {"inputs": [{"name": "x", "width": st, "signed": True}]}
+    ins = st["inputs"]
+    one = len(ins) == 1
+    def beat(extreme=None):
+        vals = {f["name"]: _rand_field(rng, f, extreme if f["width"] > 1 else None) for f in ins}
+        return vals[ins[0]["name"]] if one else vals
+    xs = [beat(+1) for _ in range(8)] + [beat(-1) for _ in range(8)] + [beat() for _ in range(n)]
     gaps = [0 if i >= len(xs) - n // 2 else rng.choice([0, 0, 1, 3, 8]) for i in range(len(xs))]
     return xs, gaps
 
 
-def run_model(code: str, params: dict, xs: list[int], cwd: Path, timeout: int = 60, name: str = "reference") -> list[int]:
+def run_model(code: str, params: dict, xs: list, cwd: Path, timeout: int = 60, name: str = "reference") -> list:
     """Run a model (`def reference(params, xs)` or `def golden(params, xs)`) in a separate, isolated interpreter
-    (`python -I`: no site, no env), with a time limit. The code was written by a model; it never runs in the server."""
+    (`python -I`: no site, no env), with a time limit. The code was written by a model; it never runs in the server.
+    Outputs are ints (one field) or dicts {name: int} (several fields)."""
     import subprocess
     import sys
     import tempfile
@@ -273,7 +305,7 @@ def run_model(code: str, params: dict, xs: list[int], cwd: Path, timeout: int = 
         f"fn = ns.get({name!r}) or ns.get('reference') or ns.get('golden')\n"
         "if fn is None: raise SystemExit('no reference()/golden() defined')\n"
         "out = fn(d['params'], d['xs'])\n"
-        "json.dump([int(v) for v in out], open('out.json', 'w'))\n"
+        "json.dump([({k: int(v) for k, v in o.items()} if isinstance(o, dict) else int(o)) for o in out], open('out.json', 'w'))\n"
     )
     p = subprocess.run([sys.executable, "-I", "-c", driver], cwd=src, capture_output=True, text=True, timeout=timeout)
     if p.returncode != 0:
@@ -281,12 +313,30 @@ def run_model(code: str, params: dict, xs: list[int], cwd: Path, timeout: int = 
     return json.loads((src / "out.json").read_text())
 
 
-def compare_models(golden: str, reference: str, params: dict, dw: int, cwd: Path, seeds: tuple[int, ...] = (1, 2, 3)) -> dict:
+def _pack(vals, fields: list[dict]) -> int:
+    """Fields packed MSB-first in declaration order into one word (the first field is the most significant)."""
+    word = 0
+    for f in fields:
+        v = vals[f["name"]] if isinstance(vals, dict) else vals
+        word = (word << f["width"]) | (int(v) & ((1 << f["width"]) - 1))
+    return word
+
+
+def _norm_out(o, fields: list[dict]):
+    """A model output normalised to the output fields' widths (masked), for comparison."""
+    if isinstance(o, dict):
+        return {f["name"]: int(o.get(f["name"], 0)) & ((1 << f["width"]) - 1) for f in fields}
+    return int(o) & ((1 << fields[0]["width"]) - 1)
+
+
+def compare_models(golden: str, reference: str, params: dict, st: dict | int, cwd: Path, seeds: tuple[int, ...] = (1, 2, 3)) -> dict:
     """The designer's golden against the independent reference, Python against Python, before any EDA time is
     spent: {"agree", "samples", "mismatch": {"seed", "index", "golden", "reference"} | None, "error"}."""
+    if isinstance(st, int):
+        st = {"inputs": [{"name": "x", "width": st, "signed": True}], "outputs": [{"name": "y", "width": 64, "signed": True}]}
     total = 0
     for seed in seeds:
-        xs, _ = stimulus(RtlArch(), dw, seed)
+        xs, _ = stimulus(st, seed)
         try:
             g = run_model(golden, params, xs, cwd, name="golden")
             r = run_model(reference, params, xs, cwd, name="reference")
@@ -294,7 +344,7 @@ def compare_models(golden: str, reference: str, params: dict, dw: int, cwd: Path
             return {"agree": False, "samples": total, "mismatch": None, "error": str(e)[-800:]}
         n = min(len(g), len(r))
         for i in range(n):
-            if g[i] != r[i]:
+            if _norm_out(g[i], st["outputs"]) != _norm_out(r[i], st["outputs"]):
                 return {"agree": False, "samples": total + i, "mismatch": {"seed": seed, "index": i, "golden": g[i], "reference": r[i]}, "error": None}
         if len(g) != len(r):
             return {"agree": False, "samples": total + n, "mismatch": {"seed": seed, "index": n, "golden": len(g), "reference": len(r), "note": "output counts differ"}, "error": None}
@@ -304,37 +354,86 @@ def compare_models(golden: str, reference: str, params: dict, dw: int, cwd: Path
 
 def vectors(bundle: dict, a: RtlArch, seed: int = 1, cwd: Path | None = None) -> tuple[list[str], list[str]]:
     """stim/exp lines for the generic vector bench of a stream bundle; the expected outputs come from the bundle's
-    reference (an independent model, or the generator the design was forked from), never from the RTL's author."""
-    st = stream_of(bundle, a)
-    if not st:
-        raise ValueError("not a stream bundle")
+    reference (an independent model, or the generator the design was forked from), never from the RTL's author.
+    A stim line is `<gap> <packed inputs>`, an exp line the packed outputs (fields MSB-first in declaration order)."""
     ref = bundle.get("reference") or {}
     if ref.get("kind") == "generator":
         from .designs import DESIGNS
         o = ref["origin"]
         d = DESIGNS[o["design"]]
         return d.vectors(d.ir_cls.from_dict(o["ir"]), seed=seed)
+    st = stream_of(bundle, a)
+    if not st:
+        raise ValueError("not a stream bundle")
     if ref.get("kind") != "independent" or not ref.get("code"):
         raise ValueError("the bundle has no reference model")
-    dw, ow = st["in_width"], st["out_width"]
-    xs, gaps = stimulus(a, dw, seed)
+    xs, gaps = stimulus(st, seed)
     work = cwd or Path(bundle.get("dir") or ".") / "ref-cache"
     ys = run_model(ref["code"], _env(bundle, a), xs, work)
-    stim = [f"{g:x} {x & ((1 << dw) - 1):0{max(1, (dw + 3) // 4)}x}" for g, x in zip(gaps, xs)]
-    exp = [f"{y & ((1 << ow) - 1):0{max(1, (ow + 3) // 4)}x}" for y in ys]
+    iw, ow = max(1, (st["in_bits"] + 3) // 4), max(1, (st["out_bits"] + 3) // 4)
+    stim = [f"{g:x} {_pack(x, st['inputs']):0{iw}x}" for g, x in zip(gaps, xs)]
+    exp = [f"{_pack(y, st['outputs']):0{ow}x}" for y in ys]
     return stim, exp
 
 
 def stream_tb(bundle: dict, a: RtlArch, period: float) -> str:
     """The generic replay bench (vectors.TB_FIR) aimed at this bundle's top and stream ports: stimulus on negedge,
-    outputs sampled 3/4 period after posedge, so it also runs on SDF-annotated netlists."""
+    outputs sampled 3/4 period after posedge, so it also runs on SDF-annotated netlists. Several fields are packed
+    into one stim/exp word and unpacked onto the ports here."""
     from .vectors import TB_FIR
     st = stream_of(bundle, a)
     drain = 300 + 4 * max(latency_cycles(bundle, a), 1) * max(st["rate"], 1)
-    tb = (TB_FIR.replace("fir_top dut(.clk, .rst, .in_valid, .in_data, .in_ready, .out_valid, .out_data{COEF_TIE});",
-                         f"{bundle['top']} dut(.clk(clk), .rst(rst), .in_valid(in_valid), .{st['in']}(in_data), .in_ready(in_ready), .out_valid(out_valid), .{st['out']}(out_data));")
+    ins, outs = st["inputs"], st["outputs"]
+    # port connections: in_data / out_data are the packed words; each field is a slice of them
+    conn_in = []
+    hi = st["in_bits"] - 1
+    for f in ins:
+        conn_in.append(f".{f['name']}(in_data[{hi}:{hi - f['width'] + 1}])" if st["in_bits"] > 1 or len(ins) > 1 else f".{f['name']}(in_data)")
+        hi -= f["width"]
+    conn_out = []
+    hi = st["out_bits"] - 1
+    for f in outs:
+        conn_out.append(f".{f['name']}(out_data[{hi}:{hi - f['width'] + 1}])" if st["out_bits"] > 1 or len(outs) > 1 else f".{f['name']}(out_data)")
+        hi -= f["width"]
+    ready = f".{st['ready']}(in_ready)" if st.get("ready") else ""
+    inst = f"{bundle['top']} dut(.clk(clk), .rst(rst), .{st['valid_in']}(in_valid), {', '.join(conn_in)}, {ready + ', ' if ready else ''}.{st['valid_out']}(out_valid), {', '.join(conn_out)});"
+    tb = (TB_FIR.replace("fir_top dut(.clk, .rst, .in_valid, .in_data, .in_ready, .out_valid, .out_data{COEF_TIE});", inst)
           .replace("repeat (300) @(posedge clk);", f"repeat ({drain}) @(posedge clk);"))
-    return tb.format(DW=st["in_width"], AW=st["out_width"], period=period, COEF_TIE="")
+    if not st.get("ready"):
+        # a design without back-pressure: the bench's in_ready is a constant 1
+        tb = tb.replace("wire in_ready, out_valid;", "wire out_valid; wire in_ready = 1'b1;")
+    return tb.format(DW=st["in_bits"], AW=st["out_bits"], period=period, COEF_TIE="")
+
+
+def bench_of(bundle: dict, a: RtlArch, period: float) -> str:
+    """The testbench of a bundle: the generator's own bench for a fork (its vectors carry its own fields and
+    protocol), the generic replay bench for an independently referenced stream, the user's bench otherwise."""
+    ref = bundle.get("reference") or {}
+    if ref.get("kind") == "generator":
+        from .designs import DESIGNS
+        o = ref["origin"]
+        d = DESIGNS[o["design"]]
+        return d.tb(d.ir_cls.from_dict(o["ir"]), period)
+    if bundle.get("stream"):
+        return stream_tb(bundle, a, period)
+    t = bundle.get("tb") or ""
+    return re.sub(r"parameter\s+real\s+PERIOD\s*=\s*[\d.]+", f"parameter real PERIOD = {period}", t)
+
+
+def design_of(bundle: dict, cwd: Path | None = None):
+    """The registry Design for a bundle (uploaded or authored)."""
+    from .designs import Design, DESIGNS
+    A = arch_class(bundle)
+    ref = bundle.get("reference") or {}
+    extra = ("mult18x18d_sim.v",)
+    if ref.get("kind") == "generator" and ref["origin"]["design"] in DESIGNS:
+        extra = tuple(sorted(set(extra) | set(DESIGNS[ref["origin"]["design"]].extra_sim_sources)))
+    has_vectors = bool(bundle.get("stream")) or ref.get("kind") == "generator"
+    return Design(kind=f"rtl:{bundle['id']}", ir_cls=A, top=bundle["top"], emit=lambda a, backend="ecp5": emit(bundle, a, backend), test_module=None,
+                  sim_env=lambda a: {}, throughput=lambda a: throughput(bundle, a), throughput_unit=bundle.get("throughput_unit", "items/cycle"),
+                  latency=lambda a: latency_cycles(bundle, a), extra_sim_sources=extra,
+                  vectors=(lambda a, seed=1: vectors(bundle, a, seed=seed, cwd=cwd)) if has_vectors else None,
+                  tb=lambda a, period: bench_of(bundle, a, period))
 
 
 def ir_schema(bundle: dict) -> str:

@@ -41,6 +41,9 @@ from .backends._common import ROOT, tool_env
 STUDIO = ROOT / "studio"
 RTL_DIR = ROOT / "rtl"
 MAX_ROUNDS = int(os.environ.get("SA_STUDIO_ROUNDS", "3"))
+# registration gate on the bench's strength: at least this share of compilable mutants of the RTL must be caught by
+# the behavioral check (the reference's vectors / the generator's bench); 0 disables the gate
+MUTATION_MIN = float(os.environ.get("SA_STUDIO_MUTATION_MIN", "0.6"))
 _lock = threading.Lock()
 
 README = """Design studio working directory (silicon-agent).
@@ -126,19 +129,42 @@ def new(brief: str, *, name: str | None = None, thread: str | None = None, subje
 
 
 # ---------------------------------------------------------------- fork: a generator's design, out of its knobs
-FORKABLE = ("fir", "decim", "cic", "iir", "fir_chain")   # single stream in/out, the TB_FIR bench family
+def _port_fields(ports: dict) -> tuple[list[dict], list[dict], dict]:
+    """Split a generator top's ports into the stream's input fields, output fields and the control names
+    (valid in / ready / valid out). Widths must already be literal ([hi:lo])."""
+    ctrl = {"valid_in": "in_valid", "ready": None, "valid_out": "out_valid"}
+    ins, outs = [], []
+    for n, (dd, t) in ports.items():
+        if n in ("clk", "rst"):
+            continue
+        if dd == "input" and n == "in_valid":
+            continue
+        if dd == "output" and n == "out_valid":
+            continue
+        if dd == "output" and n in ("in_ready", "busy"):
+            ctrl["ready"] = n if n == "in_ready" else None   # matmul's `busy` is not a ready: the bench drives at full rate
+            continue
+        m = re.search(r"\[(\d+):(\d+)\]", t)
+        if not m and "[" in t:
+            raise ValueError(f"port {n} has a width the fork cannot resolve: {t}")
+        w = abs(int(m.group(1)) - int(m.group(2))) + 1 if m else 1
+        f = {"name": n, "width": str(w), "signed": "signed" in t}
+        (ins if dd == "input" else outs).append(f)
+    return ins, outs, ctrl
 
 
 def fork(job: dict, iteration: int | None = None, *, brief: str = "", name: str | None = None, thread: str | None = None,
          subject: str = "", project: str | None = None) -> dict:
     """A studio seeded with one iteration's RTL (the summary's best when `iteration` is None): the reference is the
-    generator's own vectors for that IR, so the function is frozen and the designer is free to restructure."""
+    generator's own vectors for that IR, so the function is frozen and the designer is free to restructure. Works
+    for every generator: the interface is read from the emitted top's ports (one accepted beat of input fields,
+    one valid beat of output fields) and the generator's bench replays its own vectors."""
     from .designs import DESIGNS
     from .prompts import prompts_for
     spec = job["spec"]
     kind = spec.get("design", "matmul")
-    if kind not in FORKABLE:
-        raise ValueError(f"forking is available for {', '.join(FORKABLE)} designs; {kind} is not one (its bench is not a single stream)")
+    if kind.startswith("rtl:"):
+        raise ValueError("this run is already on a studio / BYO design: revise it (sa_studio_revise) instead of forking")
     d = DESIGNS[kind]
     results = [e for e in job.get("events", []) if e.get("kind") == "result"]
     if iteration is None:
@@ -155,33 +181,30 @@ def fork(job: dict, iteration: int | None = None, *, brief: str = "", name: str 
     backend = spec.get("backend", "ecp5")
     text = d.emit(ir, backend=backend)
     ports = {n: (dd, t) for dd, t, n in _rtl._ports({"top": d.top, "files": {"x.sv": text}})}
-    inp = next((n for n, (dd, t) in ports.items() if dd == "input" and n not in ("clk", "rst", "in_valid")), "in_data")
-    outp = next((n for n, (dd, t) in ports.items() if dd == "output" and n not in ("in_ready", "out_valid")), "out_data")
-
-    def width(t: str) -> int:
-        m = re.search(r"\[(\d+):(\d+)\]", t)
-        if not m:
-            raise ValueError(f"cannot resolve the width of a port declared `{t}`")
-        return abs(int(m.group(1)) - int(m.group(2))) + 1
-    in_w, out_w = width(ports[inp][1]), width(ports[outp][1])
-    rate = int(round(1 / max(d.throughput(ir), 1e-9))) if kind in ("decim",) else (ir_d.get("decim", 1) if kind == "cic" else 1)
+    ins, outs, ctrl = _port_fields(ports)
+    tp = d.throughput(ir)
+    rate = int(round(1 / tp)) if 0 < tp < 1 and abs(1 / tp - round(1 / tp)) < 1e-6 else (ir_d.get("decim", 1) if kind == "cic" else 1)
     frozen = {k: v for k, v in ir.to_dict().items() if k != "coefs"}
     what = prompts_for(kind)["what"]
     task = spec.get("task", kind)
+    iface = (" + ".join(f"{f['name']} ({f['width']} bits{' signed' if f['signed'] else ''})" for f in ins) + " -> " +
+             " + ".join(f"{f['name']} ({f['width']} bits{' signed' if f['signed'] else ''})" for f in outs))
     spec_md = (f"# {task}\n\n"
                f"Forked from run {job.get('id', '?')}, {label}: {what}.\n\n"
                f"## Function (frozen)\nThe block must compute exactly what the generator's RTL computes for this IR -- same outputs for the same inputs, "
-               f"in order, one output per {rate} accepted input(s). Interface: in_valid/in_ready/{inp} ({in_w} bits signed) -> out_valid/{outp} ({out_w} bits signed), "
-               f"synchronous active-high reset. The expected outputs in every check are the generator's own vectors for this IR.\n\n"
+               f"in order. Interface: {ctrl['valid_in']}{'/' + ctrl['ready'] if ctrl['ready'] else ' (no back-pressure: the source may push every cycle)'} with {iface}, "
+               f"{ctrl['valid_out']} marks each output beat; synchronous active-high reset. The expected outputs in every check are the generator's own "
+               f"test vectors for this IR, replayed by the generator's own bench, so the port names, widths and the beat protocol must stay exactly as they are.\n\n"
                f"## The design to start from\n`work/rtl/{d.top}.sv` is the generator's output for IR {json.dumps(frozen)}. "
                f"Its structure is free to change (pipelining, resource sharing, a different architecture) as long as the function and the interface hold.\n\n"
                f"## Goal\n{brief.strip() or 'Improve the design beyond what the IR knobs allow; say in design.json which parameters remain tunable.'}\n")
     rec = new(brief or f"fork of {task}", name=name or f"{task} (studio)", thread=thread, subject=subject, spec_text=spec_md, project=project)
     w = _dir(rec["id"]) / "work"
     (w / "rtl" / f"{d.top}.sv").write_text(text)
+    stream = {"inputs": ins, "outputs": outs, "rate": str(rate), "valid_in": ctrl["valid_in"], "valid_out": ctrl["valid_out"], **({"ready": ctrl["ready"]} if ctrl["ready"] else {})}
     (w / "design.json").write_text(json.dumps({
-        "top": d.top, "params": {}, "stream": {"in": inp, "out": outp, "in_width": str(in_w), "out_width": str(out_w), "rate": str(rate)},
-        "latency": str(int(d.latency(ir))), "throughput": str(d.throughput(ir)), "throughput_unit": d.throughput_unit,
+        "top": d.top, "params": {}, "stream": stream,
+        "latency": str(int(d.latency(ir))), "throughput": str(tp), "throughput_unit": d.throughput_unit,
         "description": f"{task} -- forked from {kind} {label}"}, indent=1))
     rec["origin"] = {"job": job.get("id"), "iteration": iteration, "design": kind, "backend": backend, "ir": ir.to_dict(), "label": label}
     rec["reference"] = {"kind": "generator", "origin": {"design": kind, "ir": ir.to_dict()}, "code": None}
@@ -288,17 +311,15 @@ def check(rec: dict, params: dict | None = None, files: dict | None = None, tag:
         rep["steps"].append({"name": "parameters", "ok": False, "error": "; ".join(errs), "seconds": 0})
         rep["ok"] = False
         return rep
-    d = Design(kind=f"rtl:{sid}", ir_cls=A, top=bundle["top"], emit=lambda x, backend="ecp5": _rtl.emit(bundle, x, backend), test_module=None,
-               sim_env=lambda x: {}, throughput=lambda x: _rtl.throughput(bundle, x), throughput_unit=bundle.get("throughput_unit", ""),
-               latency=lambda x: _rtl.latency_cycles(bundle, x), extra_sim_sources=("mult18x18d_sim.v",),
-               vectors=(lambda x, seed=1: _rtl.vectors(bundle, x, seed=seed, cwd=_dir(sid) / "ref-cache")) if bundle.get("stream") else None,
-               tb=(lambda x, period: _rtl.stream_tb(bundle, x, period)) if bundle.get("stream") else (lambda x, period: bundle["tb"]))
+    d = _rtl.design_of(bundle, cwd=_dir(sid) / "ref-cache")
     text = d.emit(a)
     (cdir / "rtl").mkdir()
     (cdir / "rtl" / f"{d.top}.sv").write_text(text)
 
     def elaborate():
-        p = subprocess.run(["iverilog", "-g2012", "-s", d.top, "-o", str(cdir / "elab.out"), str(cdir / "rtl" / f"{d.top}.sv")], capture_output=True, text=True, env=tool_env(), timeout=300)
+        from .backends._common import TB_DIR
+        srcs = [str(cdir / "rtl" / f"{d.top}.sv")] + [str(TB_DIR / f) for f in d.extra_sim_sources]
+        p = subprocess.run(["iverilog", "-g2012", "-s", d.top, "-o", str(cdir / "elab.out"), *srcs], capture_output=True, text=True, env=tool_env(), timeout=300)
         return {"ok": p.returncode == 0, "log": (p.stderr or p.stdout)[-1500:], "lines": text.count("\n")}
     if not run("elaborate (iverilog)", elaborate)["ok"]:
         rep["seconds"] = round(time.time() - t_all, 1)
@@ -308,17 +329,19 @@ def check(rec: dict, params: dict | None = None, files: dict | None = None, tag:
     ref = rec.get("reference") or {}
     if st and bundle.get("golden") and ref.get("kind") == "independent" and ref.get("code"):
         def models():
-            r = _rtl.compare_models(bundle["golden"], ref["code"], _rtl._env(bundle, a), st["in_width"], _dir(sid) / "ref-cache")
+            r = _rtl.compare_models(bundle["golden"], ref["code"], _rtl._env(bundle, a), st, _dir(sid) / "ref-cache")
             return {"ok": r["agree"], **r}
         run("golden vs independent reference", models)
-    if st and ref.get("kind") == "generator" and bundle.get("golden"):
+    if st and ref.get("kind") == "generator" and bundle.get("golden") and len(st["inputs"]) == 1 and len(st["outputs"]) == 1 and len((_rtl.vectors(bundle, a, seed=1)[0][0] or "").split()) == 2:
+        # a one-field stream forked from a generator whose bench lines are `<gap> <sample>`: the designer's golden
+        # can be checked against the generator's vectors directly (other benches carry extra fields per line)
         def models_gen():
             stim, exp = _rtl.vectors(bundle, a, seed=1)
             xs = [int(l.split()[-1], 16) for l in stim]
             xs = [v - (1 << st["in_width"]) if v >> (st["in_width"] - 1) else v for v in xs]
             got = _rtl.run_model(bundle["golden"], _rtl._env(bundle, a), xs, _dir(sid) / "ref-cache", name="golden")
             want = [int(l, 16) for l in exp]
-            gm = [v & ((1 << st["out_width"]) - 1) for v in got]
+            gm = [int(v) & ((1 << st["out_width"]) - 1) for v in got]
             i = next((k for k, (x, y) in enumerate(zip(gm, want)) if x != y), None)
             ok = i is None and len(gm) == len(want)
             return {"ok": ok, "samples": len(want), **({} if ok else {"mismatch": {"index": i if i is not None else min(len(gm), len(want)), "golden": gm[i] if i is not None else len(gm), "reference": want[i] if i is not None else len(want)}})}
@@ -368,17 +391,42 @@ def check_knobs(rec: dict, files: dict | None = None, tag: str = "knobs") -> dic
     return out
 
 
+def check_mutation(rec: dict, files: dict | None = None, limit: int = 16) -> dict:
+    """The strength of the check itself: inject bugs into the RTL (mutate.py) and count how many the behavioral
+    check catches. A weak reference (too few samples, no corner) lets mutants through; the gate asks for MUTATION_MIN."""
+    from . import mutate
+    b = {**bundle_of(rec, files), "revisions": [], "files": files or work_files(rec["id"])}
+    d = _rtl.design_of(b, cwd=_dir(rec["id"]) / "ref-cache")
+    a = d.ir_cls.from_dict({})
+    r = mutate.score(d, a, d.emit(a), work=_dir(rec["id"]) / "checks" / "mutation", limit=limit, budget_s=240)
+    ok = r.get("score") is None and r.get("baseline") is not False or (r.get("score") or 0) >= MUTATION_MIN
+    return {"ok": bool(ok), **{k: r.get(k) for k in ("total", "killed", "survived", "score", "uncompilable", "baseline", "error")}}
+
+
+def _gate(rec: dict, files: dict, tag: str) -> dict:
+    """The full registration gate: the check at the defaults, every declared knob value, the mutation score."""
+    rep = check(rec, files=files, tag=tag)
+    if not rep["ok"]:
+        return rep
+    kn = check_knobs(rec, files=files, tag=f"{tag}-knob")
+    rep["steps"].append({"name": "declared knobs (each tunable parameter at its other values)", "ok": kn["ok"], "points": kn["points"],
+                         **({} if kn["ok"] else {"error": "a declared knob value does not pass: fix the RTL/golden for it, or narrow the parameter's range in design.json: " + "; ".join(f"{p['params']} -> {p.get('failed')}" for p in kn["points"] if not p["ok"])})})
+    rep["ok"] = rep["ok"] and kn["ok"]
+    if rep["ok"] and MUTATION_MIN > 0:
+        mu = check_mutation(rec, files=files)
+        rep["steps"].append({"name": f"mutation score of the check (>= {MUTATION_MIN:.0%} of injected bugs caught)", **mu,
+                             **({} if mu["ok"] else {"error": f"the check lets too many injected bugs through ({mu.get('killed')}/{mu.get('total')} caught; survivors: {', '.join((mu.get('survived') or [])[:6])}): "
+                                                               "the stimulus misses the cases those mutants break -- sharpen SPEC.md's corner cases (the reference is regenerated), or the design has dead logic a mutant can flip without effect (remove it)"})})
+        rep["ok"] = rep["ok"] and mu["ok"]
+    return rep
+
+
 def register(rec: dict, note: str = "initial design") -> dict:
-    """The working directory becomes revision 0 of a registered bundle (design kind rtl:<id>); its check must pass
-    at the defaults and at the other declared knob values."""
+    """The working directory becomes revision 0 of a registered bundle (design kind rtl:<id>); it must pass the
+    gate: the check at the defaults and at every declared knob value, and the mutation score."""
     from .designs import register_rtl
     files = work_files(rec["id"])
-    rep = check(rec, files=files, tag="register")
-    if rep["ok"]:
-        kn = check_knobs(rec, files=files, tag="register-knob")
-        rep["steps"].append({"name": "declared knobs (each tunable parameter at its other values)", "ok": kn["ok"], "points": kn["points"],
-                             **({} if kn["ok"] else {"error": "a declared knob value does not pass: fix the RTL/golden for it, or narrow the parameter's range in design.json: " + "; ".join(f"{p['params']} -> {p.get('failed')}" for p in kn["points"] if not p["ok"])})})
-        rep["ok"] = rep["ok"] and kn["ok"]
+    rep = _gate(rec, files, "register")
     if not rep["ok"]:
         return {"ok": False, "check": rep}
     b = bundle_of(rec, files)
@@ -410,12 +458,7 @@ def add_revision(rec: dict, note: str) -> dict:
     if any(r["files"] == files for r in b["revisions"]):
         return {"ok": False, "error": "the working copy is identical to an existing revision"}
     n = len(b["revisions"])
-    rep = check(rec, files=files, tag=f"rev{n}")
-    if rep["ok"]:
-        kn = check_knobs(rec, files=files, tag=f"rev{n}-knob")
-        rep["steps"].append({"name": "declared knobs (each tunable parameter at its other values)", "ok": kn["ok"], "points": kn["points"],
-                             **({} if kn["ok"] else {"error": "a declared knob value does not pass: " + "; ".join(f"{p['params']} -> {p.get('failed')}" for p in kn["points"] if not p["ok"])})})
-        rep["ok"] = rep["ok"] and kn["ok"]
+    rep = _gate(rec, files, f"rev{n}")
     if not rep["ok"]:
         return {"ok": False, "check": rep}
     # the designer may have changed design.json too (new knobs, latency); the bundle follows it
@@ -436,8 +479,10 @@ def _brief(rep: dict) -> dict:
     ref = next((s for s in rep["steps"] if s["name"].startswith("golden vs")), None)
     sim = next((s for s in rep["steps"] if s["name"].startswith("behavioral")), None)
     pr = next((s for s in rep["steps"] if s["name"].startswith("stream properties")), None)
+    mu = next((s for s in rep["steps"] if s["name"].startswith("mutation score")), None)
     return {"ok": rep["ok"], "golden_vs_reference": {"ok": ref["ok"], "samples": ref.get("samples")} if ref else None,
-            "sim": sim["ok"] if sim else None, "properties": pr["ok"] if pr else None, "seconds": rep.get("seconds")}
+            "sim": sim["ok"] if sim else None, "properties": pr["ok"] if pr else None,
+            "mutation": {"killed": mu.get("killed"), "total": mu.get("total"), "score": mu.get("score")} if mu else None, "seconds": rep.get("seconds")}
 
 
 def file_listing(sid: str) -> list[dict]:

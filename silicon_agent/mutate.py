@@ -97,24 +97,32 @@ def mutants(rtl: str, limit: int = 24) -> list[tuple[str, str]]:
     return out
 
 
-def score(d: Design, ir, rtl: str, work: Path | None = None, limit: int = 24) -> dict:
+def score(d: Design, ir, rtl: str, work: Path | None = None, limit: int = 24, budget_s: float | None = None) -> dict:
     """Run the behavioral testbench on every mutant. Returns killed/survived counts, the survivors (where the
-    bench is blind) and the mutants that did not compile (not counted)."""
+    bench is blind) and the mutants that did not compile (not counted). A mutant's simulation gets a few times
+    the baseline's wall time (a stalled stream is a killed mutant, not a long wait); `budget_s` caps the whole run."""
+    import time
     from . import eda
     work = work or Path(tempfile.mkdtemp(prefix="sa_mut_"))
     res = {"total": 0, "killed": 0, "survived": [], "uncompilable": 0}
     # a bench that fails on the unmutated RTL "kills" every mutant: no score, say why
     (work / "baseline" / "rtl").mkdir(parents=True, exist_ok=True)
     (work / "baseline" / "rtl" / f"{d.top}.sv").write_text(rtl)
+    t0 = time.time()
     ok, log, _ = eda.simulate(d, ir, work / "baseline", timeout=240)
+    base_s = time.time() - t0
     if not ok:
         return {**res, "score": None, "baseline": False, "error": "the testbench fails on the unmutated RTL: " + log[-300:].strip()}
+    per = max(20, min(240, int(6 * base_s + 10)))
     for label, text in mutants(rtl, limit):
+        if budget_s is not None and time.time() - t0 > budget_s:
+            res["truncated"] = True
+            break
         w = work / re.sub(r"[^\w]", "_", label)
         (w / "rtl").mkdir(parents=True, exist_ok=True)
         (w / "rtl" / f"{d.top}.sv").write_text(text)
         # a mutant that stalls the stream hangs the bench: the short timeout counts it as killed
-        ok, log, _ = eda.simulate(d, ir, w, timeout=240)
+        ok, log, _ = eda.simulate(d, ir, w, timeout=per)
         if not ok and ("error:" in log.lower() or "CalledProcessError" in log) and "COCOTB_RESULT" not in log:
             res["uncompilable"] += 1
             continue

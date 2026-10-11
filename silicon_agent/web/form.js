@@ -14,7 +14,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     ds.innerHTML = Object.entries(schema.designs).map(([k, v]) => `<option value="${k}">${k} · ${esc(v.title)}</option>`).join("");
     bs.innerHTML = Object.entries(schema.backends).map(([k, v]) => `<option value="${k}">${k} · ${esc(v)}</option>`).join("");
     ds.onchange = () => loadDefaults(ds.value, form.backend);
-    bs.onchange = () => { form.backend = bs.value; renderKnobs(); estimate(); };
+    bs.onchange = () => { form.backend = bs.value; if (String(form.design).startsWith("rtl:")) fromDesign(form.design); else renderKnobs(); estimate(); };
     $("#nf-task").oninput = (e) => { form.task = e.target.value; };
     $("#nf-cons").querySelectorAll("input").forEach((i) => { i.oninput = () => { const v = i.value === "" ? null : Number(i.value); if (v == null) delete form.constraints[i.dataset.c]; else form.constraints[i.dataset.c] = v; estimate(); }; });
     $("#nf-json-toggle").onclick = () => { const on = $("#nf-json").hidden; $("#nf-json").hidden = !on; $("#nf-form").hidden = on; $("#nf-json-toggle").textContent = on ? "编辑表单 ▸" : "编辑 JSON ▸"; if (on) $("#spec").value = JSON.stringify(toSpec(), null, 2); };
@@ -49,6 +49,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
   function toSpec() {
     const c = { ...form.constraints, objective: [...form.objective] };
     const spec = { task: form.task || `${form.design} · ${c.fmax_mhz} MHz`, design: form.design, backend: form.backend, locked: { ...form.locked }, constraints: c, initial_ir: { ...form.initial_ir } };
+    if (String(form.design).startsWith("rtl:")) { spec.locked = {}; }
     if (!$("#usemem").checked) spec.no_memory = true;
     return spec;
   }
@@ -71,6 +72,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
   function renderLocked() {
     const box = $("#nf-locked"); box.innerHTML = "";
     const d = schema.designs[form.design];
+    if (!d) return;   // a studio / BYO kind: no schema entry (fromDesign draws its note)
     for (const [k, v] of Object.entries(form.locked)) {
       const chip = el(`<span class="lockchip">🔒 ${esc(k)} = ${esc(JSON.stringify(v))} <button title="解除固定">×</button></span>`);
       chip.querySelector("button").onclick = () => { delete form.locked[k]; renderLocked(); renderKnobs(); };
@@ -87,6 +89,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
   function renderPresets() {
     const box = $("#nf-presets"); box.innerHTML = "";
     const d = schema.designs[form.design];
+    if (!d) return;   // a studio / BYO kind: no schema entry (fromDesign draws its note)
     for (const [name, ir] of Object.entries(d.presets)) {
       const b = el(`<button class="preset ${JSON.stringify({ ...ir, ...form.locked }) === JSON.stringify({ ...form.initial_ir, ...form.locked }) ? "on" : ""}">${esc(name)}</button>`);
       b.onclick = () => { form.initial_ir = { ...ir, ...form.locked }; renderPresets(); renderKnobs(); estimate(); };
@@ -99,6 +102,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
   function renderKnobs() {
     const box = $("#nf-knobs"); box.innerHTML = "";
     const d = schema.designs[form.design];
+    if (!d) return;   // a studio / BYO kind: no schema entry (fromDesign draws its note)
     for (const f of d.fields) {
       if (f.backends && !f.backends.includes(form.backend)) continue;
       const locked = f.name in form.locked;
@@ -170,6 +174,29 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     $("#act-rerun").onclick = async () => { const d = state.detail; if (!d) return; const r = await post("/jobs", { spec: { ...d.spec, task: (d.spec.task || "") + " (re-run)" }, max_iter: d.max_iter || 8, thread: state.thread || undefined }); await refreshJobs(); select(r.id); };
     $("#act-delete").onclick = async () => { if (!state.selected || !confirm("删除这个运行及其产物？")) return; await api(`/jobs/${state.selected}`, { method: "DELETE" }); await refreshJobs(); show("empty"); };
     $("#act-compare").onclick = () => openCompare(state.selected);
+    // fork to the design studio: the designer session restructures this run's design beyond its knobs
+    $("#act-fork-studio").onclick = () => {
+      const d = state.detail; if (!d) return;
+      const results = d.events.filter((e) => e.kind === "result");
+      const best = d.summary?.best;
+      const dlg = $("#studio-dlg"), iters = $("#sf-iters"); iters.innerHTML = "";
+      let pick = best ? null : (results.at(-1)?.iteration ?? null);
+      const paint = () => iters.querySelectorAll("button").forEach((b) => b.classList.toggle("on", (b.dataset.i === "" ? null : Number(b.dataset.i)) === pick));
+      if (best) { const b = el(`<button data-i="">最佳（可行）</button>`); b.onclick = () => { pick = null; paint(); }; iters.appendChild(b); }
+      for (const r of results) { const b = el(`<button data-i="${r.iteration}" title="${esc(r.violations.join("; ") || "可行")}">${r.iteration}${r.slot ? "." + r.slot : ""} · ${fmt(r.metrics.fmax_mhz, 0)} MHz${r.violations.length ? " ✗" : " ✓"}</button>`); b.onclick = () => { pick = r.iteration; paint(); }; iters.appendChild(b); }
+      paint();
+      const m = best?.metrics, cp = (m?.critical_path || [])[0];
+      $("#sf-brief").value = best ? `在保持功能不变的前提下改进这个设计：当前 ${fmt(m.fmax_mhz, 1)} MHz、${m.lut} LUT、${m.dsp} DSP${cp ? `，关键路径 ${fmt(cp.total_ns, 2)} ns` : ""}。目标：` : "目标：";
+      $("#sf-cancel").onclick = () => dlg.close();
+      $("#sf-go").onclick = async () => {
+        const body = { from_job: state.selected, brief: $("#sf-brief").value.trim(), thread: state.thread || undefined };
+        if (pick != null) body.from_iteration = pick;
+        dlg.close();
+        try { const r = await post("/studio", body); location.hash = `studios/${r.id}`; show("studios"); }
+        catch (e) { alert(e.message); }
+      };
+      dlg.showModal();
+    };
     $("#act-package").onclick = () => { if (state.selected) window.open(`/api/jobs/${state.selected}/package`, "_blank"); };
     $("#cmp-back").onclick = () => { if (state.cmpA) select(state.cmpA); else show("empty"); };
   }
@@ -244,5 +271,15 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     for (let i = 0; i < n; i++) { const t = svgEl("text", { x: X(i), y: H - 6, "text-anchor": "middle", fill: "var(--muted)", "font-size": 10 }); t.textContent = i + 1; svg.appendChild(t); }
   }
 
-  return { initForm, initActions, openCompare };
+  function fromDesign(kind) {
+    // a studio / BYO design kind: the schema has no entry for it, so the form only carries the kind, the device
+    // and the constraints; its knobs are the bundle's parameters (defaults when initial_ir is empty)
+    if (!kind) return;
+    form.design = kind; form.initial_ir = {}; form.locked = {};
+    $("#nf-sub").textContent = `${kind} · ${form.backend}`;
+    $("#nf-knobs").innerHTML = `<div class="muted small-text">${esc(kind)}：旋钮是工作室声明的参数，留空即用默认值（rev 选修订）</div>`;
+    $("#nf-presets").innerHTML = ""; $("#nf-locked").innerHTML = "";
+    estimate();
+  }
+  return { initForm, initActions, openCompare, fromDesign };
 }

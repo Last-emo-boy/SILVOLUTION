@@ -420,7 +420,9 @@ export const siliconAgent = {
     const DESIGNER_METHOD = [
       'You are the designer session of silicon-agent\'s studio. Your working directory is one studio\'s work/ (README-studio.md there explains the files); ../SPEC.md is the task. Produce work/rtl/*.sv, work/golden.py and work/design.json, check with sa_studio_check (id = the studio id in the prompt) until every step passes, then sa_studio_submit. Your shell has no python/iverilog/yosys: it is for ls, cat, grep, diff; every check runs on the job server.',
       '1. Read ../SPEC.md and README-studio.md first. The expected outputs in the check come from an INDEPENDENT reference model that another session writes from ../SPEC.md alone -- it never sees your code. So before writing RTL, make sure ../SPEC.md states the arithmetic unambiguously (widths, truncation vs rounding, saturation vs wrap, what one output per N inputs means, alignment of the first output, reset behaviour); you may edit ../SPEC.md to make it precise, never to make it easier.',
-      '2. The interface contract for a stream block: clk, rst (synchronous, active high), in_valid, in_ready (a function of state only: never combinational from in_valid), signed [IN_W-1:0] input, out_valid, signed [OUT_W-1:0] output; outputs in order; nothing valid during reset. SystemVerilog-2012 that iverilog -g2012, yosys and Vivado all accept: no interfaces, classes, unpacked-array ports, or $-system tasks in synthesizable code. One top module named in design.json; helper modules may follow it in the same file or others under rtl/.',
+      '2. The interface contract for a stream block: clk, rst (synchronous, active high), in_valid, in_ready (a function of state only: never combinational from in_valid; omit it and set no "ready" in design.json when the block accepts a beat every cycle), the input fields, out_valid, the output fields; outputs in order; nothing valid during reset. A beat may carry several fields (I and Q, a frame_start bit, a side-band word): list them in design.json stream.inputs / stream.outputs as [{"name", "width": "<expr>", "signed": true|false}, ...] in port order; then golden.py receives each input beat as a dict {name: value} and returns dicts {name: value}. A single field keeps the short form (in / out / in_width / out_width) with plain ints. SystemVerilog-2012 that iverilog -g2012, yosys and Vivado all accept: no interfaces, classes, unpacked-array ports, or $-system tasks in synthesizable code. One top module named in design.json; helper modules may follow it in the same file or others under rtl/.',
+      '2b. Architecture before pipelining. Pick the minimal structure for the function first (a 5-input median is 6 compare-exchanges, not a full sort; a symmetric FIR pre-adds mirrored taps; an accumulator of M products needs one adder chain, not M; a decimator computes only the outputs it emits), then close timing by registering: one 16-18-bit add/compare per pipeline stage on ECP5 (a carry chain of W cells is ~0.3 ns + 0.05 ns/bit plus routing; 150 MHz leaves ~6.6 ns), two per stage on Spartan-7 at 300 MHz, and keep DSP multipliers surrounded by registers so the tool absorbs them into the block (MULT18X18D / DSP48E1 input + output registers). Count LUTs per bit honestly: a W-bit 2:1 mux is W LUT4, a compare-exchange is ~3W, an adder W (carry chain). Do not add registers that do not cut a path.',
+      '2c. The device is in SPEC.md (and the run\'s constraints): write for its primitives -- ECP5/iCE40/Gowin: LUT4 + carry chain, 18x18 multipliers, 9/18-kbit block RAM; Spartan-7/Artix-7: LUT6, DSP48E1 (25x18 with pre-adder and post-adder), 36-kbit block RAM; sky130: standard cells, no DSP/BRAM. Use `*` for multiplies (the tools map it), `always_ff` memories with one write port for RAM inference.',
       '3. Parameters are the knobs the planner will tune afterwards: expose pipelining depth, resource sharing / folding and similar structural choices as top-level `parameter`s with sane defaults, and declare each in design.json params with {default, min, max | choices, hint}. sa_studio_submit checks EVERY declared value (each knob at its other choices / its min and max, one at a time) against the reference: a knob whose other values the RTL or golden.py do not really implement fails the submit -- declare only what works, or narrow the range (min == max == default for a frozen task parameter). Widths that depend on parameters go in design.json stream.in_width/out_width/rate as expressions of them; latency and throughput too (latency as an expression of the knobs when pipelining is a knob).',
       '4. golden.py: def golden(params: dict, xs: list[int]) -> list[int], standard library only, integer arithmetic, exactly the RTL\'s widths, truncation/rounding and wrap, one output per `rate` inputs. The check first compares golden against the independent reference (cheap), then simulates your RTL on the reference\'s vectors, then checks the stream properties with SymbiYosys. A disagreement between golden and the reference means either your reading of the spec or the spec itself is wrong: fix the model/RTL, or sharpen ../SPEC.md and say so in your reply (the reference is regenerated from the new text).',
       '5. A forked design (the studio started from a generator\'s RTL): the function is frozen -- the check compares against the generator\'s own vectors -- and the structure is yours: restructure toward the goal in ../SPEC.md (shorter critical path, fewer LUTs, fewer DSPs) and expose the choices as parameters. Keep the top module name and ports.',
@@ -442,7 +444,7 @@ export const siliconAgent = {
                   referencing: 'the independent reference model is being written from SPEC.md', checking: 'elaborate, golden vs reference, simulation on the reference\'s vectors, stream properties',
                   revising: 'the designer is fixing what the check found', registered: `done: design kind ${r.design} is registered -- run it with sa_run (design "${r.design}", locked {}, initial_ir {} or the knobs it declares)`,
                   failed: 'the design did not pass the check within the rounds allowed: read steps[], then sa_studio_revise with precise guidance or open a new studio with a sharper brief',
-                  interrupted: 'the server restarted mid-pipeline: POST resume (sa_studio_status does not); tell the user' }[r.status]
+                  interrupted: 'the server restarted mid-pipeline: call sa_studio_resume, then poll again' }[r.status]
       return n ? { ...r, note: n } : r
     }
     agnes.registerTool({
@@ -456,7 +458,7 @@ export const siliconAgent = {
     })
     agnes.registerTool({
       name: 'sa_studio_fork',
-      description: 'Fork a finished run\'s design (its best iteration, or `iteration`) into a studio: the designer session starts from the generator\'s emitted RTL and restructures it beyond the IR knobs toward `brief` (e.g. fewer LUTs, a shorter critical path named in the run\'s diagnosis), keeping the function -- the check compares against the generator\'s own vectors. Available for fir / decim / cic / iir / fir_chain runs. Returns the studio id; poll with sa_studio_status; when registered, run "rtl:<id>" with sa_run.',
+      description: 'Fork a finished run\'s design (its best iteration, or `iteration`) into a studio: the designer session starts from the generator\'s emitted RTL and restructures it beyond the IR knobs toward `brief` (e.g. fewer LUTs, a shorter critical path named in the run\'s diagnosis), keeping the function -- the check replays the generator\'s own test vectors through its own bench, so the ports and the beat protocol stay. Works for every generator (matmul, fir, conv2d, fft, cordic, nco, iir, decim, cic, graph, fir_chain). Returns the studio id; poll with sa_studio_status; when registered, run "rtl:<id>" with sa_run.',
       parameters: obj({ job: str({ maxLength: 64 }), iteration: int({ minimum: 1, maximum: 64 }), brief: str({ maxLength: 2000 }), name: str({ maxLength: 120 }), thread: str({ maxLength: 64 }) }, ['job', 'brief']),
       meta: { ...starts, costHint: { wallMs: 900000 } },
       async execute({ job, iteration, brief, name, thread }, tctx) {
@@ -487,6 +489,24 @@ export const siliconAgent = {
       meta: { ...starts, costHint: { wallMs: 900000 } },
       async execute({ id, instruction, context }, tctx) {
         try { return text(await api('POST', `/studio/${encodeURIComponent(id)}/revise`, { instruction, context }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+    agnes.registerTool({
+      name: 'sa_studio_list',
+      description: 'The studios so far (id, name, status, design kind when registered, revisions, origin when forked): a design already registered as rtl:<id> can be run again or revised instead of designing it anew.',
+      parameters: obj({}),
+      meta: readOnly,
+      async execute(_args, tctx) {
+        try { const r = await api('GET', '/studio', undefined, tctx?.signal); return text(r.map(({ files, bundle, steps, ...rest }) => ({ ...rest, n_steps: steps?.length, revisions: bundle?.revisions?.map((x) => ({ rev: x.rev, note: x.note })) }))) } catch (e) { return fail(e) }
+      },
+    })
+    agnes.registerTool({
+      name: 'sa_studio_resume',
+      description: 'Resume a studio the server restart interrupted (status "interrupted"): the pipeline continues from the check with what the designer had written. Poll with sa_studio_status.',
+      parameters: obj({ id: str({ maxLength: 64 }) }, ['id']),
+      meta: starts,
+      async execute({ id }, tctx) {
+        try { return text(await api('POST', `/studio/${encodeURIComponent(id)}/resume`, {}, tctx?.signal)) } catch (e) { return fail(e) }
       },
     })
     // the designer session's own two tools: its check and its submit (the toolchain is on the job server)

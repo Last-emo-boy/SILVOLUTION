@@ -157,6 +157,46 @@ unchanged IRs is formally equivalent to the current generator (SymbiYosys), the 
 tree. The chat shows the verdict per step; nothing merges until the operator runs
 `deploy/merge-proposal.sh <id>`. First proposal by the agent: a `reg_out` knob for CORDIC, gated 4/4 and A/B'd.
 
+## The design studio: beyond the generators
+
+The generators enumerate a design space; the studio leaves it. Two cases:
+
+- **A block no generator computes** (a median filter, a CRC, a Goertzel ...): `sa_interpret` answers
+  `design: "custom"` with a precise functional specification, and the chat agent opens a studio
+  (`sa_studio_open`). In the built-in chat the same happens from `nl.interpret`.
+- **A generator's design, out of its knobs**: any finished run can be forked (`sa_studio_fork`, the worktable's
+  "分叉到设计工作室", `POST /api/studio {from_job}`); the designer starts from that iteration's emitted RTL and
+  restructures it while the function stays frozen.
+
+Who writes and who checks are different sessions (`silicon_agent/studio.py`):
+
+1. the **designer** (an Agnes Harness session, deep model, its own `SA_ROOT/studio/<id>/work/`; the plugin's hook
+   confines writes to it) writes `rtl/*.sv`, a bit-exact `golden.py` and `design.json` (top, parameters with ranges,
+   the stream's input/output fields, latency/throughput as expressions of the parameters);
+2. the **reference** session (no tools, never sees the RTL) writes `reference(params, xs)` from `SPEC.md` alone;
+   a forked design uses the generator's own test vectors and bench instead;
+3. the **check**: elaborate, golden vs reference (Python vs Python, before any EDA time), the RTL on the
+   reference's vectors through the generic replay bench (one beat = the declared fields packed MSB-first), the
+   stream properties under SymbiYosys; at submit also every declared knob value and the mutation score of the check
+   itself (`SA_STUDIO_MUTATION_MIN`, default 60 % of injected bugs caught). A failing check goes back to the
+   designer with the log, up to `SA_STUDIO_ROUNDS` times; a golden/reference disagreement sends both back to the
+   specification.
+4. registration as design kind `rtl:<id>` -- an authored BYO bundle with **revisions**; the IR's `rev` selects one.
+
+From then on it is a design like any other: runs, netlist sims, formal, mutation, the package (which also carries
+`studio/SPEC.md`, `golden.py`, `reference.py`, `revisions.json` and an AXI4-Stream wrapper for the declared
+fields). The planner of a run on an authored design may answer `"revise": "<what and why>"` instead of a knob move
+when no knob reaches the critical path; the designer rewrites, the check runs, and the next iteration measures the
+new revision (`revising` / `revised` events in the transcript). The trust strip shows the expectation's source
+(independent reference · N samples / generator vectors / self-check only) next to the simulation pills.
+
+Measured on the production host (2026-10-11): a 32-tap FIR forked out of its knobs went from 173 MHz / 903 LUT /
+4 DSP to 181.7 MHz / 737 LUT / 1 DSP over five revisions; a 5-point median filter requested in one sentence
+(no generator) was designed, independently referenced (648 samples), rewritten three times at the planner's request
+and closed at 212.8 MHz / 356 LUT / 0 DSP. Designer cost ≈ $1-2 per studio. API: `POST /api/studio`,
+`GET /api/studio[/<id>]`, `POST /api/studio/<id>/{check,submit,revise,resume}`; tools `sa_studio_{open,fork,status,
+revise,list,resume}` for the chat agent, `sa_studio_{check,submit}` for the designer; the worktable's 设计工作室 view.
+
 ## Bring your own RTL
 
 `POST /api/rtl` (or the `sa_rtl_upload` tool, or the attach button in the chat) registers the user's

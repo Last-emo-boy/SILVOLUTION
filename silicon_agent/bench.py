@@ -158,6 +158,13 @@ CASES: list[tuple[str, dict, dict]] = [
         "constraints": {"fmax_mhz": 200, "max_dsp": 30, "objective": ["maximize_throughput", "minimize_lut"]},
         "initial_ir": {"acc_width": 28, "line_mem": "bram", "par_rows": 5, "tree_regs": 0, "pipe_mul": 0, "dsp_regs": "none"}},
      {"feasible": True, "max_rounds": 4}),
+    # the studio: no generator computes a sliding median; through the chat the agent must open a studio (designer +
+    # independent reference), register the design and run it. Only meaningful with --agent (the spec is "custom").
+    ("median5-ecp5-150-studio", {
+        "task": "5-point sliding median filter, 16-bit signed samples, one output per input, window starts as zeros, ECP5, 150 MHz, as few LUTs as possible",
+        "design": "custom", "backend": "ecp5", "locked": {}, "constraints": {"fmax_mhz": 150, "max_dsp": 0, "objective": ["minimize_lut", "maximize_fmax"]}, "initial_ir": {},
+        "studio": True},
+     {"feasible": True, "max_rounds": 6}),
 ]
 
 
@@ -191,17 +198,25 @@ def run_agent_case(server: str, token: str, name: str, spec: dict, tag: str) -> 
         time.sleep(10)
     msgs = th.get("messages", [])
     runs = [m["job"] for m in msgs if m.get("kind") == "run" and m.get("job")]
+    studios = [m["studio"] for m in msgs if m.get("kind") == "studio" and m.get("studio")]
     reply = next((m for m in reversed(msgs) if m.get("role") == "assistant" and m.get("kind") == "text"), {})
     u = reply.get("usage") or {}
     # the harness ledger for the turn: what the agent itself cost on top of the EDA time
     ledger = {"model_calls": u.get("calls"), "tokens": (u.get("input") or 0) + (u.get("cache_read") or 0) + (u.get("output") or 0),
               "usd": round((u.get("usd_micros") or 0) / 1e6, 4), "model": u.get("model")} if u else None
-    return (runs[-1] if runs else None), {"thread": tid, "reply": (reply.get("text") or "")[:600], "tools": [t.get("name") for t in reply.get("tools", [])],
-                                           "turn_seconds": round(time.time() - t0, 1), "ledger": ledger,
-                                           "failed_tools": [t.get("name") for t in reply.get("tools", []) if t.get("status") == "failed"]}
+    info = {"thread": tid, "reply": (reply.get("text") or "")[:600], "tools": [t.get("name") for t in reply.get("tools", [])],
+            "turn_seconds": round(time.time() - t0, 1), "ledger": ledger,
+            "failed_tools": [t.get("name") for t in reply.get("tools", []) if t.get("status") == "failed"]}
+    if studios:
+        st = (th.get("studios") or {}).get(studios[-1]) or {}
+        info["studio"] = {"id": studios[-1], "status": st.get("status"), "reference": (st.get("reference") or {}).get("kind"), "revisions": st.get("revisions"),
+                          "usd": round(((st.get("usage") or {}).get("usd_micros") or 0) / 1e6, 4)}
+    return (runs[-1] if runs else None), info
 
 
 def golden_point(server: str, token: str, spec: dict) -> dict | None:
+    if spec.get("design") == "custom":
+        return None
     """The best design the server has already measured for this case (the cross-run Pareto store), among the points
     whose locked task parameters match the case's -- a 16-tap FIR's point is no golden for a 32-tap case -- and
     that meet its constraints, by its objective order; None when nothing measured qualifies yet."""
@@ -276,7 +291,7 @@ def run_case(server: str, token: str, name: str, spec: dict, expect: dict, max_i
         drift = best["metrics"]["fmax_mhz"] / max(gold["fmax_mhz"], 1) - 1
         ok = ok and drift > -0.06 and best["metrics"]["lut"] <= gold["lut"] * 1.15 and best["metrics"]["dsp"] <= gold["dsp"]
         gold = {**gold, "fmax_drift": round(drift, 3)}
-    return {"name": name, "job": jid, "design": spec["design"], "backend": spec["backend"], "status": j["status"], "feasible": bool(best), **({"agent": agent_info} if agent_info else {}),
+    return {"name": name, "job": jid, "design": j["spec"].get("design", spec["design"]), "backend": spec["backend"], "status": j["status"], "feasible": bool(best), **({"agent": agent_info} if agent_info else {}),
             **({"golden": gold} if gold else {}),
             "first_feasible": first, "rounds": len(results), "planner_calls": plans, "eda_seconds": round(eda_s, 1), "wall_seconds": round(time.time() - t0, 1),
             "best": {"fmax_mhz": best["metrics"]["fmax_mhz"], "lut": best["metrics"]["lut"], "dsp": best["metrics"]["dsp"], "throughput": best["throughput"]} if best else None,
@@ -291,6 +306,9 @@ def cmd_run(a) -> int:
     rows = []
     existing = {j["task"]: j["id"] for j in _req(server, token, "GET", "/jobs")} if a.reuse else {}
     for name, spec, expect in cases:
+        if spec.get("studio") and not a.agent:
+            print(f"== {name}: studio case, only through --agent (skipped)", flush=True)
+            continue
         print(f"== {name} ({spec['design']}/{spec['backend']})", flush=True)
         r = run_case(server, token, name, spec, expect, a.max_iter, a.no_memory, a.tag, existing.get(f"[{a.tag}] {spec['task']}"), a.planner, a.agent, a.golden)
         rows.append(r)
@@ -303,6 +321,7 @@ def cmd_run(a) -> int:
         print(f"   {'OK ' if r['ok'] else 'REG'} feasible={r['feasible']} first@{r['first_feasible']} rounds={r['rounds']} "
               f"{('%.1f MHz %s LUT %s DSP thr=%s' % (b['fmax_mhz'], b['lut'], b['dsp'], b['throughput'])) if b else '-'} eda={r['eda_seconds']}s wall={r['wall_seconds']}s job={r['job']}"
               + (f"  agent: {len(ag.get('tools') or [])} tools, {lg.get('model_calls')} model calls, {lg.get('tokens')} tok, ${lg.get('usd')}" if lg else "")
+              + (f"  studio {ag['studio']['id']} {ag['studio']['status']} ({ag['studio']['reference']}, {ag['studio']['revisions']} rev, ${ag['studio']['usd']})" if ag.get("studio") else "")
               + (f"  FAILED TOOLS {ag['failed_tools']}" if ag.get("failed_tools") else "")
               + (f"  golden {r['golden']['fmax_mhz']:.1f} MHz from {r['golden']['job']} (drift {r['golden'].get('fmax_drift', 0):+.1%})" if r.get("golden") else "")
               + (f"  ERROR {str(r['error'])[:160]}" if r["error"] else ""), flush=True)
