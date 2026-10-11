@@ -556,11 +556,22 @@ def designer_turn(rec: dict, text: str, lang: str = "zh", on_event=None) -> dict
     try:
         r = c.prompt(sid, designer_prompt(rec, text, lang), on_event=on_event, timeout=TURN_S)
     except agh.AghError as e:
-        if "timeout" not in str(e):
+        if "SESSION_BUSY" in str(e):
+            # the harness still runs an earlier turn of this session (a client that gave up on it): follow that
+            # turn to its end and take its outcome, then this instruction goes in as the next turn
+            print(f"studio {rec['id']}: designer session busy, following the turn in flight", flush=True)
+            c.wait_idle(sid, timeout=TURN_S, on_event=on_event)
+            r = c.prompt(sid, designer_prompt(rec, text, lang), on_event=on_event, timeout=TURN_S)
+        elif "timeout" in str(e):
+            c.cancel(sid)
+            print(f"studio {rec['id']}: designer turn cancelled after {TURN_S:.0f}s", flush=True)
+            try:
+                c.wait_idle(sid, timeout=120)
+            except agh.AghError:
+                pass
+            r = {"text": "", "tools": [], "stop": "timeout"}
+        else:
             raise
-        c.cancel(sid)
-        print(f"studio {rec['id']}: designer turn cancelled after {TURN_S:.0f}s", flush=True)
-        r = {"text": "", "tools": [], "stop": "timeout"}
     u = c.usage(sid)
     with _lock:
         rec.setdefault("turns", []).append({"t": time.time(), "text": (r.get("text") or "")[-4000:], "tools": [t.get("name") for t in r.get("tools") or []], "usage": u})

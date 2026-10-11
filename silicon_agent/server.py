@@ -1326,7 +1326,17 @@ def _agh_turn(tid: str, text: str, sub: str, resumed: bool = False) -> dict:
     # the reply follows the language of this message (a thread opened in English may continue in Chinese)
     proj = _project_prompt(th)
     prompt = f"[silicon-agent {'author' if author else 'chat'} · thread {tid} · answer in {'Chinese' if nl._lang(text) == 'zh' else 'English'}]\n" + (f"[{proj}]\n" if proj else "") + text
-    r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
+    try:
+        r = c.prompt(sid, prompt, on_event=_run_watcher(tid, lang), timeout=3600)
+    except agh.AghError as e:
+        # a turn that drives a studio and a run can outlast an hour: the harness keeps running it, so keep following
+        # it (the live trail goes on) instead of answering with an error while the agent is still working
+        if "timeout" not in str(e) or not (c.project(sid) or {}).get("opState"):
+            raise
+        r = c.wait_idle(sid, timeout=float(os.environ.get("SA_AGH_TURN_MAX_S", "10800")), on_event=_run_watcher(tid, lang))
+        if (c.project(sid) or {}).get("opState"):
+            c.cancel(sid)
+            raise agh.AghError("the agent turn exceeded the time allowed and was cancelled")
     # the harness's ledger for this turn (tokens, estimated cost, wall time): shown under the reply
     r["usage"] = c.usage(sid)
     if resumed:

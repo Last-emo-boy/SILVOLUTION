@@ -329,7 +329,7 @@ def cmd_run(a) -> int:
            "summary": {"n": len(rows), "ok": sum(r["ok"] for r in rows), "feasible": sum(r["feasible"] for r in rows),
                        "mean_first_feasible": round(sum(r["first_feasible"] or a.max_iter + 1 for r in rows) / max(len(rows), 1), 2),
                        "eda_seconds": round(sum(r["eda_seconds"] for r in rows), 1),
-                       **({"agent_usd": round(sum((r.get("agent") or {}).get("ledger", {}).get("usd", 0) or 0 for r in rows), 4),
+                       **({"agent_usd": round(sum(((r.get("agent") or {}).get("ledger") or {}).get("usd", 0) or 0 for r in rows), 4),
                            "agent_failed_tools": sum(len((r.get("agent") or {}).get("failed_tools") or []) for r in rows)} if a.agent else {})}}
     out = Path(a.out) if a.out else BENCH_DIR
     out.mkdir(parents=True, exist_ok=True)
