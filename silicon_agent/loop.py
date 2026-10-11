@@ -50,7 +50,7 @@ Respond with a JSON object:
   ],
   "stop": false,
   "stop_reason": "<only when stop is true: the bound reached and the evidence, 1-3 sentences>",
-  "revise": "<only for a designer-written design (the IR schema says so) and only when no knob reaches the critical path: what to rewrite in the RTL and why; otherwise omit>"
+  "revise": "<only for a designer-written design (the IR schema says so) and only when no knob reaches the critical path: what to rewrite in the RTL and why; a rewrite costs minutes of a deep model, so ask only when a constraint is still violated or the objective has a clear structural lever left; never ask for a structure the history shows the designer already tried or found unsound; otherwise omit>"
 }"""
 
 
@@ -380,7 +380,9 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 system = build_system(design, backend)   # the IR schema now lists the new revision
                 nxt = IR.from_dict({**ir.to_dict(), "rev": rr["rev"]})
                 emit({"kind": "revised", "iteration": it + 1, "rev": rr["rev"], "check": (rr.get("check") or {}).get("ok", True), "note": str(rr.get("note") or "")[:300]})
-                action = f"designer revision #{rr['rev']}"
+                # the designer's own summary goes into the history: the planner must see what was tried (and what the
+                # designer found impossible) before asking for the same rewrite again
+                action = f"designer revision #{rr['rev']} (asked: {revise_req[:200]}) -- designer: {str(rr.get('note') or '')[:600]}"
                 ir = nxt
                 fallbacks = []
                 continue
