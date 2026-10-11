@@ -667,7 +667,7 @@ def revise(rec: dict, instruction: str, context: dict | None = None, lang: str =
         if res.get("ok"):
             st.update({"ok": True, "rev": res["rev"], "note": note})
             set_status(rec, "registered")
-            return res
+            return {**res, "note": note}
         rep = res.get("check") or {}
         msg = ("The revision did not pass the check: " + (res.get("error") or "; ".join(f"{s['name']}: {str(s.get('error') or s.get('log') or s.get('mismatch') or '')[-500:]}" for s in rep.get("steps", []) if not s.get("ok")))
                + ". Fix it, sa_studio_check, sa_studio_submit.")

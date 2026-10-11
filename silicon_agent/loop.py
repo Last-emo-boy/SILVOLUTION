@@ -380,7 +380,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 system = build_system(design, backend)   # the IR schema now lists the new revision
                 nxt = IR.from_dict({**ir.to_dict(), "rev": rr["rev"]})
                 emit({"kind": "revised", "iteration": it + 1, "rev": rr["rev"], "check": (rr.get("check") or {}).get("ok", True), "note": str(rr.get("note") or "")[:300]})
-                action = f"designer revision #{rr['rev']}: {revise_req[:200]}"
+                action = f"designer revision #{rr['rev']}"
                 ir = nxt
                 fallbacks = []
                 continue
