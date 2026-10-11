@@ -200,15 +200,25 @@ def _env(bundle: dict, a: RtlArch) -> dict:
     return {**{k: int(v.get("default", 0)) for k, v in (bundle.get("params") or {}).items()}, **a.params}
 
 
+def _clog2(x) -> int:
+    """Verilog's $clog2 (its argument may be a true-division result such as 16/F)."""
+    x = int(round(x))
+    return 0 if x <= 1 else (x - 1).bit_length()
+
+
+# Verilog-flavoured helpers a bundle's expressions may use (the designer writes them like RTL parameters)
+_EXPR_FNS = {"clog2": _clog2, "max": max, "min": min, "abs": abs, "int": int, "ceil": lambda v: int(-(-v // 1)), "log2": lambda v: _clog2(v)}
+
+
 def expr_value(expr, env: dict, default):
-    """A bundle field that is a number or an arithmetic expression of the parameters (`"DW + 8"`)."""
+    """A bundle field that is a number or an arithmetic expression of the parameters (`"DW + 8"`, `"F + $clog2(16/F)"`)."""
     if isinstance(expr, bool):
         return default
     if isinstance(expr, (int, float)):
         return expr
     if isinstance(expr, str) and expr.strip():
         try:
-            return eval(expr, {"__builtins__": {}}, dict(env))
+            return eval(expr.replace("$clog2", "clog2"), {"__builtins__": {}}, {**_EXPR_FNS, **env})
         except Exception:
             return default
     return default
