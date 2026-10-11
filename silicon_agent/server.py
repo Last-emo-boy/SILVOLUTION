@@ -68,7 +68,7 @@ import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, unquote
 
 from . import memory, nl
 from .designs import DESIGNS
@@ -223,6 +223,16 @@ def _worker():
                 def should_stop(self):
                     with _lock:
                         return bool(job.get("stop_requested")) or _shutting_down.is_set()
+                def revise(self, instruction: str, context: dict | None = None) -> dict:
+                    # the planner asked for a rewrite of an authored design: the studio's designer session changes
+                    # the RTL, the check (independent reference) runs, and the new revision comes back as `rev`
+                    sid = _studio_of(job["spec"].get("design", ""))
+                    if not sid:
+                        return {"ok": False, "error": "not an authored design"}
+                    from . import studio as S
+                    rec = _studios.get(sid) or S.load(sid)
+                    _studios[sid] = rec
+                    return S.revise(rec, instruction, context, lang=nl._lang(job["spec"].get("task", "")))
 
             if job["spec"].get("generator_tree"):
                 summary = _run_loop_on_tree(job, job_id, on_event, Control())
@@ -649,6 +659,21 @@ def _handle_chat(tid: str, text: str, sub: str) -> dict:
     proj = _project_prompt(th)
     it = nl.interpret(text, {**(ctx or {}), "project": proj} if proj else ctx)
     spec = it["spec"]
+    if it.get("custom"):
+        # no generator computes this: the studio designs it (the agent runtime writes the RTL; without it the studio
+        # is opened for manual work and the conversation says so)
+        from . import agh, studio as S
+        rec = S.new(text, name=spec["task"], thread=tid, subject=sub, spec_text=spec.get("spec_text"), project=th.get("project"))
+        rec["run_spec"] = {k: spec[k] for k in ("backend", "constraints", "task")}
+        S.save(rec)
+        _studios[rec["id"]] = rec
+        th["messages"].append({"role": "assistant", "kind": "studio", "studio": rec["id"], "text": it["summary"] or spec["task"], "t": time.time(), "lang": lang})
+        if not th["title"]:
+            th["title"] = spec["task"]
+        _save_thread(tid)
+        if agh.enabled():
+            _studio_start(rec, lambda: _studio_then_run(rec, lang), lang)
+        return {"action": "studio", "studio": rec["id"]}
     if it["errors"]:
         th["messages"].append({"role": "assistant", "kind": "text", "text": ("我没法把这个变成合法的设计：" if lang == "zh" else "I could not turn that into a valid design: ") + "; ".join(it["errors"]), "t": time.time()})
         _save_thread(tid)
@@ -797,6 +822,87 @@ def _rtl_check(bundle: dict) -> dict:
     return {"ok": ok, "log": log[-2000:], "ports": [{"dir": dd, "type": t, "name": n} for dd, t, n in _rtl._ports(bundle)]}
 
 
+# ---------------------------------------------------------------- the design studio (authored RTL, studio.py)
+_studios: dict[str, dict] = {}
+_studio_threads: dict[str, threading.Thread] = {}
+
+
+def _studio_of(design: str) -> str | None:
+    """The studio behind an authored `rtl:<id>` design kind, if any."""
+    if not design.startswith("rtl:"):
+        return None
+    sid = design[4:]
+    if sid in _studios:
+        return sid
+    from . import studio as S
+    return sid if (S.STUDIO / sid / "studio.json").exists() else None
+
+
+def _load_studios() -> None:
+    from . import studio as S
+    for rec in S.list_all():
+        if rec.get("status") in ("designing", "referencing", "checking", "revising"):
+            rec["status"] = "interrupted"
+            S.save(rec)
+        _studios[rec["id"]] = rec
+
+
+def _check_view(rep: dict) -> dict:
+    """A check report for the API: step logs only where the step failed, and short."""
+    steps = []
+    for x in rep.get("steps", []):
+        y = {k: v for k, v in x.items() if k != "log"}
+        if x.get("log") and not x.get("ok"):
+            y["log"] = x["log"][-800:]
+        steps.append(y)
+    return {"ok": rep.get("ok"), "tag": rep.get("tag"), "seconds": rep.get("seconds"), "steps": steps}
+
+
+def _studio_view(rec: dict) -> dict:
+    from . import studio as S
+    v = {k: rec.get(k) for k in ("id", "name", "brief", "thread", "project", "subject", "status", "origin", "rounds", "revisions", "created", "design", "usage")}
+    ref = rec.get("reference") or {}
+    v["reference"] = {"kind": ref.get("kind"), **({"origin": ref.get("origin")} if ref.get("kind") == "generator" else {})}
+    v["steps"] = [{**{k: st[k] for k in st if k != "report"}, **({"report": _check_view(st["report"])} if st.get("report") else {})} for st in rec.get("steps", [])]
+    v["bundle"] = rec.get("bundle")
+    v["files"] = S.file_listing(rec["id"]) if (S.STUDIO / rec["id"] / "work").exists() else []
+    v["running"] = bool(_studio_threads.get(rec["id"]) and _studio_threads[rec["id"]].is_alive())
+    return v
+
+
+def _studio_start(rec: dict, fn, lang: str) -> None:
+    """Run a studio pipeline step in the background; the chat polls GET /studio/<id>."""
+    from . import studio as S
+    tid = rec.get("thread")
+
+    def run():
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001
+            S.step(rec, "pipeline error", ok=False, error=str(e)[-1500:])
+            S.set_status(rec, "failed")
+        if tid in _threads:
+            with _lock:
+                _save_thread(tid)
+    t = threading.Thread(target=run, daemon=True)
+    _studio_threads[rec["id"]] = t
+    t.start()
+
+
+def _studio_then_run(rec: dict, lang: str) -> None:
+    """The built-in chat's custom design: studio pipeline, then the run the request implied, as a run card."""
+    from . import studio as S
+    S.run_pipeline(rec, lang)
+    if rec.get("status") != "registered":
+        return
+    rs = rec.get("run_spec") or {}
+    spec = {"task": rs.get("task") or rec["name"], "design": f"rtl:{rec['id']}", "backend": rs.get("backend", "ecp5"), "locked": {},
+            "constraints": rs.get("constraints") or {"fmax_mhz": 100.0, "objective": ["maximize_throughput", "minimize_lut"]}, "initial_ir": {}}
+    jid = _submit(spec, 8, rec.get("subject", "cli"), thread=rec.get("thread"))
+    if rec.get("thread") in _threads:
+        _note_agent_run(rec["thread"], jid, lang)
+
+
 # ---------------------------------------------------------------- proposals (changes to the generators, gated)
 PROPOSALS = ROOT / "proposals"
 _proposals: dict[str, dict] = {}
@@ -843,7 +949,6 @@ def _proposal_view(pid: str) -> dict:
 def _independent_reference(pid: str, pr: dict, kind: str) -> str:
     """Ask a separate AGH session (no tools beyond reading, no sight of the diff) for `reference(ir, xs)`: a plain-Python
     model of the block from its description. The IR field list is taken from the diff's schema entry when present."""
-    from . import agh
     import re as _re
     diff = pr["diff"]
     # the schema fields the proposal declares for the kind, if any (a hint list, not the generator)
@@ -852,24 +957,9 @@ def _independent_reference(pid: str, pr: dict, kind: str) -> str:
     desc = (f"Block: {pr.get('title', '')}\n\n{pr.get('rationale', '')}\n\n" +
             ("IR fields:\n" + "\n".join(f"  {n}: {h}" for n, h in fields) + "\n" if fields else "") +
             f"Example IRs: {json.dumps([x['ir'] for x in (pr.get('irs') or []) if x.get('design') == kind][:2])}")
-    prompt = (f"[silicon-agent reference · proposal {pid} · answer in English]\n"
-              "You are writing an INDEPENDENT reference model of a hardware block, from its description only, for a verification gate. "
-              "Do not call any tool. Reply with ONLY a Python code block defining `def reference(ir: dict, xs: list[int]) -> list[int]` "
-              "(standard library only). `xs` are the signed input samples in arrival order; return the signed output samples in order, "
-              "exactly as fixed-point hardware would produce them (integer arithmetic, the same widths/truncation/saturation the description implies; "
-              "one output per M inputs for a rate-changing block). Samples before the stream are zero. Be literal about the definition; "
-              "do not optimise.\n\n" + desc)
-    c = agh.client()
-    sid = c.new_session(agh.workspace(), preset=os.environ.get("SA_AGH_PRESET") or None, session_key=f"sa-reference-{pid}")
-    try:
-        c.set_model(sid, "deepseek", "deepseek-v4-pro", "high")
-    except agh.AghError:
-        pass
-    r = c.prompt(sid, prompt, timeout=900)
-    code = _re.search(r"```(?:python)?\s*\n(.*?)```", r.get("full_text") or r.get("text") or "", _re.S)
-    if not code or "def reference" not in code.group(1):
-        raise RuntimeError("no reference() in the reply")
-    return code.group(1)
+    from . import studio as S
+    # the gate's reference takes the IR dict as its first argument; studio's prompt names it `params` -- same shape
+    return S.independent_reference(desc, f"sa-reference-{pid}", model="deepseek-v4-pro")
 
 
 def _start_proposal(pid: str) -> None:
@@ -1577,10 +1667,15 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 jobs_in = {jid: _jobs[jid] for jid in _thread_jobs(parts[1])}
                 props = {pid: _proposal_view(pid) for pid, pr in _proposals.items() if pr.get("thread") == parts[1]}
-            return self._json(200, {**th, "jobs": {jid: {"status": j["status"], "spec": j["spec"], "summary": j.get("summary"), "error": j.get("error"),
+                studios = {sid: _studio_view(rec) for sid, rec in _studios.items() if rec.get("thread") == parts[1]}
+            for v in studios.values():
+                v.pop("files", None)
+            # the studio's own pipeline is busy work the conversation should show as "thinking" too
+            busy_studio = any(v.get("running") for v in studios.values())
+            return self._json(200, {**th, "busy": bool(th.get("busy")) or busy_studio, "jobs": {jid: {"status": j["status"], "spec": j["spec"], "summary": j.get("summary"), "error": j.get("error"),
                                                         "n_events": len(j["events"]), "max_iter": j.get("max_iter"), "parent": j.get("parent"),
                                                         "created": j["created"], "task": j["spec"].get("task", "")} for jid, j in jobs_in.items()},
-                                    "proposals": props})
+                                    "proposals": props, "studios": studios})
         if path == "/bench":
             bdir = ROOT / "bench"
             reps = sorted(bdir.glob("*.json")) if bdir.exists() else []
@@ -1665,7 +1760,10 @@ class Handler(BaseHTTPRequestHandler):
                     b = json.loads(f.read_text())
                     if _visible({"subject": b.get("subject", "")}, sub):
                         out.append({"id": b["id"], "design": f"rtl:{b['id']}", "name": b.get("name"), "top": b["top"], "files": sorted(b["files"]), "params": b.get("params"),
-                                    "description": b.get("description", ""), "created": b.get("created"), "check": b.get("check", {}).get("ok")})
+                                    "description": b.get("description", ""), "created": b.get("created"), "check": (b.get("check") or {}) if b.get("authored") else {"ok": (b.get("check") or {}).get("ok")},
+                                    "authored": bool(b.get("authored")), "stream": b.get("stream"), "studio": b.get("studio"),
+                                    "reference": {"kind": (b.get("reference") or {}).get("kind"), "origin": (b.get("reference") or {}).get("origin")} if b.get("reference") else None,
+                                    "revisions": [{k: v for k, v in r.items() if k != "files"} for r in (b.get("revisions") or [])]})
             return self._json(200, out)
         if len(parts) == 2 and parts[0] == "rtl":
             f = RTL_DIR / parts[1] / "bundle.json"
@@ -1675,6 +1773,25 @@ class Handler(BaseHTTPRequestHandler):
             if not _visible({"subject": b.get("subject", "")}, sub):
                 return self._json(404, {"error": "no such bundle"})
             return self._json(200, b)
+        if path == "/studio":
+            rows = [_studio_view(r) for r in _studios.values() if _visible(r, sub)]
+            rows.sort(key=lambda r: r.get("created") or 0, reverse=True)
+            return self._json(200, rows)
+        if len(parts) >= 2 and parts[0] == "studio":
+            rec = _studios.get(parts[1])
+            if not rec or not _visible(rec, sub):
+                return self._json(404, {"error": "no such studio"})
+            if len(parts) == 2:
+                return self._json(200, _studio_view(rec))
+            if len(parts) == 3 and parts[2] == "spec":
+                from . import studio as S
+                return self._json(200, {"spec": (S.STUDIO / rec["id"] / "SPEC.md").read_text(), "reference": (rec.get("reference") or {}).get("code")})
+            if len(parts) == 4 and parts[2] == "file":
+                from . import studio as S
+                f = (S.STUDIO / rec["id"] / "work" / unquote(parts[3])).resolve()
+                if (S.STUDIO / rec["id"] / "work").resolve() not in f.parents or not f.is_file():
+                    return self._json(404, {"error": "no such file"})
+                return self._json(200, {"path": parts[3], "text": f.read_text()[:400_000]})
         if path == "/proposals":
             with _lock:
                 rows = [_proposal_view(pid) for pid in _proposals]
@@ -1773,6 +1890,18 @@ class Handler(BaseHTTPRequestHandler):
                 m = best["metrics"]
                 out["stages"] = {"behavioral": m.get("sim_passed"), **{k: v.get("passed") for k, v in (m.get("sim_stages") or {}).items()}}
                 out["seeds"] = m.get("fmax_seeds") or []
+                # where the behavioral expectation came from: an authored design's independent reference (or the
+                # generator it was forked from), an uploaded design's own bench, a generator's golden model
+                dk = job["spec"].get("design", "matmul")
+                if dk.startswith("rtl:"):
+                    bf = RTL_DIR / dk[4:] / "bundle.json"
+                    b = json.loads(bf.read_text()) if bf.exists() else {}
+                    ref = b.get("reference") or {}
+                    chk = (b.get("check") or {}).get("golden_vs_reference") or {}
+                    out["reference"] = {"kind": ref.get("kind") or "self-check", "samples": chk.get("samples"), "agree": chk.get("ok"),
+                                        "rev": best["ir"].get("rev", 0), "revisions": len(b.get("revisions") or [])}
+                else:
+                    out["reference"] = {"kind": "generator-golden"}
                 out["running"] = {k: bool(t and t.is_alive()) for k, t in (("formal", _formal_jobs.get(job_id)), ("mutation", _mutation_jobs.get(job_id)))}
                 return self._json(200, out)
             if len(parts) == 3 and parts[2] == "mutation":
@@ -2028,6 +2157,96 @@ class Handler(BaseHTTPRequestHandler):
                     th["messages"].append({"role": "assistant", "kind": "proposal", "proposal": pid, "text": pr["title"], "t": time.time(), "source": "agh"})
                     _save_thread(pr["thread"])
             return self._json(200, {"id": pid, "status": "gating", "note": "the gate takes 1-10 minutes; poll GET /proposals/<id>"})
+        if path == "/studio":
+            # open a studio: the agent designs a block no generator covers (brief / spec_text), or forks a run's design
+            # out of its knobs (from_job [+ from_iteration]); the pipeline runs in the background
+            from . import agh, studio as S
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            brief = str(body.get("brief") or "").strip()[:4000]
+            thread = body.get("thread") if body.get("thread") in _threads else None
+            project = (_threads.get(thread) or {}).get("project") if thread else body.get("project")
+            lang = nl._lang(brief or str(body.get("spec_text") or ""))
+            try:
+                if body.get("from_job"):
+                    with _lock:
+                        job = _jobs.get(str(body["from_job"]))
+                    if not job:
+                        return self._json(404, {"error": "no such job"})
+                    it = body.get("from_iteration")
+                    rec = S.fork(dict(job, id=str(body["from_job"])), int(it) if it is not None else None, brief=brief, name=body.get("name"), thread=thread, subject=sub, project=project)
+                else:
+                    if not brief and not body.get("spec_text"):
+                        return self._json(400, {"error": "brief (or spec_text): what the block must do"})
+                    rec = S.new(brief or str(body.get("spec_text"))[:200], name=body.get("name"), thread=thread, subject=sub, spec_text=body.get("spec_text"), project=project)
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            _studios[rec["id"]] = rec
+            if thread:
+                th = _threads[thread]
+                with _lock:
+                    th["messages"].append({"role": "assistant", "kind": "studio", "studio": rec["id"], "text": rec["name"], "t": time.time(), "source": "agh"})
+                    _save_thread(thread)
+            if not agh.enabled():
+                return self._json(200, {"id": rec["id"], "status": rec["status"], "note": "the agent runtime is off: the studio is open for manual work (write work/, then POST /studio/<id>/check and /submit)"})
+            _studio_start(rec, lambda: S.run_pipeline(rec, lang), lang)
+            return self._json(200, {"id": rec["id"], "status": "designing", "note": "the designer session is writing; poll GET /studio/<id> (minutes)"})
+        if len(parts) == 3 and parts[0] == "studio":
+            from . import agh, studio as S
+            rec = _studios.get(parts[1])
+            if not rec or not _visible(rec, sub):
+                return self._json(404, {"error": "no such studio"})
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            if parts[2] == "check":
+                # the designer's inner loop: elaborate + golden-vs-reference + simulation + properties on the working copy
+                try:
+                    S.ensure_reference(rec) if agh.enabled() else None
+                    rep = S.check(rec, params=body.get("params") or None, properties=bool(body.get("properties", True)))
+                except Exception as e:  # noqa: BLE001
+                    return self._json(200, {"ok": False, "error": str(e)[-1500:]})
+                return self._json(200, rep)
+            if parts[2] == "submit":
+                if _studio_threads.get(rec["id"]) and _studio_threads[rec["id"]].is_alive() and rec.get("status") in ("checking",):
+                    return self._json(409, {"error": "a check is already running"})
+                # from the designer's own session the submit is synchronous (one check, up to the rounds in the pipeline
+                # otherwise); the pipeline thread notices the registered status when the turn ends
+                try:
+                    if agh.enabled():
+                        S.ensure_reference(rec)
+                    res = S.register(rec, note=str(body.get("note") or "initial design")) if not rec.get("bundle") else S.add_revision(rec, str(body.get("note") or "revision"))
+                except Exception as e:  # noqa: BLE001
+                    return self._json(200, {"ok": False, "error": str(e)[-1500:]})
+                if res.get("ok"):
+                    S.set_status(rec, "registered", design=f"rtl:{rec['id']}")
+                    if rec.get("thread") in _threads:
+                        with _lock:
+                            _save_thread(rec["thread"])
+                return self._json(200, {**{k: v for k, v in res.items() if k != "check"}, **({"check": _check_view(res["check"])} if res.get("check") else {})})
+            if parts[2] == "revise":
+                instr = str(body.get("instruction") or "").strip()[:4000]
+                if not instr:
+                    return self._json(400, {"error": "instruction"})
+                if not agh.enabled():
+                    return self._json(409, {"error": "the agent runtime is off"})
+                if _studio_threads.get(rec["id"]) and _studio_threads[rec["id"]].is_alive():
+                    return self._json(409, {"error": f"studio is busy ({rec.get('status')})"})
+                lang = nl._lang(instr)
+                _studio_start(rec, lambda: S.revise(rec, instr, body.get("context"), lang), lang)
+                return self._json(202, {"id": rec["id"], "status": "revising"})
+            if parts[2] == "resume":
+                if not agh.enabled():
+                    return self._json(409, {"error": "the agent runtime is off"})
+                if _studio_threads.get(rec["id"]) and _studio_threads[rec["id"]].is_alive():
+                    return self._json(409, {"error": f"studio is busy ({rec.get('status')})"})
+                lang = nl._lang(rec.get("brief") or "")
+                _studio_start(rec, lambda: S.submit(rec, lang), lang)
+                return self._json(202, {"id": rec["id"], "status": "checking"})
+            return self._json(404, {"error": "not found"})
         if path == "/rtl":
             # upload a bring-your-own-RTL bundle: files + a self-checking SV bench + the parameters the planner may move
             from . import rtl as _rtl
@@ -2208,6 +2427,8 @@ class Handler(BaseHTTPRequestHandler):
             if backend not in BACKENDS:
                 return self._json(400, {"error": f"unknown backend {backend!r}; have {list(BACKENDS)}"})
             design = spec.get("design", "matmul")
+            if design == "custom":
+                return self._json(400, {"error": "design \"custom\" is not runnable: open a studio (POST /studio with spec_text) and run the registered rtl:<id> design"})
             if design not in DESIGNS:
                 return self._json(400, {"error": f"unknown design {design!r}; have {list(DESIGNS)}"})
             max_iter = max(1, min(int(body.get("max_iter", 8)), 20))
@@ -2313,6 +2534,7 @@ def main():
     _load_threads()
     _load_projects()
     _load_proposals()
+    _load_studios()
     for _ in range(_WORKERS):
         threading.Thread(target=_worker, daemon=True).start()
     threading.Thread(target=_resume_turns, daemon=True).start()

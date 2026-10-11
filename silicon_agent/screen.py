@@ -264,7 +264,7 @@ def _features(design: str, ir: dict, backend: str) -> list[float]:
     f = [1.0]
     if design.startswith("rtl:"):
         # the exposed parameters themselves, in declaration order (log2 for anything > 8), padded to 7
-        vals = [float(v) for k, v in sorted(ir.items()) if isinstance(v, (int, float)) and not isinstance(v, bool)][:7]
+        vals = [float(v) for k, v in sorted(ir.items()) if k != "rev" and isinstance(v, (int, float)) and not isinstance(v, bool)][:7]
         f += [math.log2(v) if v > 8 else v for v in vals] + [0.0] * (7 - len(vals))
         return f
     if design == "matmul":

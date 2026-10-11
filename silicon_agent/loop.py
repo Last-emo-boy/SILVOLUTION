@@ -49,7 +49,8 @@ Respond with a JSON object:
     ...
   ],
   "stop": false,
-  "stop_reason": "<only when stop is true: the bound reached and the evidence, 1-3 sentences>"
+  "stop_reason": "<only when stop is true: the bound reached and the evidence, 1-3 sentences>",
+  "revise": "<only for a designer-written design (the IR schema says so) and only when no knob reaches the critical path: what to rewrite in the RTL and why; otherwise omit>"
 }"""
 
 
@@ -268,6 +269,7 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             _learn(design, backend, c, run_id, history[-2], history[-1], shown_lessons, emit)
 
     siblings: list[dict] = []  # extra screened candidates to evaluate alongside the chosen one this round
+    n_revised = [0]            # designer rewrites requested so far (authored designs only)
 
     if spec.get("sweep"):
         # design-space sweep: no planner; every point of the product of the listed knob values is measured (n_par at
@@ -358,6 +360,31 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
             break
         (out / f"llm_{it:02d}.json").write_text(json.dumps({"system": system, "prompt": user, "reply": reply}, indent=2))
         diagnosis = reply.get("diagnosis", "")
+        # an authored design (studio): the planner may ask for a rewrite of the RTL instead of a knob move; the
+        # studio's designer changes it, the check (independent reference) runs, and the new revision is measured next
+        revise_req = str(reply.get("revise") or "").strip()
+        if revise_req and control is not None and hasattr(control, "revise") and n_revised[0] < int(spec.get("max_revisions", 3)):
+            n_revised[0] += 1
+            print(f"     planner asks the designer to revise: {revise_req[:160]}", flush=True)
+            emit({"kind": "revising", "iteration": it + 1, "diagnosis": diagnosis, "instruction": revise_req})
+            last_m = history[-1]
+            try:
+                rr = control.revise(revise_req, {"metrics": {k: v for k, v in last_m["metrics"].items() if k != "sim_log"}, "violations": last_m["violations"],
+                                                 "critical_path": last_m["metrics"].get("critical_path", [])[:6], "ir": ir_view(IR.from_dict(last_m["ir"]), locked)})
+            except Exception as e:  # noqa: BLE001 -- the studio's failure is a note, the run goes on
+                rr = {"ok": False, "error": str(e)[-300:]}
+            if rr.get("ok"):
+                # the registry re-registered the bundle with the new revision: pick up its IR class and emitter
+                design = design_for(spec)
+                IR = design.ir_cls
+                system = build_system(design, backend)   # the IR schema now lists the new revision
+                nxt = IR.from_dict({**ir.to_dict(), "rev": rr["rev"]})
+                emit({"kind": "revised", "iteration": it + 1, "rev": rr["rev"], "check": (rr.get("check") or {}).get("ok", True), "note": str(rr.get("note") or "")[:300]})
+                action = f"designer revision #{rr['rev']}: {revise_req[:200]}"
+                ir = nxt
+                fallbacks = []
+                continue
+            emit({"kind": "note", "iteration": it + 1, "message": f"revision request failed: {rr.get('error') or 'no passing revision'}; continuing with the knobs"})
         # accept both the new multi-candidate shape and the old single next_ir
         cands = reply.get("candidates") or ([{"ir": reply["next_ir"], "why": reply.get("action", "")}] if reply.get("next_ir") else [])
         cands = [c for c in cands if isinstance(c, dict) and isinstance(c.get("ir"), dict)][:3]

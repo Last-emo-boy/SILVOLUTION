@@ -197,13 +197,17 @@ def register_rtl(bundle: dict) -> Design:
     top = bundle["top"]
 
     def tb(a, period):
+        if bundle.get("stream"):
+            # an authored stream design: the generic replay bench, expected values from the bundle's reference
+            return _rtl.stream_tb(bundle, a, period)
         t = bundle.get("tb") or ""
         # the bench may read the period from a parameter named PERIOD
         return re.sub(r"parameter\s+real\s+PERIOD\s*=\s*[\d.]+", f"parameter real PERIOD = {period}", t)
 
+    vectors = (lambda a, seed=1: _rtl.vectors(bundle, a, seed=seed)) if bundle.get("stream") else None
     d = Design(kind=kind, ir_cls=A, top=top, emit=lambda a, backend="ecp5": _rtl.emit(bundle, a, backend), test_module=None,
                sim_env=lambda a: {}, throughput=lambda a: _rtl.throughput(bundle, a), throughput_unit=bundle.get("throughput_unit", "items/cycle"),
-               latency=lambda a: _rtl.latency_cycles(bundle, a), extra_sim_sources=(), vectors=None, tb=tb)
+               latency=lambda a: _rtl.latency_cycles(bundle, a), extra_sim_sources=(), vectors=vectors, tb=tb)
     DESIGNS[kind] = d
     return d
 

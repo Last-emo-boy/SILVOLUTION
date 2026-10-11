@@ -35,6 +35,7 @@ const openTurns = new Set(); // iteration numbers whose details are expanded
   llmBanner(); setInterval(llmBanner, 30000);
   specs = await api("/specs");
   try { BFACTS = (await api("/schema")).backend_facts; BSTAGES = Object.fromEntries(Object.entries(BFACTS).map(([k, v]) => [k, v.sim_stages])); } catch {}
+  try { rtlBundles = Object.fromEntries((await api("/rtl")).map((b) => [b.design, b])); } catch {}
   ext = wire({ $, api, post, esc, el, fmt, specs, state, select, refreshJobs, show });
   await ext.initForm();
   ext.initActions();
@@ -146,13 +147,15 @@ async function poll() {
 // fold the event stream into turns: one per iteration
 function turns() {
   const rows = new Map(), notes = [];
+  // the planner asked the studio's designer for a rewrite (authored designs): a note on the round it precedes
+  const evs = detail.events.map((e) => e.kind === "revising" ? { ...e, kind: "note", message: `改写请求：${e.instruction}` } : e.kind === "revised" ? { ...e, kind: "note", message: `修订 #${e.rev}${e.note ? " — " + e.note : ""}` } : e);
   let pendingMem = null, pendingSteer = [];
   const key = (e) => `${e.iteration}.${e.slot || 0}`;
   const get = (e) => { const k = key(e); if (!rows.has(k)) rows.set(k, { n: e.iteration, slot: e.slot || 0, pending: true, user: [], stages: {} }); return rows.get(k); };
-  for (const e of detail.events) {
+  for (const e of evs) {
     switch (e.kind) {
       case "user": pendingSteer.push(e); break;
-      case "note": if (e.iteration) get({ iteration: e.iteration }).note = e.message; else notes.push(e); break;
+      case "note": if (e.iteration) { const r = get({ iteration: e.iteration }); r.note = r.note ? r.note + "\n" + e.message : e.message; } else notes.push(e); break;
       case "steer": get({ iteration: e.iteration }).user.push(...pendingSteer.splice(0)); break;
       case "memory": pendingMem = e; break;
       case "rescreen": get({ iteration: e.iteration }).rescreen = e; break;
@@ -274,6 +277,7 @@ function irChips(ir, prevIr, locked) {
 }
 const line = (lbl, html, cls = "") => `<div class="ln"><span class="lbl ${cls}">${lbl}</span><div class="txt">${html}</div></div>`;
 let BSTAGES = {}, BFACTS = {};
+let rtlBundles = {};   // design kind rtl:<id> -> bundle summary (/api/rtl), for the design tab of such runs
 const stagesOf = (backend) => BSTAGES[backend] || ["behavioral", "post_synth_func"];
 const stageChips = (r, backend) => {
   const keys = stagesOf(backend);
@@ -299,7 +303,7 @@ function buildTurn(r, prevIr, unit, spec) {
   if (r.slot) b.appendChild(el(`<div class="action"><span class="why">并行候选（同轮实测）— </span>${esc(loopText(r.action || ""))}</div>`));
   else if (r.n === 1) b.appendChild(el(`<div class="action">从规格的起点设计开始。</div>`));
   else if (a) b.appendChild(el(`<div class="action">${r.plan?.fallback ? `<span class="why">兜底候选 — </span>` : ""}${esc(loopText(a))}</div>`));
-  if (r.note) b.appendChild(el(`<div class="action"><span class="why">${esc(loopText(r.note))}</span></div>`));
+  for (const line of (r.note || "").split("\n").filter(Boolean)) b.appendChild(el(`<div class="action"><span class="why">${esc(loopText(line))}</span></div>`));
   if (r.ir) b.appendChild(el(irChips(r.ir, prevIr, spec.locked)));
   if (r.pending) {
     b.appendChild(el(`<div class="head"><span class="verdict live">${r.ir ? "仿真 · 综合 · 布局布线" : "规划中"}</span></div>`));
@@ -405,7 +409,13 @@ function renderDesign(row, done, spec) {
   const prev = done.filter((d) => d.n < row.n).at(-1)?.ir;
   const sec = el(`<div class="sec"><h3>架构 <span class="hint">第 ${row.n} 轮${row.pending ? "（评估中）" : ""}</span></h3></div>`);
   const arch = el(`<div class="arch"></div>`);
-  if (design === "matmul") {
+  if (design.startsWith("rtl:")) {
+    // a BYO / studio design: no sketch -- the generator is the uploaded or designer-written RTL; say where it came from
+    const b = rtlBundles[design];
+    const revs = b?.revisions || [];
+    const cur = revs.find((r) => r.rev === (ir.rev ?? 0));
+    sec.appendChild(el(`<div class="archlegend"><span>${b?.authored ? "设计工作室编写的 RTL" : "自带 RTL"} · 顶层 <span class="mono">${esc(b?.top || design)}</span>${b?.stream ? ` · 流接口 ${esc(b.stream.in)} → ${esc(b.stream.out)}` : ""}</span>${b?.reference?.kind ? `<span>期望值来源：${b.reference.kind === "independent" ? "独立参考模型" : b.reference.kind === "generator" ? `生成器向量（${esc(b.reference.origin?.design || "")}）` : "自带自检台"}${b.check?.golden_vs_reference?.samples ? ` · 一致 ${b.check.golden_vs_reference.samples} 样本` : ""}</span>` : ""}${revs.length ? `<span>修订 ${ir.rev ?? 0} / ${revs.length - 1}${cur?.note ? ` — ${esc(cur.note)}` : ""}</span>` : ""}<span>${esc(b?.description || "")}</span></div>`));
+  } else if (design === "matmul") {
     const R = Math.min(ir.pe_rows, 12), C = Math.min(ir.pe_cols, 16);
     for (let i = 0; i < R; i++) { const r = el(`<div class="r"></div>`); for (let j = 0; j < C; j++) r.appendChild(el(`<div class="pe">×+</div>`)); arch.appendChild(r); }
     sec.appendChild(arch);

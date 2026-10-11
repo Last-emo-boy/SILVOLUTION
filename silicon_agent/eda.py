@@ -91,6 +91,11 @@ raise SystemExit(1 if failed else 0)
 
 
 def _simulate_sv_bench(d: Design, arch, rtl: Path, sim_dir: Path, timeout: int) -> tuple[bool, str, dict]:
+    if d.vectors is not None:
+        # an authored stream bundle: the generic replay bench reads the reference's stim/exp from the sim directory
+        stim, exp = d.vectors(arch)
+        (sim_dir / "stim.hex").write_text("\n".join(stim) + "\n")
+        (sim_dir / "exp.hex").write_text("\n".join(exp) + "\n")
     (sim_dir / "tb.sv").write_text(d.tb(arch, 10.0))
     srcs = [str(sim_dir / "tb.sv"), str(rtl)] + [str(TB_DIR / f) for f in d.extra_sim_sources]
     log = sim_dir / "sim.log"

@@ -62,7 +62,7 @@ export const siliconAgent = {
     // A job-server redeploy leaves the worker's keep-alive sockets pointing at a container that is gone; the first
     // request after that fails at the transport ("fetch failed"). Reads and the side-effect-free POSTs are retried
     // once on a fresh connection; POST /jobs is not (a retry could start the run twice).
-    const idempotent = (method, path) => method === 'GET' || path === '/interpret' || path === '/estimate' || path === '/author/check' || /^\/proposals\/[^/]+$/.test(path)
+    const idempotent = (method, path) => method === 'GET' || path === '/interpret' || path === '/estimate' || path === '/author/check' || /^\/studio\/[^/]+\/check$/.test(path) || /^\/proposals\/[^/]+$/.test(path)
     const api = async (method, path, body, signal) => {
       const req = async () => fetch(`${server}/api${path}`, { method, headers: await headers(), body: body === undefined ? undefined : JSON.stringify(body), signal })
       let r
@@ -401,6 +401,7 @@ export const siliconAgent = {
       '7a. "Compare / try both / race": sa_tournament with 2-4 variants (planner deepseek-flash vs deepseek-v4-pro, two starting designs, two objective orders); poll sa_tournament_status; report the leader and why the others lost, with numbers.',
       '7b. sa_memory searches the lessons of every earlier run (text + design/device preference). Use it when the user asks what was learned, when a run stalls and you want precedent for the next move (then sa_steer with the lesson), or to explain a result; cite the lesson id.',
       '8. Devices: the FPGAs plus `sky130` (OpenROAD ASIC standard cells, 2-10 min per flow): no DSP/LUT there -- the numbers are cells, area in um2 (max_area_um2 is the budget, minimize_area the objective) and the STA critical path through fa_1/ha_1 adder cells.',
+      '9. The studio, when the generators are not enough. (a) sa_interpret returns design "custom" (no generator fits), or the user describes a block/structure the generators do not have: write a precise functional specification (arithmetic, widths, truncation/rounding/saturation, rate, alignment, reset, tunable parameters) and call sa_studio_open (pass `thread`); tell the user a designer session is writing and that an independent reference model will check it; poll sa_studio_status (wait_seconds 90) until registered; then sa_run the spec with design "rtl:<id>", locked {}, initial_ir {} (or the knobs the studio declared), the device and constraints from the request. (b) A finished run whose planner stopped at a bound ("no knob reaches the critical path"), or a user asking to go beyond the knobs / restructure: sa_studio_fork (job, brief = the goal with the measured numbers) for fir/decim/cic/iir/fir_chain runs, then sa_run "rtl:<id>" and compare with the original. (c) A registered studio design that measures badly: sa_studio_revise with the critical path, then sa_run again with initial_ir {"rev": <new rev>}. Never promise a studio result before sa_studio_status says registered; a failed studio is reported with its failing step.',
       'Keep the final answer short: the chat already shows the spec, every iteration and the result as cards next to your message, so write 3-8 sentences a colleague would say, not a report. No headings, no tables, no restating every iteration; name the numbers that decide the outcome and what you would do next. Do not narrate your tool calls ("I will call ...").',
       'Answer in the user\'s language.',
     ].join('\n')
@@ -415,6 +416,17 @@ export const siliconAgent = {
       'Never claim a result the gate or the A/B run did not measure. The operator merges; you do not.',
       'Answer in the user\'s language.',
     ].join('\n')
+    // The designer method: how to write a design in the studio and get it checked.
+    const DESIGNER_METHOD = [
+      'You are the designer session of silicon-agent\'s studio. Your working directory is one studio\'s work/ (README-studio.md there explains the files); ../SPEC.md is the task. Produce work/rtl/*.sv, work/golden.py and work/design.json, check with sa_studio_check (id = the studio id in the prompt) until every step passes, then sa_studio_submit. Your shell has no python/iverilog/yosys: it is for ls, cat, grep, diff; every check runs on the job server.',
+      '1. Read ../SPEC.md and README-studio.md first. The expected outputs in the check come from an INDEPENDENT reference model that another session writes from ../SPEC.md alone -- it never sees your code. So before writing RTL, make sure ../SPEC.md states the arithmetic unambiguously (widths, truncation vs rounding, saturation vs wrap, what one output per N inputs means, alignment of the first output, reset behaviour); you may edit ../SPEC.md to make it precise, never to make it easier.',
+      '2. The interface contract for a stream block: clk, rst (synchronous, active high), in_valid, in_ready (a function of state only: never combinational from in_valid), signed [IN_W-1:0] input, out_valid, signed [OUT_W-1:0] output; outputs in order; nothing valid during reset. SystemVerilog-2012 that iverilog -g2012, yosys and Vivado all accept: no interfaces, classes, unpacked-array ports, or $-system tasks in synthesizable code. One top module named in design.json; helper modules may follow it in the same file or others under rtl/.',
+      '3. Parameters are the knobs the planner will tune afterwards: expose pipelining depth, resource sharing / folding and similar structural choices as top-level `parameter`s with sane defaults, and declare each in design.json params with {default, min, max | choices, hint}. Widths that depend on parameters go in design.json stream.in_width/out_width/rate as expressions of them; latency and throughput too.',
+      '4. golden.py: def golden(params: dict, xs: list[int]) -> list[int], standard library only, integer arithmetic, exactly the RTL\'s widths, truncation/rounding and wrap, one output per `rate` inputs. The check first compares golden against the independent reference (cheap), then simulates your RTL on the reference\'s vectors, then checks the stream properties with SymbiYosys. A disagreement between golden and the reference means either your reading of the spec or the spec itself is wrong: fix the model/RTL, or sharpen ../SPEC.md and say so in your reply (the reference is regenerated from the new text).',
+      '5. A forked design (the studio started from a generator\'s RTL): the function is frozen -- the check compares against the generator\'s own vectors -- and the structure is yours: restructure toward the goal in ../SPEC.md (shorter critical path, fewer LUTs, fewer DSPs) and expose the choices as parameters. Keep the top module name and ports.',
+      '6. After sa_studio_submit succeeds, reply in a few sentences: what the architecture is, what the parameters do, what you expect the critical path to be. Never claim a check or measurement that the tools did not return.',
+      'Answer in the user\'s language.',
+    ].join('\n')
     ctx.skills.register({
       name: 'silicon-agent',
       description: 'Turn a natural-language FPGA accelerator request into signed-off Verilog with silicon-agent: interpret, estimate, run on the real device, explain the trajectory.',
@@ -423,6 +435,80 @@ export const siliconAgent = {
 
     // Guardrails for silicon-agent chat sessions (the job server opens them with a `sa-thread-` session key):
     // the method is injected as a prompt section so the agent never has to be told to "use the skill", and the
+    // ---- the design studio: the agent writes RTL (designer session) for a block no generator covers, or forks a
+    // run's design out of its knobs; an independent reference model written from the spec alone is the check
+    const studioNote = (r) => {
+      const n = { designing: 'the designer session is writing (minutes): call sa_studio_status with wait_seconds 90 until it leaves designing/referencing/checking/revising',
+                  referencing: 'the independent reference model is being written from SPEC.md', checking: 'elaborate, golden vs reference, simulation on the reference\'s vectors, stream properties',
+                  revising: 'the designer is fixing what the check found', registered: `done: design kind ${r.design} is registered -- run it with sa_run (design "${r.design}", locked {}, initial_ir {} or the knobs it declares)`,
+                  failed: 'the design did not pass the check within the rounds allowed: read steps[], then sa_studio_revise with precise guidance or open a new studio with a sharper brief',
+                  interrupted: 'the server restarted mid-pipeline: POST resume (sa_studio_status does not); tell the user' }[r.status]
+      return n ? { ...r, note: n } : r
+    }
+    agnes.registerTool({
+      name: 'sa_studio_open',
+      description: 'Open a design studio for a block NO generator covers (sa_interpret returned design "custom", or the user asks for a structure the generators do not have). A separate designer session (deep model) writes the RTL, a bit-exact golden model and the parameter list from `spec_text`; a session that never sees the RTL writes an independent reference model from the same text; the RTL must match the reference on random stimulus, pass the stream properties, then it is registered as design "rtl:<id>" for sa_run. Write spec_text as a precise functional specification: the arithmetic (widths, truncation vs rounding, saturation, wrap), the rate (outputs per input), sample alignment, reset behaviour, the parameters you want tunable. Returns the studio id; poll with sa_studio_status (several minutes).',
+      parameters: obj({ brief: str({ maxLength: 2000 }), spec_text: str({ maxLength: 12000 }), name: str({ maxLength: 120 }), thread: str({ maxLength: 64 }) }, ['brief', 'spec_text']),
+      meta: { ...starts, costHint: { wallMs: 900000 } },
+      async execute({ brief, spec_text, name, thread }, tctx) {
+        try { return text(await api('POST', '/studio', { brief, spec_text, name, thread }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+    agnes.registerTool({
+      name: 'sa_studio_fork',
+      description: 'Fork a finished run\'s design (its best iteration, or `iteration`) into a studio: the designer session starts from the generator\'s emitted RTL and restructures it beyond the IR knobs toward `brief` (e.g. fewer LUTs, a shorter critical path named in the run\'s diagnosis), keeping the function -- the check compares against the generator\'s own vectors. Available for fir / decim / cic / iir / fir_chain runs. Returns the studio id; poll with sa_studio_status; when registered, run "rtl:<id>" with sa_run.',
+      parameters: obj({ job: str({ maxLength: 64 }), iteration: int({ minimum: 1, maximum: 64 }), brief: str({ maxLength: 2000 }), name: str({ maxLength: 120 }), thread: str({ maxLength: 64 }) }, ['job', 'brief']),
+      meta: { ...starts, costHint: { wallMs: 900000 } },
+      async execute({ job, iteration, brief, name, thread }, tctx) {
+        try { return text(await api('POST', '/studio', { from_job: job, from_iteration: iteration, brief, name, thread }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+    agnes.registerTool({
+      name: 'sa_studio_status',
+      description: 'A studio\'s state: status (designing / referencing / checking / revising / registered / failed), the pipeline steps with check reports (which step failed and its log), the reference kind, the registered design kind and its revisions, the designer\'s cost. With wait_seconds > 0 it blocks (at most 90 s) while the pipeline is running.',
+      parameters: obj({ id: str({ maxLength: 64 }), wait_seconds: int({ minimum: 0, maximum: 90 }) }, ['id']),
+      meta: readOnly,
+      async execute({ id, wait_seconds }, tctx) {
+        const deadline = Date.now() + 1000 * Math.min(wait_seconds ?? 0, 90)
+        try {
+          for (;;) {
+            const r = await api('GET', `/studio/${encodeURIComponent(id)}`, undefined, tctx?.signal)
+            const busy = ['designing', 'referencing', 'checking', 'revising'].includes(r.status) || r.running
+            if (!busy || Date.now() >= deadline) { const { files, bundle, ...rest } = r; rest.n_files = files?.length; rest.revisions = bundle?.revisions; return text(studioNote(rest)) }
+            await new Promise((ok) => setTimeout(ok, 5000))
+          }
+        } catch (e) { return fail(e) }
+      },
+    })
+    agnes.registerTool({
+      name: 'sa_studio_revise',
+      description: 'Ask the studio\'s designer to rewrite a registered design: `instruction` says what to change and why (cite the measured critical path / resource numbers from sa_job); the result is re-checked against the same reference and becomes the next revision (`rev`) of design "rtl:<id>"; then sa_run again with initial_ir {"rev": <new rev>}. Poll with sa_studio_status.',
+      parameters: obj({ id: str({ maxLength: 64 }), instruction: str({ maxLength: 4000 }), context: any() }, ['id', 'instruction']),
+      meta: { ...starts, costHint: { wallMs: 900000 } },
+      async execute({ id, instruction, context }, tctx) {
+        try { return text(await api('POST', `/studio/${encodeURIComponent(id)}/revise`, { instruction, context }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+    // the designer session's own two tools: its check and its submit (the toolchain is on the job server)
+    agnes.registerTool({
+      name: 'sa_studio_check',
+      description: 'Designer inner loop: on this studio\'s working directory, elaborate work/rtl with iverilog, compare golden.py with the independent reference (Python vs Python), simulate the RTL on the reference\'s vectors through the generic stream bench, and check the stream properties with SymbiYosys. Returns the steps with logs. Use it after every edit; `params` overrides the parameter defaults for this check.',
+      parameters: obj({ id: str({ maxLength: 64 }), params: any(), properties: bool() }, ['id']),
+      meta: { ...readOnly, costHint: { wallMs: 120000 } },
+      async execute({ id, params, properties }, tctx) {
+        try { return text(await api('POST', `/studio/${encodeURIComponent(id)}/check`, { params, properties: properties ?? true }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+    agnes.registerTool({
+      name: 'sa_studio_submit',
+      description: 'Designer: register the working directory as the design (or as its next revision when it is already registered). Runs the full check first; a failing check is returned with its logs and nothing is registered. `note`: one sentence on what this version is.',
+      parameters: obj({ id: str({ maxLength: 64 }), note: str({ maxLength: 300 }) }, ['id']),
+      meta: { ...starts, costHint: { wallMs: 180000 } },
+      async execute({ id, note }, tctx) {
+        try { return text(await api('POST', `/studio/${encodeURIComponent(id)}/submit`, { note }, tctx?.signal)) } catch (e) { return fail(e) }
+      },
+    })
+
     // host tools that would let it edit files or run commands are refused -- every mutation goes through the
     // job server, whose results are what the chat renders.
     const isChatSession = (session) => typeof session?.key === 'string' && session.key.startsWith('sa-thread-')
@@ -431,12 +517,16 @@ export const siliconAgent = {
     // an author session changes the generators in a scratch copy the job server made (its cwd); it may write there
     // and nowhere else, and the change leaves through sa_propose
     const isAuthorSession = (session) => typeof session?.key === 'string' && session.key.startsWith('sa-author-')
+    // a designer session writes RTL in the studio's work/ directory the job server opened it in; same confinement
+    // as an author session, its change leaves through sa_studio_submit
+    const isStudioSession = (session) => typeof session?.key === 'string' && session.key.startsWith('sa-studio-')
     const HOST_TOOLS = new Set(['write', 'edit', 'shell', 'web_fetch', 'subagent_spawn', 'subagent_fork', 'plugin_helper_install', 'skill_helper_install', 'skill_helper_import', 'mcp_manage'])
     const NEVER = new Set(['web_fetch', 'subagent_spawn', 'subagent_fork', 'plugin_helper_install', 'skill_helper_install', 'skill_helper_import', 'mcp_manage'])
     agnes.registerHook('context', (_payload, hctx) => {
       // a participant returns only its own sections (author shape: id/order/content); the kernel keeps the rest
       if (isChatSession(hctx.session)) return { sections: [{ id: 'silicon-agent', order: 50, content: `# silicon-agent\n${METHOD}` }] }
       if (isAuthorSession(hctx.session)) return { sections: [{ id: 'silicon-agent-author', order: 50, content: `# silicon-agent author\n${AUTHOR_METHOD}` }] }
+      if (isStudioSession(hctx.session)) return { sections: [{ id: 'silicon-agent-studio', order: 50, content: `# silicon-agent studio designer\n${DESIGNER_METHOD}` }] }
       return {}
     })
     // the session's workspace is the scratch tree the job server opened the author session in; a relative path is
@@ -451,6 +541,23 @@ export const siliconAgent = {
       if (isReferenceSession(hctx.session)) return { allow: false, reason: 'a reference-model session answers from the description alone (no tools)' }
       if (isChatSession(hctx.session) && HOST_TOOLS.has(payload.name))
         return { allow: false, reason: `${payload.name} is not available in a silicon-agent chat: use the sa_* tools (the design, its files and the EDA run live on the job server)` }
+      if (isStudioSession(hctx.session)) {
+        if (NEVER.has(payload.name)) return { allow: false, reason: `${payload.name} is not available in a designer session` }
+        if (payload.name === 'write' || payload.name === 'edit') {
+          const p = payload.args?.path
+          // ../SPEC.md (the studio's specification, one level up from work/) is the one file outside work/ the designer may sharpen
+          const root = String(hctx.session?.workspaceRoot ?? '').replace(/\/$/, '')
+          const specPath = root ? root.replace(/\/work$/, '') + '/SPEC.md' : ''
+          const isSpec = typeof p === 'string' && (p === '../SPEC.md' || (specPath && p === specPath))
+          if (!insideRoot(hctx.session, p) && !isSpec) return { allow: false, reason: `writes are confined to the studio's work/ (and ../SPEC.md); ${p} is outside it` }
+        }
+        if (payload.name === 'shell') {
+          const cmd = String(payload.args?.command ?? '')
+          if (payload.args?.cwd && !insideRoot(hctx.session, payload.args.cwd)) return { allow: false, reason: 'shell cwd must stay in the studio' }
+          if (/\b(curl|wget|ssh|scp|rsync|git (push|commit|checkout|reset)|rm -rf \/|sudo|docker|pip install|npm )/.test(cmd))
+            return { allow: false, reason: 'designer shells are for ls/cat/grep/diff in the studio; the toolchain runs through sa_studio_check' }
+        }
+      }
       if (isAuthorSession(hctx.session)) {
         if (NEVER.has(payload.name)) return { allow: false, reason: `${payload.name} is not available in an author session` }
         if (payload.name === 'write' || payload.name === 'edit') {

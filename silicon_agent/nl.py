@@ -58,6 +58,13 @@ Available designs:
           chains). locked: {"stages": [{"taps","data_width","coef_width","cutoff"}, ...]} -- one entry per stage.
           initial_ir: {"stages": [<full FIR IR per stage>], "fifo_depth": 16, "round_mode": "truncate"}.
           Use it only when the user describes more than one filter in series.
+  custom  NONE of the above computes what the user asks for (a median / rank filter, a CRC, an interpolator, a PID, a
+          Goertzel, a histogram, an encoder ... any single-stream block the generators do not have). Then design is
+          "custom": the agent's studio writes the RTL. Put a precise functional specification in "spec_text": the
+          exact arithmetic (input/output widths, signedness, truncation vs rounding, saturation vs wrap), the rate (how
+          many inputs per output), the alignment of the first output, reset behaviour, and which parameters should
+          stay tunable. locked {} and initial_ir {}; constraints and backend as usual. Do not force a request into a
+          generator that computes something else.
 Available backends (choose from device words; default xc7s50 when timing signoff is implied, else ecp5; `sky130`
 is an ASIC standard-cell flow (OpenROAD, SkyWater 130 nm): pick it when the user says ASIC / tapeout / standard cell /
 流片 / sky130, where constraints are fmax_mhz and max_area_um2 (no DSP/LUT budgets) and the natural objective is
@@ -67,8 +74,9 @@ is an ASIC standard-cell flow (OpenROAD, SkyWater 130 nm): pick it when the user
 Spec shape:
 {
   "task": "<short title, user's language>",
-  "design": "matmul" | "fir",
+  "design": "matmul" | "fir" | ... | "custom",
   "backend": "ecp5" | "xc7s50",
+  "spec_text": "<only with design custom: the precise functional specification>",
   "locked": {<task-defining fields>},
   "planner": <string or null>   (only when the user names a planner model to compare, e.g. "deepseek-reasoner"; otherwise null)
   "constraints": {"fmax_mhz": <number>, "max_dsp": <number or null>, "max_lut": <number or null>, "max_power_mw": <number or null, Vivado devices only>, "max_area_um2": <number or null, sky130 only>,
@@ -141,10 +149,19 @@ def interpret(message: str, context: dict | None = None) -> dict:
             "best": context.get("best"), "last": context.get("last")}, ensure_ascii=False)[:4000])
     r = llm.chat_json(INTERPRET_SYSTEM.replace("@BACKENDS@", _backend_lines()), f"## Request\n{message}{ctx}")
     spec = r.get("spec") or {}
-    # normalize + validate against the real schema; a fork inherits everything it does not mention
     base = context["spec"] if (context and context.get("spec") and r.get("fork")) else None
-    design = spec.get("design") if spec.get("design") in DESIGNS else (base["design"] if base else "matmul")
     backend = spec.get("backend") if spec.get("backend") in BACKENDS else (base["backend"] if base else "xc7s50")
+    if spec.get("design") == "custom" and not base:
+        # no generator fits: the studio designs it (server / agent); the spec carries the functional specification
+        cons_in = spec.get("constraints") or {}
+        obj = [o for o in (cons_in.get("objective") or ["maximize_throughput", "minimize_lut"]) if o in OBJECTIVES] or ["maximize_throughput", "minimize_lut"]
+        cons = {"fmax_mhz": 100.0, **{k: v for k, v in cons_in.items() if k != "objective"}, "objective": obj}
+        out_spec = {"task": spec.get("task") or message[:60], "design": "custom", "backend": backend, "locked": {}, "constraints": cons, "initial_ir": {},
+                    "spec_text": str(spec.get("spec_text") or r.get("spec_text") or "").strip()[:12000] or message}
+        return {"spec": out_spec, "fork": False, "summary": r.get("summary", ""), "assumptions": r.get("assumptions") or [], "questions": r.get("questions") or [],
+                "alternatives": [], "errors": [], "lang": _lang(message), "custom": True}
+    # normalize + validate against the real schema; a fork inherits everything it does not mention
+    design = spec.get("design") if spec.get("design") in DESIGNS else (base["design"] if base else "matmul")
     if base and base["design"] != design:
         base = None  # a different design kind: nothing to inherit
     sch = SCHEMAS[design]
