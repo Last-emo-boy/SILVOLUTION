@@ -13,7 +13,7 @@ if [ -x "$PY311" ]; then
   for f in silicon_agent/*.py silicon_agent/backends/*.py silicon_agent/tb/*.py; do "$PY311" -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$f" || { echo "syntax check failed on $f (Python 3.11)" >&2; exit 1; }; done
 fi
 rsync -az --delete \
-  --exclude tools/ --exclude cache/ --exclude runs/ --exclude results/ --exclude '__pycache__/' --exclude .git/ \
+  --exclude tools/ --exclude cache/ --exclude runs/ --exclude results/ --exclude broll/ --exclude .workflow/ --exclude '__pycache__/' --exclude .git/ \
   ./ "$HOST:/opt/silicon-agent/app/"
 ssh "$HOST" 'set -e
   mkdir -p /srv/sa/home && chown -R 10001:10001 /srv/sa
