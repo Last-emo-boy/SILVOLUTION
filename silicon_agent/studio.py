@@ -554,7 +554,16 @@ def designer_turn(rec: dict, text: str, lang: str = "zh", on_event=None) -> dict
     c = agh.client()
     sid = designer_session(rec)
     try:
-        r = c.prompt(sid, designer_prompt(rec, text, lang), on_event=on_event, timeout=TURN_S)
+        try:
+            r = c.prompt(sid, designer_prompt(rec, text, lang), on_event=on_event, timeout=TURN_S)
+        except agh.AghError as e:
+            if "faulted" not in str(e):
+                raise
+            # the harness marks a session faulted after a storage hiccup (seen under host IO pressure) and asks
+            # for a reopen: session/load clears it, the turn is retried once
+            print(f"studio {rec['id']}: designer session faulted, reopening", flush=True)
+            c.load_session(sid, str(_dir(rec["id"]) / "work"))
+            r = c.prompt(sid, designer_prompt(rec, text, lang), on_event=on_event, timeout=TURN_S)
     except agh.AghError as e:
         if "SESSION_BUSY" in str(e):
             # the harness still runs an earlier turn of this session (a client that gave up on it): follow that
