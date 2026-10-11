@@ -19,7 +19,7 @@ from .backends._common import CACHE, ROOT, TB_DIR, TOOLS, tool_env, run  # noqa:
 from .designs import DESIGNS, Design
 from .ir import Metrics
 
-CACHE_VERSION = "16"  # bump when report parsing, the vector benches or the sim libraries change (16: long valid gaps in the stream benches)
+CACHE_VERSION = "17"  # bump when report parsing, the vector benches or the sim libraries change (17: Gowin SP/SPX9 ROM init no longer wiped)
 
 
 class _BackendView(dict):

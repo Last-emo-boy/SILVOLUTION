@@ -264,8 +264,11 @@ module SP (DO, DI, BLKSEL, AD, WRE, CLK, CE, OCE, RESET);
   reg [7:0] mem [0:2047];
   integer i; reg [31:0] dq;
   // INIT_RAM_xx (x8 view): 32 lanes of 8 bits per parameter (yosys init_slice_x8); lane i = INIT_RAM_[i/32][(i%32)*8 +: 8]
+  // The zero-fill and the INIT load share one initial block: separate initial blocks have no defined order, and a
+  // zero-fill that runs after the load wipes a ROM (a twiddle ROM read 0 in a Gowin netlist sim).
   reg [255:0] gw_iv [0:63];
   initial begin
+    dq = 0;
     gw_iv[0]=INIT_RAM_00;
     gw_iv[1]=INIT_RAM_01;
     gw_iv[2]=INIT_RAM_02;
@@ -332,7 +335,6 @@ module SP (DO, DI, BLKSEL, AD, WRE, CLK, CE, OCE, RESET);
     gw_iv[63]=INIT_RAM_3F;
     for (i = 0; i < 2048; i = i + 1) mem[i] = gw_iv[i / 32][(i % 32) * 8 +: 8];
   end
-  initial begin for (i = 0; i < 2048; i = i + 1) mem[i] = 8'd0; dq = 0; end
   function [31:0] rd; input [13:0] ad; input integer w; integer b, off;
     begin
       if (w >= 32) begin b = ad[13:5] * 4; rd = {mem[b+3], mem[b+2], mem[b+1], mem[b]}; end
@@ -371,9 +373,10 @@ module SPX9 (DO, DI, BLKSEL, AD, WRE, CLK, CE, OCE, RESET);
   reg [8:0] mem [0:2047];
   integer i; reg [35:0] dq;
   // INIT_RAM_xx: 16 words of 18 bits per parameter (yosys packs a ROM's contents this way): word i lives at
-  // lanes 2i, 2i+1 of the 18-bit view
+  // lanes 2i, 2i+1 of the 18-bit view; the load covers every entry, so it is the zero-fill too (see SP)
   reg [287:0] gw_iv [0:63];
   initial begin
+    dq = 0;
     gw_iv[0]=INIT_RAM_00;
     gw_iv[1]=INIT_RAM_01;
     gw_iv[2]=INIT_RAM_02;
@@ -443,7 +446,6 @@ module SPX9 (DO, DI, BLKSEL, AD, WRE, CLK, CE, OCE, RESET);
       mem[2*i+1] = gw_iv[i / 16][(i % 16) * 18 + 9 +: 9];
     end
   end
-  initial begin for (i = 0; i < 2048; i = i + 1) mem[i] = 9'd0; dq = 0; end
   function [35:0] rd; input [13:0] ad; input integer w; integer b, off;
     begin
       if (w >= 36) begin b = ad[13:5] * 4; rd = {mem[b+3], mem[b+2], mem[b+1], mem[b]}; end
