@@ -44,6 +44,9 @@ MAX_ROUNDS = int(os.environ.get("SA_STUDIO_ROUNDS", "3"))
 # registration gate on the bench's strength: at least this share of compilable mutants of the RTL must be caught by
 # the behavioral check (the reference's vectors / the generator's bench); 0 disables the gate
 MUTATION_MIN = float(os.environ.get("SA_STUDIO_MUTATION_MIN", "0.6"))
+# one designer turn at most this long: a designer that keeps searching (a run's revise waits on it) is cancelled and
+# the turn counts as failed; the next instruction resumes the same session
+TURN_S = float(os.environ.get("SA_STUDIO_TURN_S", "2400"))
 _lock = threading.Lock()
 
 README = """Design studio working directory (silicon-agent).
@@ -550,7 +553,14 @@ def designer_turn(rec: dict, text: str, lang: str = "zh", on_event=None) -> dict
     agh = _agh()
     c = agh.client()
     sid = designer_session(rec)
-    r = c.prompt(sid, designer_prompt(rec, text, lang), on_event=on_event, timeout=3600)
+    try:
+        r = c.prompt(sid, designer_prompt(rec, text, lang), on_event=on_event, timeout=TURN_S)
+    except agh.AghError as e:
+        if "timeout" not in str(e):
+            raise
+        c.cancel(sid)
+        print(f"studio {rec['id']}: designer turn cancelled after {TURN_S:.0f}s", flush=True)
+        r = {"text": "", "tools": [], "stop": "timeout"}
     u = c.usage(sid)
     with _lock:
         rec.setdefault("turns", []).append({"t": time.time(), "text": (r.get("text") or "")[-4000:], "tools": [t.get("name") for t in r.get("tools") or []], "usage": u})
@@ -700,11 +710,18 @@ def revise(rec: dict, instruction: str, context: dict | None = None, lang: str =
     if context:
         ctx = "\nMeasured context: " + json.dumps({k: context[k] for k in ("metrics", "violations", "critical_path", "ir") if k in context}, ensure_ascii=False)[:3000]
     msg = (f"Revise the design: {instruction}{ctx}\nKeep the function and the interface (the check compares against the same reference). Edit work/rtl/ "
-           "(and golden.py / design.json if the knobs change), run sa_studio_check until it passes, then sa_studio_submit. Say in one sentence what you changed.")
+           "(and golden.py / design.json if the knobs change), run sa_studio_check until it passes, then sa_studio_submit. Say in one sentence what you changed. "
+           "The instruction is the planner's direction, not a contract: if the exact structure it names is impossible or unsound, build the nearest sound "
+           "design that serves the same goal (shorter critical path / fewer resources) and say what differs -- do not spend the turn searching for the literal structure.")
     before = rec.get("revisions") or 0
     for rnd in range(MAX_ROUNDS):
         r = designer_turn(rec, msg, lang, on_event)
         note = (r.get("text") or instruction)[:300]
+        if r.get("stop") == "timeout":
+            # the designer did not finish: whatever is in work/ is not a revision; the run goes on with its knobs
+            st.update({"ok": False, "error": f"designer turn cancelled after {TURN_S:.0f}s"})
+            set_status(rec, "registered" if rec.get("bundle") else "failed")
+            return {"ok": False, "error": st["error"]}
         if (rec.get("revisions") or 0) > before:
             # the designer submitted inside its turn (sa_studio_submit registered the revision already)
             res = {"ok": True, "rev": rec["revisions"] - 1}
