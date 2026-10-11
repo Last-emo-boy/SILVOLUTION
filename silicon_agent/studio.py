@@ -563,7 +563,9 @@ def run_pipeline(rec: dict, lang: str = "zh", on_event=None) -> dict:
         r = designer_turn(rec, kick, lang, on_event)
         rec["steps"][-1].update({"ok": True, "text": (r.get("text") or "")[-1500:]})
         save(rec)
-        if rec["status"] == "registered":
+        if rec.get("bundle"):
+            # the designer's own sa_studio_submit registered the design during the turn
+            set_status(rec, "registered", design=f"rtl:{sid}")
             return rec
         # the designer may have submitted inside its turn (sa_studio_submit); otherwise the server submits now
         return submit(rec, lang, on_event)
@@ -653,10 +655,15 @@ def revise(rec: dict, instruction: str, context: dict | None = None, lang: str =
         ctx = "\nMeasured context: " + json.dumps({k: context[k] for k in ("metrics", "violations", "critical_path", "ir") if k in context}, ensure_ascii=False)[:3000]
     msg = (f"Revise the design: {instruction}{ctx}\nKeep the function and the interface (the check compares against the same reference). Edit work/rtl/ "
            "(and golden.py / design.json if the knobs change), run sa_studio_check until it passes, then sa_studio_submit. Say in one sentence what you changed.")
+    before = rec.get("revisions") or 0
     for rnd in range(MAX_ROUNDS):
         r = designer_turn(rec, msg, lang, on_event)
         note = (r.get("text") or instruction)[:300]
-        res = add_revision(rec, note)
+        if (rec.get("revisions") or 0) > before:
+            # the designer submitted inside its turn (sa_studio_submit registered the revision already)
+            res = {"ok": True, "rev": rec["revisions"] - 1}
+        else:
+            res = add_revision(rec, note)
         if res.get("ok"):
             st.update({"ok": True, "rev": res["rev"], "note": note})
             set_status(rec, "registered")
