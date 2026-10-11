@@ -177,7 +177,7 @@ export function wire({ $, api, post, esc, el, fmt, specs, state, select, refresh
     // fork to the design studio: the designer session restructures this run's design beyond its knobs
     $("#act-fork-studio").onclick = () => {
       const d = state.detail; if (!d) return;
-      const results = d.events.filter((e) => e.kind === "result");
+      const results = d.events.filter((e) => e.kind === "result").sort((a, b) => a.iteration - b.iteration || (a.slot || 0) - (b.slot || 0));
       const best = d.summary?.best;
       const dlg = $("#studio-dlg"), iters = $("#sf-iters"); iters.innerHTML = "";
       let pick = best ? null : (results.at(-1)?.iteration ?? null);

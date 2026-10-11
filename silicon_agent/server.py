@@ -1108,6 +1108,23 @@ def _export_md(tid: str) -> str:
                 v = _proposal_view(m["proposal"])
                 out += [f"**Generator change proposal `{m['proposal']}`** · {t} — {v['title']} ({v['status']})", ""] + [f"- {'✓' if st['ok'] else '✕'} {st['name']}" for st in v["steps"]] + [""]
             continue
+        if m.get("kind") == "studio":
+            rec = _studios.get(m.get("studio"))
+            if rec:
+                v = _studio_view(rec)
+                ref = v.get("reference") or {}
+                ref_s = {"independent": "independent reference model", "generator": f"the {((ref.get('origin') or {}).get('design') or '?')} generator's vectors", "self": "self-check only"}.get(ref.get("kind") or "", "reference pending")
+                head = f"**Design studio `{m['studio']}`** · {t} — {v.get('name') or ''} ({v['status']}" + (f", registered as `{v['design']}`" if v.get("design") else "") + ")"
+                out += [head, "", f"- verified against {ref_s}; {v.get('revisions') or 0} revision(s)" + (f"; forked from run `{v['origin']['job']}` ({v['origin'].get('label') or 'best'})" if v.get("origin") else "")]
+                for st in v["steps"]:
+                    mark = "✓" if st.get("ok") else "✕" if st.get("ok") is False else "…"
+                    line = f"- {mark} {st['name']}" + (f" — {st['instruction'][:160]}" if st.get("instruction") else "")
+                    rep = st.get("report") or {}
+                    if rep.get("steps"):
+                        line += ": " + ", ".join(f"{x['name']} {'✓' if x.get('ok') else '✕'}" + (f" ({x['samples']} samples)" if x.get("samples") else f" ({x['killed']}/{x['total']})" if x.get("total") else "") for x in rep["steps"])
+                    out.append(line)
+                out.append("")
+            continue
         if m.get("text"):
             out += [f"**Agent** · {t}" + (" · resumed" if m.get("resumed") else ""), "", m["text"], ""]
             if m.get("usage"):

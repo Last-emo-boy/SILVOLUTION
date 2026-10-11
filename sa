@@ -17,6 +17,10 @@
     sa rtl list
     sa propose proposal.diff --title ... --designs fir,decim [--rationale ...] [--ab-spec spec.json] [--reference ref.py]
     sa proposals [<id>] [--diff]                         gate verdicts; one proposal's steps / diff
+    sa studio open "<brief>" [--spec SPEC.md] [--thread ...]     the agent designs a block no generator covers
+    sa studio fork <job-id> [--iteration N] [--brief ...]        a run's design, out of its knobs, as an editable bundle
+    sa studio list | status <id> [--watch] | spec <id> | file <id> <path>
+    sa studio revise <id> "<what and why>" | resume <id>
     sa export <thread-id> [out.md]                       a conversation as Markdown
     sa package <job-id> [out.zip]                        the delivery package (RTL, AXI wrapper, bench, reports, GDS on sky130)
 
@@ -33,6 +37,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 SERVER = os.environ.get("SA_SERVER", "http://127.0.0.1:8765").rstrip("/")
 
@@ -228,6 +233,36 @@ def print_proposal(p: dict, with_diff: bool) -> None:
         print(p["diff"])
 
 
+def print_studio(s: dict) -> None:
+    ref = s.get("reference") or {}
+    ref_s = {"independent": "independent reference", "generator": f"generator vectors ({(ref.get('origin') or {}).get('design', '?')})", "self": "self-check only"}.get(ref.get("kind") or "", "reference pending")
+    print(f"{s['id']}  {s['status']:11s}  {s.get('name', '')}" + (f"  → {s['design']}" if s.get("design") else ""))
+    print(f"    {ref_s} · {s.get('revisions') or 0} revision(s)" + (f" · forked from {s['origin']['job']} ({s['origin'].get('label') or 'best'})" if s.get("origin") else "") + ("  (running)" if s.get("running") else ""))
+    for st in s.get("steps") or []:
+        ok = "ok " if st.get("ok") else "BAD" if st.get("ok") is False else " - "
+        line = f"    [{ok}] {st['name']}"
+        if st.get("instruction"):
+            line += f"  — {st['instruction'][:120]}"
+        print(line)
+        for x in (st.get("report") or {}).get("steps") or []:
+            xo = "ok " if x.get("ok") else "BAD"
+            extra = f"  {x['samples']} samples" if x.get("samples") else f"  {x['killed']}/{x['total']} killed" if x.get("total") else ""
+            secs = f"  {x['seconds']}s" if x.get("seconds") is not None else ""
+            print(f"          [{xo}] {x['name']}{extra}{secs}")
+            if not x.get("ok") and (x.get("error") or x.get("mismatch")):
+                print(f"                {str(x.get('error') or x.get('mismatch'))[-200:]}")
+        if st.get("error"):
+            print(f"          {st['error'][-300:]}")
+    u = s.get("usage") or {}
+    if u.get("calls"):
+        print(f"    {u['calls']} designer/reference calls · ${(u.get('usd_micros') or 0) / 1e6:.4f}")
+    if s["status"] == "registered":
+        print(f"    run it: a spec with \"design\": \"{s['design']}\"   (sa submit spec.json)")
+
+
+BUSY = ("new", "designing", "referencing", "checking", "revising")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="sa")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -251,6 +286,15 @@ def main() -> int:
     pr = sub.add_parser("propose"); pr.add_argument("diff"); pr.add_argument("--title", required=True); pr.add_argument("--designs", required=True, help="comma-separated")
     pr.add_argument("--rationale", default=""); pr.add_argument("--ab-spec"); pr.add_argument("--ab-max-iter", type=int); pr.add_argument("--reference", help="Python file: reference(ir, xs) for a new design kind"); pr.add_argument("--no-watch", action="store_true")
     pl = sub.add_parser("proposals"); pl.add_argument("id", nargs="?"); pl.add_argument("--diff", action="store_true")
+    st = sub.add_parser("studio"); sts = st.add_subparsers(dest="studio_cmd", required=True)
+    so = sts.add_parser("open"); so.add_argument("brief"); so.add_argument("--spec", help="Markdown file: the precise functional specification"); so.add_argument("--name"); so.add_argument("--thread"); so.add_argument("--no-watch", action="store_true")
+    sf = sts.add_parser("fork"); sf.add_argument("job_id"); sf.add_argument("--iteration", type=int); sf.add_argument("--brief", default=""); sf.add_argument("--name"); sf.add_argument("--thread"); sf.add_argument("--no-watch", action="store_true")
+    sts.add_parser("list")
+    ss = sts.add_parser("status"); ss.add_argument("id"); ss.add_argument("--watch", action="store_true")
+    sp = sts.add_parser("spec"); sp.add_argument("id")
+    sfi = sts.add_parser("file"); sfi.add_argument("id"); sfi.add_argument("path", help="a work/ path, e.g. rtl/top.sv, golden.py, design.json")
+    sr = sts.add_parser("revise"); sr.add_argument("id"); sr.add_argument("instruction"); sr.add_argument("--no-watch", action="store_true")
+    srs = sts.add_parser("resume"); srs.add_argument("id"); srs.add_argument("--no-watch", action="store_true")
     ex = sub.add_parser("export"); ex.add_argument("thread_id"); ex.add_argument("out", nargs="?")
     pk = sub.add_parser("package"); pk.add_argument("job_id"); pk.add_argument("out", nargs="?")
     a = ap.parse_args()
@@ -379,6 +423,56 @@ def main() -> int:
         for p in rows:
             print(f"{p['id']}  {p['status']:8s}  {', '.join(p.get('files') or [])}  {p.get('title', '')}{'  MERGED' if p.get('merged') else ''}")
         return 0
+    if a.cmd == "studio":
+        def watch(sid: str) -> int:
+            while True:
+                s = req("GET", f"/studio/{sid}")
+                if s["status"] not in BUSY and not s.get("running"):
+                    break
+                time.sleep(15)
+            print_studio(s)
+            return 0 if s["status"] == "registered" else 1
+
+        if a.studio_cmd == "list":
+            rows = req("GET", "/studio")
+            if not rows:
+                print("no studios yet")
+            for s in rows:
+                print(f"{s['id']}  {s['status']:11s}  {s.get('revisions') or 0} rev  {s.get('name', '')}" + (f"  → {s['design']}" if s.get("design") else ""))
+            return 0
+        if a.studio_cmd == "status":
+            if a.watch:
+                return watch(a.id)
+            print_studio(req("GET", f"/studio/{a.id}"))
+            return 0
+        if a.studio_cmd == "spec":
+            r = req("GET", f"/studio/{a.id}/spec")
+            print(r["spec"])
+            if r.get("reference"):
+                print("\n--- reference.py (independent model) ---\n")
+                print(r["reference"])
+            return 0
+        if a.studio_cmd == "file":
+            print(req("GET", f"/studio/{a.id}/file/{quote(a.path, safe='')}")["text"])
+            return 0
+        if a.studio_cmd in ("open", "fork"):
+            if a.studio_cmd == "open":
+                body = {"brief": a.brief, "name": a.name, "thread": a.thread}
+                if a.spec:
+                    body["spec_text"] = open(a.spec).read()
+            else:
+                body = {"from_job": a.job_id, "from_iteration": a.iteration, "brief": a.brief, "name": a.name, "thread": a.thread}
+            r = req("POST", "/studio", body)
+            print(f"studio {r['id']}: {r['status']}" + (f"  ({r['note']})" if r.get("note") else ""))
+            return 0 if a.no_watch or r["status"] not in BUSY else watch(r["id"])
+        if a.studio_cmd == "revise":
+            r = req("POST", f"/studio/{a.id}/revise", {"instruction": a.instruction})
+            print(f"studio {a.id}: {r['status']}")
+            return 0 if a.no_watch else watch(a.id)
+        if a.studio_cmd == "resume":
+            r = req("POST", f"/studio/{a.id}/resume", {})
+            print(f"studio {a.id}: {r['status']}")
+            return 0 if a.no_watch else watch(a.id)
     if a.cmd == "export":
         md = req("GET", f"/threads/{a.thread_id}/export.md")
         if a.out:
