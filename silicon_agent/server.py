@@ -842,9 +842,28 @@ def _load_studios() -> None:
     from . import studio as S
     for rec in S.list_all():
         if rec.get("status") in ("designing", "referencing", "checking", "revising"):
+            # a restart cut the pipeline short; the designer's session and files are intact, so after start-up the
+            # pipeline is picked up again from the check (the designer is asked to submit what it has)
             rec["status"] = "interrupted"
+            rec["resume_pending"] = True
             S.save(rec)
         _studios[rec["id"]] = rec
+
+
+def _resume_studios() -> None:
+    from . import agh, studio as S
+    if not agh.enabled():
+        return
+    for rec in list(_studios.values()):
+        if not rec.pop("resume_pending", False):
+            continue
+        lang = nl._lang(rec.get("brief") or "")
+        S.step(rec, "server restarted: resuming", ok=None)
+        if rec.get("bundle"):
+            # a revision was in flight: ask the designer to finish and submit it
+            _studio_start(rec, lambda r=rec, l=lang: S.revise(r, "Continue the revision you were working on (the server restarted): finish it, sa_studio_check, sa_studio_submit.", None, l), lang)
+        else:
+            _studio_start(rec, lambda r=rec, l=lang: S.submit(r, l) if (S.STUDIO / r["id"] / "work" / "design.json").exists() and (S.STUDIO / r["id"] / "work" / "rtl").exists() and any((S.STUDIO / r["id"] / "work" / "rtl").glob("*.sv")) else S.run_pipeline(r, l), lang)
 
 
 def _check_view(rep: dict) -> dict:
@@ -2538,6 +2557,7 @@ def main():
     for _ in range(_WORKERS):
         threading.Thread(target=_worker, daemon=True).start()
     threading.Thread(target=_resume_turns, daemon=True).start()
+    threading.Thread(target=_resume_studios, daemon=True).start()
     threading.Thread(target=_llm_probe, daemon=True).start()
     srv = ThreadingHTTPServer((host, port), Handler)
     print(f"silicon-agent server on http://{host}:{port}  root={ROOT}  backends={list(BACKENDS)} designs={list(DESIGNS)}  "

@@ -385,6 +385,8 @@ def run_loop(spec: dict, max_iter: int = 8, out_dir: Path | None = None, on_even
                 fallbacks = []
                 continue
             emit({"kind": "note", "iteration": it + 1, "message": f"revision request failed: {rr.get('error') or 'no passing revision'}; continuing with the knobs"})
+            if "studio is" in str(rr.get("error", "")):
+                n_revised[0] = 10 ** 6   # the studio is not available in this run: stop asking
         # accept both the new multi-candidate shape and the old single next_ir
         cands = reply.get("candidates") or ([{"ir": reply["next_ir"], "why": reply.get("action", "")}] if reply.get("next_ir") else [])
         cands = [c for c in cands if isinstance(c, dict) and isinstance(c.get("ir"), dict)][:3]

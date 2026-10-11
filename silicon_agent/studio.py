@@ -637,8 +637,15 @@ def submit(rec: dict, lang: str = "zh", on_event=None) -> dict:
 def revise(rec: dict, instruction: str, context: dict | None = None, lang: str = "zh", on_event=None) -> dict:
     """A rewrite requested mid-run (the planner's `revise`, or the user): the designer changes the RTL, the result is
     checked and becomes the next revision. Returns {"ok", "rev", "check" | "error"}."""
-    if rec.get("status") not in ("registered", "failed", "revising"):
+    if rec.get("status") not in ("registered", "failed", "revising", "interrupted"):
         return {"ok": False, "error": f"studio is {rec.get('status')}"}
+    if not rec.get("bundle"):
+        # nothing registered yet (an interrupted first pipeline): the revision request is the designer's next
+        # instruction and the result registers as revision 0
+        set_status(rec, "revising")
+        step(rec, "revise", ok=None, instruction=instruction[:1000])
+        designer_turn(rec, f"Revise the design: {instruction}\nThen sa_studio_check until it passes and sa_studio_submit.", lang, on_event)
+        return {"ok": rec.get("status") == "registered", **({"rev": 0} if rec.get("status") == "registered" else {"error": "no passing design yet"})}
     set_status(rec, "revising")
     st = step(rec, "revise", ok=None, instruction=instruction[:1000])
     ctx = ""
