@@ -1114,7 +1114,7 @@ def _export_md(tid: str) -> str:
                 v = _studio_view(rec)
                 ref = v.get("reference") or {}
                 ref_s = {"independent": "independent reference model", "generator": f"the {((ref.get('origin') or {}).get('design') or '?')} generator's vectors", "self": "self-check only"}.get(ref.get("kind") or "", "reference pending")
-                head = f"**Design studio `{m['studio']}`** · {t} — {v.get('name') or ''} ({v['status']}" + (f", registered as `{v['design']}`" if v.get("design") else "") + ")"
+                head = f"**Design studio `{m['studio']}`** · {t} — {v.get('name') or ''} (" + (f"registered as `{v['design']}`" if v["status"] == "registered" and v.get("design") else v["status"]) + ")"
                 out += [head, "", f"- verified against {ref_s}; {v.get('revisions') or 0} revision(s)" + (f"; forked from run `{v['origin']['job']}` ({v['origin'].get('label') or 'best'})" if v.get("origin") else "")]
                 for st in v["steps"]:
                     mark = "✓" if st.get("ok") else "✕" if st.get("ok") is False else "…"

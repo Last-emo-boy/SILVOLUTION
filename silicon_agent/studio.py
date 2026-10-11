@@ -597,7 +597,7 @@ def run_pipeline(rec: dict, lang: str = "zh", on_event=None) -> dict:
     sid = rec["id"]
     try:
         set_status(rec, "designing")
-        step(rec, "designer: write the design", ok=None)
+        st = step(rec, "designer: write the design", ok=None)
         kick = ("SPEC.md in the parent directory (../SPEC.md) is the task. Write work/rtl/*.sv, golden.py and design.json, run sa_studio_check "
                 f"(studio id {sid}) until it passes, then sa_studio_submit. Report what you built and what the knobs are.")
         if rec.get("origin"):
@@ -606,7 +606,8 @@ def run_pipeline(rec: dict, lang: str = "zh", on_event=None) -> dict:
                     f"(the check compares against the generator's own vectors), expose the choices you make as parameters, run sa_studio_check (studio id {sid}) until it passes, "
                     f"then sa_studio_submit. Report what you changed and why.")
         r = designer_turn(rec, kick, lang, on_event)
-        rec["steps"][-1].update({"ok": True, "text": (r.get("text") or "")[-1500:]})
+        # the designer's own sa_studio_check / sa_studio_submit may have appended steps meanwhile: close this one by handle
+        st.update({"ok": True, "text": (r.get("text") or "")[-1500:]})
         save(rec)
         if rec.get("bundle"):
             # the designer's own sa_studio_submit registered the design during the turn
