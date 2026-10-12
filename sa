@@ -424,7 +424,7 @@ def main() -> int:
             print(f"{p['id']}  {p['status']:8s}  {', '.join(p.get('files') or [])}  {p.get('title', '')}{'  MERGED' if p.get('merged') else ''}")
         return 0
     if a.cmd == "studio":
-        def watch(sid: str) -> int:
+        def watch_studio(sid: str) -> int:
             while True:
                 s = req("GET", f"/studio/{sid}")
                 if s["status"] not in BUSY and not s.get("running"):
@@ -442,7 +442,7 @@ def main() -> int:
             return 0
         if a.studio_cmd == "status":
             if a.watch:
-                return watch(a.id)
+                return watch_studio(a.id)
             print_studio(req("GET", f"/studio/{a.id}"))
             return 0
         if a.studio_cmd == "spec":
@@ -464,15 +464,15 @@ def main() -> int:
                 body = {"from_job": a.job_id, "from_iteration": a.iteration, "brief": a.brief, "name": a.name, "thread": a.thread}
             r = req("POST", "/studio", body)
             print(f"studio {r['id']}: {r['status']}" + (f"  ({r['note']})" if r.get("note") else ""))
-            return 0 if a.no_watch or r["status"] not in BUSY else watch(r["id"])
+            return 0 if a.no_watch or r["status"] not in BUSY else watch_studio(r["id"])
         if a.studio_cmd == "revise":
             r = req("POST", f"/studio/{a.id}/revise", {"instruction": a.instruction})
             print(f"studio {a.id}: {r['status']}")
-            return 0 if a.no_watch else watch(a.id)
+            return 0 if a.no_watch else watch_studio(a.id)
         if a.studio_cmd == "resume":
             r = req("POST", f"/studio/{a.id}/resume", {})
             print(f"studio {a.id}: {r['status']}")
-            return 0 if a.no_watch else watch(a.id)
+            return 0 if a.no_watch else watch_studio(a.id)
     if a.cmd == "export":
         md = req("GET", f"/threads/{a.thread_id}/export.md")
         if a.out:

@@ -41,9 +41,9 @@ curl -sf -H "Authorization: Bearer $tok" "$B/jobs/$J_MED/package" -o "$O/normal/
 # and from the film's product snapshots (captured from the product served on that checkout), not the server
 J_CIC=20261009-141103-d59f; T_CIC=20261009-141051-a320
 mkdir -p "$O/normal/cic-local"
-cp -R "results/$J_CIC" "$O/normal/cic-local/results-$J_CIC"
-cp "threads/$T_CIC.json" "$O/normal/cic-local/thread-$T_CIC.json"
-for f in job-cic trust-cic formal-cic; do cp "broll/public/assets/product/$f.json" "$O/normal/cic-local/$f.json"; done
+[ -d "results/$J_CIC" ] && cp -R "results/$J_CIC" "$O/normal/cic-local/results-$J_CIC"
+[ -f "threads/$T_CIC.json" ] && cp "threads/$T_CIC.json" "$O/normal/cic-local/thread-$T_CIC.json"
+for f in job-cic trust-cic formal-cic; do [ -f "broll/public/assets/product/$f.json" ] && cp "broll/public/assets/product/$f.json" "$O/normal/cic-local/$f.json"; done
 cp broll/docs/evidence/*.json "$O/normal/cic-local/" 2>/dev/null || true
 echo "$O/normal/cic-local/  (development-checkout run: results/, threads/, film snapshots)"
 # the tournament (two planners on one spec) and the bench
@@ -112,8 +112,8 @@ cat > "$O/README.md" <<'MD'
 | 文件 | 支撑的说法 |
 |---|---|
 | `studio-median5-checks.tgz` | 检查 101543：SymbiYosys 流属性在第 1 步给出反例（`props.sv`、`logfile.txt`）；设计师修改后 102125 全部通过；`register*/report.json` 是注册门禁 |
-| `studio-median5-first.json`, `job-median5-first-failed.json`, `thread-bench-median5.json` | 一次设计师在不存在的结构上空转两小时的记录，对应运行因此失败；由此加入的单轮超时与 SESSION_BUSY 跟随（代码提交 850ffaf、cf8a3d3） |
-| `job-fft-before-fix.json` | 同一设计在仿真模型 bug 修复前被误判「综合后仿真失败」（Gowin SP/SPX9 模型把 ROM 初始化清零，提交 6a82fe2） |
+| `studio-median5-first.json`, `job-median5-first-failed.json`, `thread-bench-median5.json` | 一次设计师在不存在的结构上空转两小时的记录，对应运行因此失败；由此加入的单轮超时与 SESSION_BUSY 跟随（代码提交 2ef6ca8、ae03ac9） |
+| `job-fft-before-fix.json` | 同一设计在仿真模型 bug 修复前被误判「综合后仿真失败」（Gowin SP/SPX9 模型把 ROM 初始化清零，提交 f88cf17） |
 | `failed-runs.json` | 服务器上所有以 failed 结束的运行，按产品自己的列表 |
 
 ## AGH 执行记录（agh/）

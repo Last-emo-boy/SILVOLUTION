@@ -1,0 +1,42 @@
+# silicon-agent job server with the open-source toolchain (oss-cad-suite: yosys, nextpnr-ecp5/ice40/himbaechel,
+# Icarus Verilog, cocotb, SymbiYosys + boolector, its own Python 3.11). Backends out of the box: ECP5, iCE40,
+# Gowin, GateMate. Spartan-7 (Vivado) and sky130 (OpenROAD) are optional: see docker-compose.yml.
+ARG OSS_CAD_SUITE_RELEASE=2026-10-06
+
+FROM debian:bookworm-slim AS tools
+ARG OSS_CAD_SUITE_RELEASE
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/silicon-agent/tools
+# linux-x64 or linux-arm64, by the image's own architecture (the same release setup.sh installs on a laptop)
+RUN set -eux; tag="$(echo "$OSS_CAD_SUITE_RELEASE" | tr -d -)"; \
+    case "$(uname -m)" in x86_64) plat=linux-x64 ;; aarch64|arm64) plat=linux-arm64 ;; *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; esac; \
+    curl -fL -o oss.tgz "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${OSS_CAD_SUITE_RELEASE}/oss-cad-suite-${plat}-${tag}.tgz"; \
+    tar xzf oss.tgz && rm oss.tgz
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git diffutils && rm -rf /var/lib/apt/lists/*
+COPY --from=tools /opt/silicon-agent/tools /opt/silicon-agent/tools
+RUN useradd -u 10001 -m -d /home/sa sa && mkdir -p /data && chown -R sa:sa /data
+# the application: the Python package, the AGH plugin (the daemon resolves file:./agh-plugin against /app),
+# the CLI and the deploy helpers the proposals gate needs
+COPY --chown=sa:sa silicon_agent /app/silicon_agent
+COPY --chown=sa:sa agh-plugin /app/agh-plugin
+COPY --chown=sa:sa specs /app/specs
+COPY --chown=sa:sa sa sa_mcp.py README.md /app/
+RUN chmod +x /app/sa
+ENV SA_ROOT=/data \
+    SA_TOOLS=/opt/silicon-agent/tools/oss-cad-suite \
+    SA_HOST=0.0.0.0 \
+    SA_PORT=8765 \
+    SA_AGH_HOME=/data/agh \
+    SA_AGH_PRESET=silicon \
+    SA_ASIC_QUEUE=/data/asic/queue \
+    HOME=/home/sa \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/silicon-agent/tools/oss-cad-suite/bin:/opt/silicon-agent/tools/oss-cad-suite/py3bin:/usr/local/bin:/usr/bin:/bin
+USER sa
+WORKDIR /app
+EXPOSE 8765
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -fsS http://127.0.0.1:8765/health || exit 1
+ENTRYPOINT ["/opt/silicon-agent/tools/oss-cad-suite/py3bin/python3", "-m", "silicon_agent.server"]

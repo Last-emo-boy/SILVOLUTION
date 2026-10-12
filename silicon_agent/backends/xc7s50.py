@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import re
 import subprocess
 from pathlib import Path
@@ -239,7 +240,7 @@ def netlist_sims(d, arch, work: Path, fmax_target: float, on_stage=None) -> dict
 VIVADO_BIN_DIR = os.environ.get("SA_VIVADO_BIN_DIR", "")  # e.g. /opt/amd/2025.2/Vivado/bin/ when not on PATH
 
 
-DEV = register(Backend(
+DEV = register(available=bool(shutil.which(VIVADO)) or os.environ.get("SA_VIVADO_FORCE") == "1", b=Backend(
     key="xc7s50", name="AMD Spartan-7 XC7S50-1 (CSGA324)", vendor="amd",
     lut=32600, dsp=120, bram=75, lut_kind="LUT6", dsp_kind="DSP48E1", dsp_width=18,
     synth_pnr=synth_pnr, netlist_sims=netlist_sims,

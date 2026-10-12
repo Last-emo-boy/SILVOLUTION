@@ -1,7 +1,0 @@
-{
- "id": "20261009-145352-jafe3",
- "name": "板卡 A · DSP 前端",
- "instructions": "所有设计跑在 ECP5 LFE5U-25F 上，系统时钟 100 MHz，AXI-Stream 接口，优先用 BRAM，DSP 不超过 24 个。",
- "created": 1791528832.270912,
- "subject": "anonymous"
-}

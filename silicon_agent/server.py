@@ -2619,6 +2619,9 @@ def main():
     host = os.environ.get("SA_HOST", "127.0.0.1")
     port = int(os.environ.get("SA_PORT", "8765"))
     RESULTS.mkdir(parents=True, exist_ok=True)
+    n_seed = memory.seed_if_empty()
+    if n_seed:
+        print(f"memory: seeded {n_seed} lesson files from the repository into {memory.MEM_DIR}", flush=True)
     _load_rtl_bundles()
     _load_from_disk()
     _load_threads()

@@ -1,10 +1,23 @@
+# toolchain and runtime state (SA_ROOT)
 tools/
 cache/
 runs/
 results/
+data/
+memory/obs_*.jsonl
+# secrets
+.env
+# local scratch
 __pycache__/
 *.pyc
 sim_build/
-.env
-.claude/launch.json
-dist/
+.DS_Store
+.claude/
+.workflow/
+# per-deployment records (conversations, projects live under SA_ROOT)
+threads/
+projects/
+# the demo-film project is published separately
+broll/
+# evidence bundles built by deploy/evidence-bundle.sh
+evidence/

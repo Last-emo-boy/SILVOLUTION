@@ -1,0 +1,89 @@
+# silicon-agent, out of the box: the job server with the open-source toolchain and Agnes Harness as the agent
+# runtime. One shared volume carries runs, results, memory, studios and the harness's home.
+#
+#   cp .env.example .env            # set SA_TOKEN and DEEPSEEK_API_KEY
+#   docker compose up -d --build    # first build downloads oss-cad-suite (~1 GB) and builds Agnes Harness
+#   open http://localhost:8765      # type the token once; or: export SA_TOKEN=... && ./sa health
+#
+# Optional profiles:
+#   docker compose --profile asic up -d     # + OpenROAD-flow-scripts runner: the sky130 ASIC backend
+#   Vivado (Spartan-7 / Artix-7): mount an installed Vivado and set SA_VIVADO (see README "Vivado").
+name: silicon-agent
+services:
+  server:
+    build: { context: ., dockerfile: docker/Dockerfile.server }
+    image: silicon-agent/server:local
+    container_name: silicon-agent
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30m          # SIGTERM lets the in-flight iteration finish; the job resumes after restart
+    environment:
+      SA_TOKEN: ${SA_TOKEN:?set SA_TOKEN in .env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in .env}
+      SA_AGH: "1"                            # chat turns run inside Agnes Harness (the agh service)
+      SA_AGH_HOME: /data/agh
+      SA_AGH_WORKSPACE: /data/agh-workspace
+      SA_WORKERS: ${SA_WORKERS:-2}           # runs in flight at once
+      SA_PUBLIC_URL: ${SA_PUBLIC_URL:-http://localhost:8765}
+      SA_SHARED: ${SA_SHARED:-1}             # 1: every login sees every conversation (single team)
+      SA_WEBHOOK: ${SA_WEBHOOK:-}            # optional: POSTed a run-finished JSON (Slack/Discord webhooks get a text line)
+      SA_DISABLE_BACKENDS: ${SA_DISABLE_BACKENDS:-}
+      SA_ASIC_ENABLE: ${SA_ASIC_ENABLE:-0}   # 1 with --profile asic
+      SA_VIVADO: ${SA_VIVADO:-vivado}
+    volumes:
+      - sa-data:/data
+      - ./specs:/app/specs:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=4g,mode=1777
+    ports:
+      - "${SA_BIND:-127.0.0.1}:${SA_PORT:-8765}:8765"
+    pids_limit: 4096
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - agh
+  agh:
+    build: { context: ., dockerfile: docker/Dockerfile.agh }
+    image: silicon-agent/agh:local
+    container_name: silicon-agent-agh
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 2m
+    environment:
+      SA_TOKEN: ${SA_TOKEN:?set SA_TOKEN in .env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in .env}
+      SA_AGH_MODEL: ${SA_AGH_MODEL:-deepseek-flash}
+      SA_SERVER: http://server:8765          # the plugin's tools reach the job server over the compose network
+      SA_TOKEN_FILE: /data/agh/sa-token
+    volumes:
+      - sa-data:/data
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g,mode=1777
+    pids_limit: 1024
+    security_opt:
+      - no-new-privileges:true
+  # OpenROAD-flow-scripts: the sky130 ASIC backend. The job server drops a request directory under
+  # /data/asic/queue and this runner (deploy/orfs-runner.sh) runs the flow on it. ~8 GB image.
+  orfs:
+    profiles: [asic]
+    image: openroad/orfs:latest
+    container_name: silicon-agent-orfs
+    user: "10001:10001"
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 10m
+    entrypoint: ["/bin/bash", "/app/deploy/orfs-runner.sh"]
+    environment:
+      HOME: /tmp
+      SA_ASIC_QUEUE: /data/asic/queue
+      SA_ASIC_TIMEOUT: "3600"
+    volumes:
+      - sa-data:/data
+      - ./deploy/orfs-runner.sh:/app/deploy/orfs-runner.sh:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=2g,mode=1777
+    pids_limit: 4096
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  sa-data: {}

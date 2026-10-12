@@ -23,7 +23,7 @@ from pathlib import Path
 from . import Backend, register
 from ._common import TOOLS, iverilog_netlist_sim
 
-QUEUE = Path(os.environ.get("SA_ASIC_QUEUE", "/srv/sa/asic/queue"))
+QUEUE = Path(os.environ.get("SA_ASIC_QUEUE", str(Path(os.environ.get("SA_ROOT", ".")) / "asic" / "queue")))
 PLATFORM = "sky130hd"
 CELL_LIB = TOOLS / "examples" / "eqy" / "spm"   # sky130_fd_sc_hd.v + primitives.v
 
@@ -136,7 +136,7 @@ def netlist_sims(d, arch, work: Path, fmax_target: float, on_stage=None) -> dict
     return r
 
 
-register(Backend(
+register(available=os.environ.get("SA_ASIC_ENABLE", "") == "1" or QUEUE.exists(), b=Backend(
     key="sky130", name="SkyWater sky130 HD (ASIC, OpenROAD)", vendor="skywater",
     lut=200000, dsp=0, bram=0, lut_kind="stdcell", dsp_kind="none", dsp_width=0,
     synth_pnr=synth_pnr, netlist_sims=netlist_sims, sim_stages=("behavioral", "post_synth_func", "post_impl_func"),

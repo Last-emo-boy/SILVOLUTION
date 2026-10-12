@@ -1,26 +1,52 @@
 # silicon-agent
 
-Autonomous hardware design loop: say what you want in plain language, and an
-LLM planner iterates architecture → RTL → simulation → synthesis → place-and-route
-until it meets the requirements, then hands you the Verilog. Real EDA tools are
-the ground truth; nothing is estimated.
+Autonomous hardware design loop: say what you want in plain language, and an agent iterates
+architecture → RTL → simulation → synthesis → place-and-route until it meets the requirements,
+then hands you the Verilog with the evidence. Real EDA tools are the ground truth; nothing is
+estimated. The agent runs inside [Agnes Harness](https://github.com/AgnesAI-Labs/agnes-harness)
+(DeepSeek models); when none of the 11 parametric generators covers a block, a **design studio**
+lets the agent write the RTL itself, checked against an independent reference model, formal
+properties and a mutation score before it is admitted.
 
-Designs: `matmul` (systolic INT matrix multiply), `fir` (fixed-coefficient FIR), `conv2d`
-(streaming K×K convolution with BRAM line buffers), `fir_chain` (a cascade of FIR stages with
-FIFOs between them — the first composite datapath). Devices: Lattice ECP5, AMD Spartan-7 (Vivado),
-Lattice iCE40 UP5K, Gowin GW1NR-9 — each a plugin under `silicon_agent/backends/`.
+**Out of the box** (open-source toolchain in the image): Lattice ECP5, iCE40 UP5K, Gowin GW1NR-9,
+Cologne Chip GateMate. **Optional**: AMD Spartan-7 / Artix-7 through your own Vivado, sky130 ASIC
+through OpenROAD-flow-scripts (`--profile asic`).
+
+## Quick start (Docker)
+
+```bash
+git clone https://github.com/Last-emo-boy/silicon-agent && cd silicon-agent
+cp .env.example .env            # set SA_TOKEN (any long random string) and DEEPSEEK_API_KEY
+docker compose up -d --build    # first build: oss-cad-suite (~1 GB) + Agnes Harness from source (~10 min)
+open http://localhost:8765      # type the token once; the browser keeps a session cookie
+```
+
+Then, in the chat: *"一个 16 阶 FIR 低通，16 位系数，ECP5，120 MHz 以上，DSP 不超过 4 个"* — or
+*"a 5-point sliding median filter, 16-bit signed, ECP5, 150 MHz, as few LUTs as possible"* (no generator has
+one: the studio designs it). The worktable is at `/work`; the CLI and the MCP server use the same token:
+
+```bash
+export SA_TOKEN=...             # SA_SERVER defaults to http://127.0.0.1:8765
+./sa ask "INT8 matmul on ECP5, 180 MHz or better, at most 48 DSPs"
+./sa studio list ; ./sa trust <job> ; ./sa package <job>
+```
+
+Data (runs, results, conversations, design memory, studios, the harness's sessions) lives in the `sa-data`
+volume; `docker compose down` keeps it, `docker compose down -v` wipes it. The image ships the development
+lesson corpus (`memory/`) as a seed for an empty volume. Images: `docker/Dockerfile.server` (Debian +
+oss-cad-suite 2026-10-06, linux x64/arm64), `docker/Dockerfile.agh` (Agnes Harness `cde816b8` +
+`docker/agh-silicon-presets.patch`, the two session recipes silicon-agent needs).
 
 ```
-laptop                              EDA host (netcup)
-──────                              ─────────────────────────────────────────────
-sa submit spec.json ──HTTP/SSH──▶   job server ──▶ planner (DeepSeek) ──▶ arch IR
-sa watch <job>      ◀── events ──        ▲                                   │
-                                         │                            generator → SystemVerilog
-                                         │                                   │
-                                         │             cocotb + iverilog   functional vs. Python golden model
-                                         │             ecp5:   yosys + nextpnr     real P&R timing, ~30 s
-                                         │             xc7s50: Vivado 2025.2        real P&R timing, ~2-4 min
-                                         └──── metrics + critical path ◀─────┘
+browser / sa CLI / MCP            docker compose
+────────────────────              ────────────────────────────────────────────────────────────
+POST /api/login {token} ────▶     server (Python, oss-cad-suite)   ◀── unix socket ──  agh (Agnes Harness daemon)
+chat / worktable        ◀────      │ planner (DeepSeek) ──▶ arch IR          sessions: chat (silicon preset),
+                                   │ generator → SystemVerilog               designer + reference (studio),
+                                   │ cocotb + iverilog   functional vs. golden / independent reference
+                                   │ yosys + nextpnr     real P&R timing, 3 seeds, ~30 s        author (proposals)
+                                   │ SymbiYosys          equivalence + stream properties        tools: sa_* over HTTP
+                                   └── metrics + critical path → planner → next round / studio revise
 ```
 
 ## Verification ladder
@@ -236,8 +262,7 @@ Desktop or any MCP client can drive silicon-agent: `claude mcp add silicon-agent
 
 ## Chat
 
-`https://silicon.w33d.xyz` — behind sluice SSO (route `silicon-agent-root`,
-permission `studio.console.enter`). One conversation per design task, like a chat
+`http://localhost:8765` (the token login page, then the chat). One conversation per design task, like a chat
 with an engineer:
 
 ```
@@ -349,13 +374,14 @@ for the operator).
 Deploys are safe: on SIGTERM the server finishes the in-flight iteration,
 requeues the job, and on restart replays it from the EDA and planner caches.
 
-Auth model: sluice injects `X-Auth-Subject` + `X-Auth-Sig` (HMAC-SHA256 over
-`subject\ngroups\nepoch-minute` with the gateway key). The server shares that key
-(`SA_GATEWAY_HMAC_KEY`) and verifies the signature for the current and previous
-minute, so a direct dial on the docker network cannot forge identity. The `sa`
-CLI keeps using its bearer token over the SSH tunnel.
+Auth model: three ways in, any of them enough. The browser posts the token once to `/api/login` and gets an
+HttpOnly session cookie derived from it (rotating `SA_TOKEN` logs every browser out); the `sa` CLI, the MCP server
+and the Agnes Harness plugin send `Authorization: Bearer <SA_TOKEN>`; a reverse proxy that does SSO may inject
+`X-Auth-Subject` + `X-Auth-Sig` (HMAC-SHA256 over `subject\ngroups\nepoch-minute` with a key shared as
+`SA_GATEWAY_HMAC_KEY`), verified for the current and previous minute. Conversations are per login subject
+unless `SA_SHARED=1` (the compose default: one team).
 
-## Quick start (remote: laptop is a thin client)
+## CLI against a remote server (SSH tunnel)
 
 ```bash
 ssh -f -N -L 8765:127.0.0.1:8765 netcup               # tunnel to the job server
@@ -380,7 +406,7 @@ export SA_TOKEN=$(security find-generic-password -s silicon-agent-token -w)
 without `SA_TOKEN` it reads the macOS Keychain item `silicon-agent-token`.
 `--backend <device>` overrides the spec's backend.
 
-## Quick start (local, ECP5 only)
+## Without Docker (local, open-source backends)
 
 ```bash
 ./setup.sh                                 # downloads oss-cad-suite (~600 MB) into tools/, no sudo
@@ -397,11 +423,28 @@ failure samples, the Markdown conversation exports and the AGH session records (
 — into one directory with an index that says which claim each file backs. The demo video is the `broll/`
 project (`pnpm preview` for 1080p, `pnpm render` for the 4K master).
 
-## Server deployment
+## Vivado (Spartan-7 / Artix-7) and the ASIC profile
 
-The server runs inside the host's existing `local/vivado-desktop:2025.2` image so
-both backends are available. Secrets live in `/opt/silicon-agent/.env` on the host
-(`SA_TOKEN`, `DEEPSEEK_API_KEY`), outside the synced tree.
+The Xilinx backends register themselves when a `vivado` command resolves inside the server container
+(`SA_VIVADO` names it). Mount your installation and source its settings, e.g. in a compose override:
+
+```yaml
+services:
+  server:
+    volumes: [ "/opt/Xilinx:/opt/Xilinx:ro" ]
+    environment:
+      SA_VIVADO: /opt/Xilinx/Vivado/2025.2/bin/vivado
+      SA_XILINX_GLBL: /opt/Xilinx/Vivado/2025.2/data/verilog/src/glbl.v
+```
+
+The sky130 backend needs the `orfs` service: `docker compose --profile asic up -d` (and `SA_ASIC_ENABLE=1`
+in `.env`; the openroad/orfs image is ~8 GB). `SA_DISABLE_BACKENDS=a,b` hides any backend.
+
+## Production deployment notes (the authors' host)
+
+`deploy/` holds the authors' own production setup (an existing Vivado image, an SSO gateway in front, rsync
+deploys, the nightly bench cron) — kept as a worked example, not needed for the Docker quick start. Secrets live
+in `/opt/silicon-agent/.env` on that host (`SA_TOKEN`, `DEEPSEEK_API_KEY`), outside the synced tree.
 
 ```bash
 deploy/push.sh netcup      # rsync code → /opt/silicon-agent/app, recreate container, health check

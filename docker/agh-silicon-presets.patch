@@ -1,0 +1,51 @@
+diff --git a/packages/code/presets/author.yaml b/packages/code/presets/author.yaml
+new file mode 100644
+index 00000000..99020aeb
+--- /dev/null
++++ b/packages/code/presets/author.yaml
+@@ -0,0 +1,12 @@
++# The silicon-agent "author" recipe: a session that changes the generators themselves. It gets the coding tools
++# of standard; its workspace is a scratch copy of silicon_agent/ the job server made for the proposal, and the
++# plugin's tool_call hook refuses writes outside that copy. The change leaves the session only as a unified diff
++# through sa_propose, which the job server gates (emit, simulation, formal equivalence, mutation score, a
++# measured A/B) -- the author never merges anything.
++name: author
++extends: standard
++surfaces: [cli, sdk, acp, daemon]
++tools: { core: [read, write, edit, shell, grep, find, ls, todo] }
++approval: { on_unavailable: deny }
++budget: { per_request_cap: 6000, max_steps: null }
++subagent: { max_depth: 0, max_fan_out: 0 }
+diff --git a/packages/code/presets/silicon.yaml b/packages/code/presets/silicon.yaml
+new file mode 100644
+index 00000000..f7009617
+--- /dev/null
++++ b/packages/code/presets/silicon.yaml
+@@ -0,0 +1,14 @@
++# The silicon-agent recipe: the agent drives an FPGA design loop through the silicon-agent plugin's tools
++# (sa_schema, sa_interpret, sa_run, sa_job, ...) and reads results; it has no reason to edit files or run
++# commands, so the coding tools are left out. Everything else comes from standard.
++name: silicon
++extends: standard
++surfaces: [cli, sdk, acp, daemon]
++# read/grep/find/ls stay for reading a workspace or an artifact the plugin cannot reach; write/edit/shell
++# and web_fetch are out: every mutation goes through the job server, and the model has nothing to download.
++tools: { core: [read, grep, find, ls, todo] }
++# The plugin's tools declare their own approval class; nothing else needs an operator.
++approval: { on_unavailable: deny }
++# The design loop is long: a run takes minutes and the agent polls it; the per-request output cap of the
++# standard recipe is kept, the step ceiling stays off.
++budget: { per_request_cap: 4000, max_steps: null }
+diff --git a/packages/code/src/presets/load.ts b/packages/code/src/presets/load.ts
+index 4e8bec4d..4dcaa0ba 100644
+--- a/packages/code/src/presets/load.ts
++++ b/packages/code/src/presets/load.ts
+@@ -15,7 +15,7 @@ declare const AGNES_CODE_MINIMAL_SHA256: string | undefined
+  * Adding a recipe means adding its name here and shipping `presets/<name>.yaml`; the two are checked
+  * against each other, so a name without a file fails rather than resolving to nothing.
+  */
+-export const PRESET_NAMES = ['standard', 'claw', 'channel', 'minimal-rl', 'standard-windows'] as const
++export const PRESET_NAMES = ['standard', 'claw', 'channel', 'minimal-rl', 'standard-windows', 'silicon', 'author'] as const
+ export type PresetName = (typeof PRESET_NAMES)[number]
+ 
+ function isPresetName(name: string): name is PresetName {

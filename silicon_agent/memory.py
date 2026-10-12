@@ -33,6 +33,23 @@ from .ir import Constraints, Metrics
 
 ROOT = Path(os.environ.get("SA_ROOT", Path(__file__).resolve().parent.parent))
 MEM_DIR = ROOT / "memory"
+# the repository ships a seed (lessons measured during development, one file per design × device): a fresh
+# SA_ROOT starts from it instead of from nothing, so the first planner already recalls what is known
+SEED_DIR = Path(__file__).resolve().parent.parent / "memory"
+
+
+def seed_if_empty() -> int:
+    """Copy the shipped lessons into an empty SA_ROOT/memory; returns how many files were copied."""
+    if MEM_DIR.resolve() == SEED_DIR.resolve() or not SEED_DIR.exists():
+        return 0
+    if MEM_DIR.exists() and any(MEM_DIR.glob("*.jsonl")):
+        return 0
+    MEM_DIR.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for f in SEED_DIR.glob("*.jsonl"):
+        (MEM_DIR / f.name).write_bytes(f.read_bytes())
+        n += 1
+    return n
 _lock = threading.Lock()
 
 TOP_K = 6

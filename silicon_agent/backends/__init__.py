@@ -51,8 +51,11 @@ class Backend:
 BACKENDS: dict[str, Backend] = {}
 
 
-def register(b: Backend) -> Backend:
-    if b.key in os.environ.get("SA_DISABLE_BACKENDS", "").split(","):
+def register(b: Backend, available: bool = True) -> Backend:
+    """A backend joins the catalogue when its toolchain is there: the open-source ones always, Vivado when the
+    `vivado` command resolves (SA_VIVADO), the sky130 flow when SA_ASIC_ENABLE=1 / the orfs runner's queue exists.
+    SA_DISABLE_BACKENDS=a,b hides any of them regardless."""
+    if b.key in os.environ.get("SA_DISABLE_BACKENDS", "").split(",") or not available:
         return b
     BACKENDS[b.key] = b
     return b

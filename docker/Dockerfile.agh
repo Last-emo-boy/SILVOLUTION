@@ -1,0 +1,41 @@
+# Agnes Harness (the agent runtime) for silicon-agent, built from the upstream source at a pinned commit
+# plus the two silicon-agent presets (docker/agh-silicon-presets.patch: `silicon` = read-only tool set for chat
+# sessions, `author` = coding tools on a scratch copy for generator proposals / studio designers).
+#
+# Stage 1 builds the local distribution (agnes.mjs, daemon.mjs, worker.mjs, web/, the system-node native
+# addon); stage 2 keeps the dist, the SDK sources the provisioning script imports through tsx, and a slim node.
+ARG AGH_REPO=https://github.com/AgnesAI-Labs/agnes-harness.git
+ARG AGH_COMMIT=cde816b8
+
+FROM node:24-bookworm AS build
+ARG AGH_REPO
+ARG AGH_COMMIT
+RUN apt-get update && apt-get install -y --no-install-recommends git build-essential python3 ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN corepack enable && corepack prepare pnpm@10.34.5 --activate
+WORKDIR /opt/agnes-harness
+RUN git clone --filter=blob:none "$AGH_REPO" . && git checkout "$AGH_COMMIT"
+COPY docker/agh-silicon-presets.patch /tmp/agh-silicon-presets.patch
+RUN git apply /tmp/agh-silicon-presets.patch && git diff --stat
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @agnes/cli build:local
+# the build's transactional output directory is created 0700 for root: open it for the runtime user
+RUN chmod -R a+rX /opt/agnes-harness/packages/cli/dist
+
+FROM node:24-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+# the dist (what runs) and the parts of the source tree the provisioning script needs: the SDK is imported from
+# source through tsx (the dist has no importable SDK); workspace packages resolve through the pnpm store
+COPY --from=build /opt/agnes-harness /opt/agnes-harness
+RUN useradd -u 10001 -m -d /home/sa sa && mkdir -p /data && chown -R sa:sa /data
+ENV AGH_DIST=/opt/agnes-harness/packages/cli/dist/local \
+    AGH_REPO_DIR=/opt/agnes-harness \
+    AGH_HOME=/data/agh \
+    AGNES_PROFILE=local-dev \
+    HOME=/home/sa
+COPY --chown=sa:sa agh-plugin /app/agh-plugin
+COPY --chown=sa:sa deploy/agh-provision.mjs /app/deploy/agh-provision.mjs
+COPY --chown=sa:sa docker/entrypoint-agh.sh /app/docker/entrypoint-agh.sh
+RUN chmod +x /app/docker/entrypoint-agh.sh
+USER sa
+WORKDIR /app
+ENTRYPOINT ["/bin/bash", "/app/docker/entrypoint-agh.sh"]

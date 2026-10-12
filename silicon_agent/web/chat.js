@@ -5,6 +5,8 @@
 const $ = (s) => document.querySelector(s);
 const api = async (path, opts) => {
   const r = await fetch(`/api${path}`, { cache: "no-store", ...opts });
+  // the session cookie is gone (token rotated, cookie expired): back to the login page
+  if (r.status === 401 && !path.startsWith("/login")) { location.replace("/login"); throw new Error("401 unauthorized"); }
   if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 300)}`);
   return r.headers.get("content-type")?.includes("json") ? r.json() : r.text();
 };
