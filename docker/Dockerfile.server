@@ -22,6 +22,8 @@ RUN useradd -u 10001 -m -d /home/sa sa && mkdir -p /data && chown -R sa:sa /data
 COPY --chown=sa:sa silicon_agent /app/silicon_agent
 COPY --chown=sa:sa agh-plugin /app/agh-plugin
 COPY --chown=sa:sa specs /app/specs
+# the lesson corpus measured during development: copied into an empty data volume at first start (memory.seed_if_empty)
+COPY --chown=sa:sa memory /app/memory
 COPY --chown=sa:sa sa sa_mcp.py README.md /app/
 RUN chmod +x /app/sa
 ENV SA_ROOT=/data \
