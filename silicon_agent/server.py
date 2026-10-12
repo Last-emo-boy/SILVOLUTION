@@ -1831,7 +1831,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, _studio_view(rec))
             if len(parts) == 3 and parts[2] == "spec":
                 from . import studio as S
-                return self._json(200, {"spec": (S.STUDIO / rec["id"] / "SPEC.md").read_text(), "reference": (rec.get("reference") or {}).get("code")})
+                return self._json(200, {"spec": S.spec_path(rec["id"]).read_text(), "reference": (rec.get("reference") or {}).get("code")})
             if len(parts) == 4 and parts[2] == "file":
                 from . import studio as S
                 f = (S.STUDIO / rec["id"] / "work" / unquote(parts[3])).resolve()

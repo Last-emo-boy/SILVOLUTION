@@ -488,8 +488,9 @@ def package(job: dict, results_dir: Path, runs_dir: Path) -> bytes:
         if sb:
             # the studio's evidence travels with the design: the spec, both models, every revision's check
             sdir = Path(sb.get("dir") or "")
-            if (sdir / "SPEC.md").exists():
-                z.write(sdir / "SPEC.md", "studio/SPEC.md")
+            spec = sdir / "work" / "SPEC.md" if (sdir / "work" / "SPEC.md").exists() else sdir / "SPEC.md"
+            if spec.exists():
+                z.write(spec, "studio/SPEC.md")
             if sb.get("golden"):
                 z.writestr("studio/golden.py", sb["golden"])
             if (sb.get("reference") or {}).get("code"):

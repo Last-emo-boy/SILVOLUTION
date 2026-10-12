@@ -51,7 +51,7 @@ _lock = threading.Lock()
 
 README = """Design studio working directory (silicon-agent).
 
-Write here:
+Read SPEC.md here first: the task. Write here:
   rtl/<top>.sv (+ other .sv)   the design. Interface contract for a stream block:
                                input clk, input rst (synchronous, active high), input in_valid, output in_ready,
                                input signed [IN_W-1:0] <in>, output out_valid, output signed [OUT_W-1:0] <out>.
@@ -73,6 +73,13 @@ session that never sees your code: if SPEC.md is ambiguous, say so in SPEC.md ra
 # ---------------------------------------------------------------- records
 def _dir(sid: str) -> Path:
     return STUDIO / sid
+
+
+def spec_path(sid: str) -> Path:
+    """SPEC.md lives in work/ (the designer's workspace) since the harness confines file tools to it; studios
+    opened before that kept it one level up."""
+    w = _dir(sid) / "work" / "SPEC.md"
+    return w if w.exists() else _dir(sid) / "SPEC.md"
 
 
 def load(sid: str) -> dict:
@@ -124,7 +131,8 @@ def new(brief: str, *, name: str | None = None, thread: str | None = None, subje
     d = _dir(sid)
     (d / "work" / "rtl").mkdir(parents=True)
     (d / "work" / "README-studio.md").write_text(README)
-    (d / "SPEC.md").write_text((spec_text or brief).strip() + "\n")
+    (d / "work" / "SPEC.md").write_text((spec_text or brief).strip() + "\n")
+    (d / "SPEC.md").symlink_to(Path("work") / "SPEC.md")
     rec = {"id": sid, "name": (name or brief)[:120], "brief": brief, "thread": thread, "project": project, "subject": subject,
            "status": "new", "origin": None, "steps": [], "rounds": 0, "revisions": 0, "created": time.time(), "usage": {}}
     save(rec)
@@ -359,7 +367,18 @@ def check(rec: dict, params: dict | None = None, files: dict | None = None, tag:
     if properties:
         def props():
             r = formal.properties(d, a, text, cdir / "props", k=12)
-            return {"ok": bool(r["ok"]), "depth": r["depth"], "log": r["log"][-800:]}
+            out = {"ok": bool(r["ok"]), "depth": r["depth"], "log": r["log"][-800:]}
+            if not r["ok"]:
+                # what was asserted, and where the solver broke it: the designer fixes from this, not from the disk
+                try:
+                    out["properties"] = (cdir / "props" / "props.sv").read_text()
+                    out["failed"] = [l.strip() for l in r["log"].splitlines() if "Assert failed" in l or "failed assertion" in l][:4]
+                    tr = cdir / "props" / "props" / "engine_0" / "trace_tb.v"
+                    if tr.exists():
+                        out["trace_tb"] = tr.read_text()[-3000:]
+                except OSError:
+                    pass
+            return out
         run("stream properties (SymbiYosys)", props)
     rep["seconds"] = round(time.time() - t_all, 1)
     (cdir / "report.json").write_text(json.dumps(rep, indent=1))
@@ -607,7 +626,7 @@ def independent_reference(desc: str, key: str, model: str | None = None) -> str:
 
 def reference_desc(rec: dict) -> str:
     """What the reference session sees: SPEC.md and the interface/parameters from design.json -- never the RTL."""
-    spec_md = (_dir(rec["id"]) / "SPEC.md").read_text()
+    spec_md = spec_path(rec["id"]).read_text()
     try:
         dj = design_json(rec["id"])
     except ValueError:
@@ -628,11 +647,11 @@ def run_pipeline(rec: dict, lang: str = "zh", on_event=None) -> dict:
     try:
         set_status(rec, "designing")
         st = step(rec, "designer: write the design", ok=None)
-        kick = ("SPEC.md in the parent directory (../SPEC.md) is the task. Write work/rtl/*.sv, golden.py and design.json, run sa_studio_check "
+        kick = ("SPEC.md (in your working directory) is the task. Write rtl/*.sv, golden.py and design.json, run sa_studio_check "
                 f"(studio id {sid}) until it passes, then sa_studio_submit. Report what you built and what the knobs are.")
         if rec.get("origin"):
-            kick = (f"../SPEC.md is the task: a design forked from the {rec['origin']['design']} generator ({rec['origin']['label']} of run {rec['origin']['job']}). "
-                    f"work/rtl/ already holds the generator's RTL; design.json has the interface. Rewrite or restructure it toward the goal in SPEC.md, keep the function "
+            kick = (f"SPEC.md (in your working directory) is the task: a design forked from the {rec['origin']['design']} generator ({rec['origin']['label']} of run {rec['origin']['job']}). "
+                    f"rtl/ already holds the generator's RTL; design.json has the interface. Rewrite or restructure it toward the goal in SPEC.md, keep the function "
                     f"(the check compares against the generator's own vectors), expose the choices you make as parameters, run sa_studio_check (studio id {sid}) until it passes, "
                     f"then sa_studio_submit. Report what you changed and why.")
         r = designer_turn(rec, kick, lang, on_event)
@@ -704,7 +723,7 @@ def submit(rec: dict, lang: str = "zh", on_event=None) -> dict:
             # reference is rewritten from the (possibly sharpened) spec once
             msg = (f"Check round {rnd + 1} failed: your golden.py and the independent reference model disagree at {json.dumps(failed[0].get('mismatch'))}"
                    f"{(' (' + failed[0]['error'] + ')') if failed[0].get('error') else ''}. Either your model/RTL or the specification is wrong. "
-                   "If SPEC.md is ambiguous about this case, rewrite the relevant part of ../SPEC.md precisely (the reference will be regenerated from it); "
+                   "If SPEC.md is ambiguous about this case, rewrite the relevant part of SPEC.md precisely (the reference will be regenerated from it); "
                    "otherwise fix golden.py and the RTL. Then sa_studio_check and sa_studio_submit again.")
             set_status(rec, "revising")
             designer_turn(rec, msg, lang, on_event)
