@@ -248,7 +248,8 @@ def stream_of(bundle: dict, a: RtlArch) -> dict | None:
     def fields(key_list, key_one, key_w, dflt):
         if st.get(key_list):
             return [{"name": f.get("name", dflt), "width": int(expr_value(f.get("width"), env, 16)), "signed": bool(f.get("signed", True))} for f in st[key_list]]
-        return [{"name": st.get(key_one, dflt), "width": int(expr_value(st.get(key_w), env, 16)), "signed": True}]
+        # the one-field shorthand may say "signed": false (an unsigned block); samples default to signed
+        return [{"name": st.get(key_one, dflt), "width": int(expr_value(st.get(key_w), env, 16)), "signed": bool(st.get("signed", True))}]
     ins = fields("inputs", "in", "in_width", "in_data")
     outs = fields("outputs", "out", "out_width", "out_data")
     return {"in": ins[0]["name"], "out": outs[0]["name"], "in_width": ins[0]["width"], "out_width": outs[0]["width"],

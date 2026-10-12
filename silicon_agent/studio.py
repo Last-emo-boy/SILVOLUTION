@@ -60,7 +60,10 @@ Read SPEC.md here first: the task. Write here:
   golden.py                    def golden(params: dict, xs: list[int]) -> list[int]: your bit-exact model of the
                                RTL (signed integers in arrival order -> signed outputs in order, one per `rate` inputs).
   design.json                  {"top", "params": {NAME: {default, min, max | choices, hint}}, "stream": {"in", "out",
-                               "in_width": "<expr of params>", "out_width": "<expr>", "rate": "<expr>"} | null,
+                               "in_width": "<expr of params>", "out_width": "<expr>", "rate": "<expr>", "signed": true|false}
+                               (or the general form "inputs"/"outputs": [{"name", "width", "signed"}] for several
+                               fields per beat; an unsigned block MUST say signed: false, or the check drives
+                               negative samples) | null,
                                "latency": "<expr>", "throughput": "<expr>", "throughput_unit", "description"}
                                (a non-stream design sets stream null and adds "tb": "tb.sv", a self-checking bench
                                that prints RESULT PASS / RESULT FAIL)
