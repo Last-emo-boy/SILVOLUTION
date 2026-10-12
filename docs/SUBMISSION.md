@@ -12,7 +12,7 @@
 | 学校与专业 | （填写） |
 | 团队成员 | （填写） |
 | 可访问应用 | https://silicon.w33d.xyz （对话）· https://silicon.w33d.xyz/work （工作台）· 访问令牌见提交表单 |
-| 代码 | 本仓库（`silicon_agent/` 服务端，`agh-plugin/` Agnes Harness 插件，`sa` 命令行，`broll/` 演示视频工程） |
+| 代码 | https://github.com/Last-emo-boy/silicon-agent （Apache-2.0；`silicon_agent/` 服务端，`agh-plugin/` Agnes Harness 插件，`sa` 命令行，`docker/` 开箱即用镜像）；演示视频工程另行发布 |
 
 ## 2. 问题来源
 
@@ -101,7 +101,13 @@
 ## 9. 可复现运行方式
 
 ```bash
-# 远程（推荐）：笔记本只是薄客户端
+# 开箱即用（任何有 Docker 的 x86-64 / arm64 机器）：开源工具链 + Agnes Harness，约 10 分钟首次构建
+git clone https://github.com/Last-emo-boy/silicon-agent && cd silicon-agent
+cp .env.example .env            # SA_TOKEN 任意长随机串；DEEPSEEK_API_KEY
+docker compose up -d --build
+open http://localhost:8765      # 输入令牌一次；或 export SA_TOKEN=... && ./sa health
+
+# 远程（作者的生产服务器）：笔记本只是薄客户端
 ssh -f -N -L 18765:127.0.0.1:8765 netcup
 export SA_SERVER=http://127.0.0.1:18765 SA_TOKEN=...
 sa ask "一个 5 点滑动中值滤波器：16 位有符号，ECP5，150 MHz 以上，LUT 越少越好"
