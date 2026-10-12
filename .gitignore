@@ -7,3 +7,4 @@ __pycache__/
 sim_build/
 .env
 .claude/launch.json
+dist/

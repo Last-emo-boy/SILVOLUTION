@@ -9,6 +9,8 @@ set -euo pipefail
 : "${AGH_DIST:=/opt/agnes-harness/packages/cli/dist/local}"
 : "${AGH_WORKSPACE:=/srv/sa/agh-workspace}"
 export AGH_HOME AGNES_PROFILE
+# no core dumps from the processes agent sessions start (a designer's shell once left a 2.2 GB core in its studio)
+ulimit -c 0
 mkdir -p "$AGH_HOME/profiles/$AGNES_PROFILE" "$AGH_WORKSPACE"
 chmod 700 "$AGH_HOME" "$AGH_HOME/profiles" "$AGH_HOME/profiles/$AGNES_PROFILE"
 if [ ! -f "$AGH_HOME/profiles/$AGNES_PROFILE/profile.yaml" ]; then

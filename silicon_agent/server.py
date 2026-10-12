@@ -41,11 +41,12 @@ Conversations are per login subject unless SA_SHARED=1; the CLI token sees all.
 
 Legacy paths without /api/ keep working for the `sa` CLI.
 
-Auth: two trust paths.
-  1. Bearer token (SA_TOKEN)                 -- the `sa` CLI over the SSH tunnel
-  2. Gateway identity headers from sluice    -- browser SSO; the gateway injects
-     X-Auth-Subject + X-Auth-Sig (HMAC with the shared GATEWAY_HMAC_KEY), which we
-     verify, so the UI needs no token of its own.
+Auth: three trust paths, any of them enough.
+  1. Bearer token (SA_TOKEN)                 -- the `sa` CLI, the MCP server, the AGH plugin
+  2. Browser login (POST /api/login {token}) -- the token typed once into the login page; the
+     server answers with an HttpOnly session cookie derived from it (no token in the page)
+  3. Gateway identity headers (optional)     -- a reverse proxy that does SSO injects
+     X-Auth-Subject + X-Auth-Sig (HMAC with the shared SA_GATEWAY_HMAC_KEY), which we verify
 One job runs at a time per server (EDA tools are CPU-bound); others queue.
 """
 
@@ -89,7 +90,11 @@ def _static_stamp() -> str:
     except ValueError:
         return "0"
 TOKEN = os.environ.get("SA_TOKEN", "")
-# Shared with sluice (GATEWAY_HMAC_KEY). When set, X-Auth-Subject is trusted only if
+# the browser's session cookie: an HMAC of a fixed label under the token (the token itself never reaches the
+# page); rotating SA_TOKEN logs every browser out
+COOKIE = "sa_session"
+_SESSION = hmac.new(TOKEN.encode(), b"silicon-agent browser session", hashlib.sha256).hexdigest() if TOKEN else ""
+# Shared with the reverse proxy's SSO (optional). When set, X-Auth-Subject is trusted only if
 # X-Auth-Sig = HMAC-SHA256(key, subject "\n" groups "\n" epoch_minute) for the current or
 # previous minute -- the gateway's documented canonical form. Nothing else on the docker
 # network can mint that, so a direct dial to this port cannot forge identity.
@@ -1535,11 +1540,20 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     # -- auth --
+    def _cookie(self) -> str:
+        for part in self.headers.get("Cookie", "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == COOKIE:
+                return v
+        return ""
+
     def _subject(self) -> str | None:
         """Who is calling, or None if unauthenticated."""
         auth = self.headers.get("Authorization", "")
         if TOKEN and hmac.compare_digest(auth, f"Bearer {TOKEN}"):
             return "cli"
+        if _SESSION and hmac.compare_digest(self._cookie(), _SESSION):
+            return "web"
         if GATEWAY_KEY:
             sub = self.headers.get("X-Auth-Subject", "")
             sig = self.headers.get("X-Auth-Sig", "")
@@ -1550,12 +1564,14 @@ class Handler(BaseHTTPRequestHandler):
             return "anonymous"  # dev mode: no auth configured at all
         return None
 
-    def _json(self, code: int, obj) -> None:
+    def _json(self, code: int, obj, extra: dict | None = None) -> None:
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -1607,11 +1623,14 @@ class Handler(BaseHTTPRequestHandler):
                                     "agh_web": bool(AGH_WEB) and _agh_web_allowed(self._subject(), self.headers.get("X-Auth-Groups", "")),
                                     **({"modes": {k: v["model"] + (f" · thinking {v['thinking']}" if v["thinking"] != "off" else "") for k, v in agh.MODES.items()},
                                         "default_mode": agh.DEFAULT_MODE} if agh.enabled() else {})})
-        # static UI (public: sluice gates it before it reaches us)
-        if path == "/" or path == "/index.html":
-            return self._file(STATIC / "index.html")
-        if path == "/work":
-            return self._file(STATIC / "work.html")
+        # static UI: the pages need a session (the login page issues one from the token); a reverse proxy doing SSO
+        # arrives with gateway headers and skips it
+        if path in ("/", "/index.html", "/work"):
+            if TOKEN and self._subject() is None:
+                return self._file(STATIC / "login.html")
+            return self._file(STATIC / ("work.html" if path == "/work" else "index.html"))
+        if path == "/login":
+            return self._file(STATIC / "login.html")
         if path.startswith("/static/"):
             target = (STATIC / path[len("/static/"):]).resolve()
             if STATIC.resolve() in target.parents and target.is_file():
@@ -1837,7 +1856,16 @@ class Handler(BaseHTTPRequestHandler):
                 f = (S.STUDIO / rec["id"] / "work" / unquote(parts[3])).resolve()
                 if (S.STUDIO / rec["id"] / "work").resolve() not in f.parents or not f.is_file():
                     return self._json(404, {"error": "no such file"})
-                return self._json(200, {"path": parts[3], "text": f.read_text()[:400_000]})
+                with f.open("rb") as fh:
+                    head = fh.read(400_000)
+                try:
+                    text = head.decode()
+                except UnicodeDecodeError as e:
+                    # a cut through a multi-byte character at the 400 KB limit is still text; anything else is binary
+                    if e.start < len(head) - 4:
+                        return self._json(415, {"error": "not a text file", "size": f.stat().st_size})
+                    text = head[:e.start].decode()
+                return self._json(200, {"path": parts[3], "text": text})
         if path == "/proposals":
             with _lock:
                 rows = [_proposal_view(pid) for pid in _proposals]
@@ -1992,13 +2020,29 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self._maybe_agh():
             return
-        sub = self._subject()
-        if sub is None:
-            return self._json(401, {"error": "unauthorized"})
         path = urlsplit(self.path).path
         if path.startswith("/api/"):
             path = path[4:]
         n = int(self.headers.get("Content-Length", "0"))
+        if path == "/login":
+            # the browser's way in: the operator token, typed once; the reply sets the session cookie
+            try:
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except json.JSONDecodeError:
+                return self._json(400, {"error": "bad json"})
+            given = str(body.get("token") or "")
+            if not TOKEN:
+                return self._json(200, {"ok": True, "note": "no SA_TOKEN configured: open access"})
+            if not hmac.compare_digest(given, TOKEN):
+                time.sleep(0.5)   # a wrong token costs half a second: no fast guessing
+                return self._json(401, {"error": "wrong token"})
+            secure = "; Secure" if (self.headers.get("X-Forwarded-Proto", "") == "https") else ""
+            return self._json(200, {"ok": True}, extra={"Set-Cookie": f"{COOKIE}={_SESSION}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000{secure}"})
+        if path == "/logout":
+            return self._json(200, {"ok": True}, extra={"Set-Cookie": f"{COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"})
+        sub = self._subject()
+        if sub is None:
+            return self._json(401, {"error": "unauthorized"})
         parts = path.strip("/").split("/")
         if len(parts) == 3 and parts[0] == "jobs" and parts[2] in ("steer", "stop"):
             with _lock:

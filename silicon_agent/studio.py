@@ -514,7 +514,8 @@ def file_listing(sid: str) -> list[dict]:
     w = _dir(sid) / "work"
     out = []
     for p in sorted(w.rglob("*")):
-        if p.is_file():
+        # a crashed process's core dump is not a studio file
+        if p.is_file() and not re.fullmatch(r"core(\.\d+)?", p.name):
             out.append({"path": str(p.relative_to(w)), "size": p.stat().st_size})
     return out
 
