@@ -187,9 +187,10 @@ def main() -> None:
     job(FFT["job_after"], c / "04_run_after_fix")
     for h in runs_of(f"rtl:{FFT['studio']}"):
         rsync(f"/srv/sa/runs/{h}", c / "eda_workdirs" / h)
-    fix = subprocess.run(["git", "-C", str(REPO), "show", "6a82fe2"], capture_output=True, text=True).stdout
-    (c / "fix_6a82fe2_bram_sim.diff").write_text(fix)
-    print(f"  {(c / 'fix_6a82fe2_bram_sim.diff').relative_to(ROOT)}  ← git show 6a82fe2")
+    h = subprocess.run(["git", "-C", str(REPO), "log", "-1", "--format=%h", "--grep=SP/SPX9 models zero-filled"], capture_output=True, text=True).stdout.strip()
+    fix = subprocess.run(["git", "-C", str(REPO), "show", h], capture_output=True, text=True, check=True).stdout
+    (c / f"fix_{h}_gowin_bram_sim_model.diff").write_text(fix)
+    print(f"  {(c / f'fix_{h}_gowin_bram_sim_model.diff').relative_to(ROOT)}  ← git show {h}")
 
     print("case5: failures and recovery: a designer that searched for hours, a failed run, the second studio (production)")
     c = ROOT / "case5_failure_recovery"
@@ -202,7 +203,7 @@ def main() -> None:
     studio(REC["studio2"], c / "03_studio_second")
     agh([f"sa-studio-{REC['studio2']}:/srv/sa/studio/{REC['studio2']}/work"], c / "03_studio_second" / "agh_session_designer.json")
     job(REC["job2"], c / "04_run_second")
-    log = subprocess.run(["git", "-C", str(REPO), "log", "--format=%h %ad %s", "--date=iso", "850ffaf~1..HEAD", "--", "silicon_agent/studio.py", "silicon_agent/server.py", "silicon_agent/loop.py", "silicon_agent/rtl.py", "agh-plugin/index.mjs", "silicon_agent/tb/bram_sim.v"], capture_output=True, text=True).stdout
+    log = subprocess.run(["git", "-C", str(REPO), "log", "--format=%h %ad %s", "--date=iso", "--since=2026-10-11T12:00", "--", "silicon_agent/studio.py", "silicon_agent/server.py", "silicon_agent/loop.py", "silicon_agent/rtl.py", "agh-plugin/index.mjs", "silicon_agent/tb/bram_sim.v", "deploy/agh-entry.sh"], capture_output=True, text=True, check=True).stdout
     (c / "fixes_git_log.txt").write_text(log)
     print(f"  {(c / 'fixes_git_log.txt').relative_to(ROOT)}  ← git log (the fixes these failures led to)")
 
@@ -215,6 +216,20 @@ def main() -> None:
     for p, f in (("health", "health.json"), ("schema", "schema.json"), ("bench", "bench.json"), ("catalog", "catalog.json"), ("studio", "studios.json"), ("rtl", "rtl_bundles.json")):
         get(p, c / f)
     rsync("/srv/sa/bench", c / "bench_reports", ["--exclude", "*.log"])
+    # tool and runtime versions as the server reports them
+    probe = r'''T=/opt/silicon-agent/tools/oss-cad-suite/bin; echo "yosys=$($T/yosys -V | head -1)"; echo "nextpnr=$($T/nextpnr-ecp5 --version 2>&1 | head -1)";
+echo "iverilog=$($T/iverilog -V 2>/dev/null | head -1)"; echo "sby=$($T/sby --version 2>/dev/null | head -1)";
+echo "cocotb=$(/opt/silicon-agent/tools/oss-cad-suite/py3bin/python3 -c 'import cocotb; print(cocotb.__version__)')";
+echo "python=$(/opt/silicon-agent/tools/oss-cad-suite/py3bin/python3 --version)";
+echo "vivado=$(docker exec silicon-agent bash -lc 'vivado -version 2>/dev/null | head -1')";
+echo "orfs=$(docker images openroad/orfs --format '{{.Repository}}:{{.Tag}} {{.ID}}' | head -1)";
+echo "agh=$(cd /opt/agnes-harness && git log -1 --format='%h %ad' --date=short)"; echo "node=$(docker exec silicon-agent-agh node --version)";
+echo "os=$(. /etc/os-release; echo $PRETTY_NAME)"; echo "cpu=$(nproc) cores, $(free -g | awk '/Mem/{print $2}') GB"'''
+    p = subprocess.run(["ssh", HOST, probe], capture_output=True, text=True, check=True)
+    v = dict(l.split("=", 1) for l in p.stdout.splitlines() if "=" in l)
+    v["silicon_agent_commit"] = subprocess.run(["git", "-C", str(REPO), "log", "-1", "--format=%h %ad", "--date=iso"], capture_output=True, text=True).stdout.strip()
+    (c / "versions.json").write_text(json.dumps(v, ensure_ascii=False, indent=1))
+    print(f"  {(c / 'versions.json').relative_to(ROOT)}  ← ssh {HOST} (tool --version)")
     copy(REPO / "agh-plugin" / "index.mjs", c / "agh-plugin_index.mjs")
     copy(REPO / "agh-plugin" / "package.json", c / "agh-plugin_package.json")
     print(f"done: {ROOT}")
