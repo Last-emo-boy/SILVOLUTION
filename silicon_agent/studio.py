@@ -678,6 +678,13 @@ def ensure_reference(rec: dict) -> dict:
 def submit(rec: dict, lang: str = "zh", on_event=None) -> dict:
     """Reference (once) + check; a failing check goes back to the designer, up to MAX_ROUNDS times."""
     sid = rec["id"]
+    if rec.get("bundle"):
+        # a registered studio whose working copy is one of its revisions has nothing to check (a resume after an
+        # interrupted revise lands here): it is simply registered again, no designer round is spent
+        b = json.loads((RTL_DIR / sid / "bundle.json").read_text())
+        if any(r["files"] == work_files(sid) for r in b["revisions"]):
+            set_status(rec, "registered", design=f"rtl:{sid}")
+            return rec
     for rnd in range(MAX_ROUNDS + 1):
         ensure_reference(rec)
         set_status(rec, "checking", rounds=rnd)
