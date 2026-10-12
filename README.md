@@ -372,6 +372,8 @@ export SA_TOKEN=$(security find-generic-password -s silicon-agent-token -w)
 ./sa rtl upload --top my_fir --tb tb.sv --params params.json my_fir.sv   # bring your own RTL -> design rtl:<id>
 ./sa propose change.diff --title "..." --designs fir --ab-spec specs/fir_ecp5.json   # gated generator change
 ./sa proposals [<id> --diff] ; ./sa export <thread-id> report.md ; ./sa package <job-id> out.zip
+./sa studio open "a 5-point sliding median, 16-bit signed, ECP5, 150 MHz" --spec SPEC.md   # the design studio
+./sa studio fork <job-id> --brief "LUT under 1200 at 100 MHz" ; ./sa studio status <id> --watch
 ```
 
 `sa` is a single stdlib Python file: no toolchain, no dependencies on the laptop;
@@ -385,6 +387,15 @@ without `SA_TOKEN` it reads the macOS Keychain item `silicon-agent-token`.
 export DEEPSEEK_API_KEY=sk-...             # or macOS Keychain item 'deepseek'
 ./run.sh specs/matmul_int8_180mhz.json 8
 ```
+
+## Submission materials (competition)
+
+`docs/SUBMISSION.md` is the 项目说明 (problem, goals, method, the Agnes Harness execution flow, models and
+versions, where each is used, how it is called, how results are verified, environment and tools).
+`deploy/evidence-bundle.sh` exports the 运行与验证证据 from the production server — normal / boundary /
+failure samples, the Markdown conversation exports and the AGH session records (`deploy/scripts/agh-export.py`)
+— into one directory with an index that says which claim each file backs. The demo video is the `broll/`
+project (`pnpm preview` for 1080p, `pnpm render` for the 4K master).
 
 ## Server deployment
 
